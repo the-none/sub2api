@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/realaccount"
 	"github.com/Wei-Shaw/sub2api/ent/realaccountusagesnapshot"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertbinding"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
 )
 
@@ -171,6 +172,21 @@ func (_u *RealAccountUpdate) AddWebhookBindings(v ...*UsageAlertBinding) *RealAc
 	return _u.AddWebhookBindingIDs(ids...)
 }
 
+// AddAlertRuleIDs adds the "alert_rules" edge to the UsageAlertRule entity by IDs.
+func (_u *RealAccountUpdate) AddAlertRuleIDs(ids ...int64) *RealAccountUpdate {
+	_u.mutation.AddAlertRuleIDs(ids...)
+	return _u
+}
+
+// AddAlertRules adds the "alert_rules" edges to the UsageAlertRule entity.
+func (_u *RealAccountUpdate) AddAlertRules(v ...*UsageAlertRule) *RealAccountUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAlertRuleIDs(ids...)
+}
+
 // AddAlertStateIDs adds the "alert_states" edge to the UsageAlertState entity by IDs.
 func (_u *RealAccountUpdate) AddAlertStateIDs(ids ...int64) *RealAccountUpdate {
 	_u.mutation.AddAlertStateIDs(ids...)
@@ -252,6 +268,27 @@ func (_u *RealAccountUpdate) RemoveWebhookBindings(v ...*UsageAlertBinding) *Rea
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveWebhookBindingIDs(ids...)
+}
+
+// ClearAlertRules clears all "alert_rules" edges to the UsageAlertRule entity.
+func (_u *RealAccountUpdate) ClearAlertRules() *RealAccountUpdate {
+	_u.mutation.ClearAlertRules()
+	return _u
+}
+
+// RemoveAlertRuleIDs removes the "alert_rules" edge to UsageAlertRule entities by IDs.
+func (_u *RealAccountUpdate) RemoveAlertRuleIDs(ids ...int64) *RealAccountUpdate {
+	_u.mutation.RemoveAlertRuleIDs(ids...)
+	return _u
+}
+
+// RemoveAlertRules removes "alert_rules" edges to UsageAlertRule entities.
+func (_u *RealAccountUpdate) RemoveAlertRules(v ...*UsageAlertRule) *RealAccountUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAlertRuleIDs(ids...)
 }
 
 // ClearAlertStates clears all "alert_states" edges to the UsageAlertState entity.
@@ -511,6 +548,51 @@ func (_u *RealAccountUpdate) sqlSave(ctx context.Context) (_node int, err error)
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.AlertRulesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: true,
+			Table:   realaccount.AlertRulesTable,
+			Columns: []string{realaccount.AlertRulesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagealertrule.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAlertRulesIDs(); len(nodes) > 0 && !_u.mutation.AlertRulesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: true,
+			Table:   realaccount.AlertRulesTable,
+			Columns: []string{realaccount.AlertRulesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagealertrule.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AlertRulesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: true,
+			Table:   realaccount.AlertRulesTable,
+			Columns: []string{realaccount.AlertRulesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagealertrule.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.AlertStatesCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -715,6 +797,21 @@ func (_u *RealAccountUpdateOne) AddWebhookBindings(v ...*UsageAlertBinding) *Rea
 	return _u.AddWebhookBindingIDs(ids...)
 }
 
+// AddAlertRuleIDs adds the "alert_rules" edge to the UsageAlertRule entity by IDs.
+func (_u *RealAccountUpdateOne) AddAlertRuleIDs(ids ...int64) *RealAccountUpdateOne {
+	_u.mutation.AddAlertRuleIDs(ids...)
+	return _u
+}
+
+// AddAlertRules adds the "alert_rules" edges to the UsageAlertRule entity.
+func (_u *RealAccountUpdateOne) AddAlertRules(v ...*UsageAlertRule) *RealAccountUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAlertRuleIDs(ids...)
+}
+
 // AddAlertStateIDs adds the "alert_states" edge to the UsageAlertState entity by IDs.
 func (_u *RealAccountUpdateOne) AddAlertStateIDs(ids ...int64) *RealAccountUpdateOne {
 	_u.mutation.AddAlertStateIDs(ids...)
@@ -796,6 +893,27 @@ func (_u *RealAccountUpdateOne) RemoveWebhookBindings(v ...*UsageAlertBinding) *
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveWebhookBindingIDs(ids...)
+}
+
+// ClearAlertRules clears all "alert_rules" edges to the UsageAlertRule entity.
+func (_u *RealAccountUpdateOne) ClearAlertRules() *RealAccountUpdateOne {
+	_u.mutation.ClearAlertRules()
+	return _u
+}
+
+// RemoveAlertRuleIDs removes the "alert_rules" edge to UsageAlertRule entities by IDs.
+func (_u *RealAccountUpdateOne) RemoveAlertRuleIDs(ids ...int64) *RealAccountUpdateOne {
+	_u.mutation.RemoveAlertRuleIDs(ids...)
+	return _u
+}
+
+// RemoveAlertRules removes "alert_rules" edges to UsageAlertRule entities.
+func (_u *RealAccountUpdateOne) RemoveAlertRules(v ...*UsageAlertRule) *RealAccountUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAlertRuleIDs(ids...)
 }
 
 // ClearAlertStates clears all "alert_states" edges to the UsageAlertState entity.
@@ -1078,6 +1196,51 @@ func (_u *RealAccountUpdateOne) sqlSave(ctx context.Context) (_node *RealAccount
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(usagealertbinding.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.AlertRulesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: true,
+			Table:   realaccount.AlertRulesTable,
+			Columns: []string{realaccount.AlertRulesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagealertrule.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAlertRulesIDs(); len(nodes) > 0 && !_u.mutation.AlertRulesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: true,
+			Table:   realaccount.AlertRulesTable,
+			Columns: []string{realaccount.AlertRulesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagealertrule.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AlertRulesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: true,
+			Table:   realaccount.AlertRulesTable,
+			Columns: []string{realaccount.AlertRulesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagealertrule.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

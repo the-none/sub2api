@@ -61,18 +61,21 @@ type RealAccount struct {
 }
 
 type UsageAlertRule struct {
-	ID                 int64     `json:"id"`
-	Name               string    `json:"name"`
-	Platform           string    `json:"platform"`
-	Window             string    `json:"window"`
-	Metric             string    `json:"metric"`
-	Operator           string    `json:"operator"`
-	Threshold          float64   `json:"threshold"`
-	MinResetAfterHours *float64  `json:"min_reset_after_hours,omitempty"`
-	CooldownMinutes    int       `json:"cooldown_minutes"`
-	Enabled            bool      `json:"enabled"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 int64        `json:"id"`
+	Name               string       `json:"name"`
+	Platform           string       `json:"platform"`
+	RealAccountID      *int64       `json:"real_account_id,omitempty"`
+	Window             string       `json:"window"`
+	Metric             string       `json:"metric"`
+	Operator           string       `json:"operator"`
+	Threshold          float64      `json:"threshold"`
+	MinResetAfterHours *float64     `json:"min_reset_after_hours,omitempty"`
+	StepPercent        *float64     `json:"step_percent,omitempty"`
+	CooldownMinutes    int          `json:"cooldown_minutes"`
+	Enabled            bool         `json:"enabled"`
+	CreatedAt          time.Time    `json:"created_at"`
+	UpdatedAt          time.Time    `json:"updated_at"`
+	RealAccount        *RealAccount `json:"real_account,omitempty"`
 }
 
 type UsageAlertWebhook struct {
@@ -158,6 +161,7 @@ type UsageAlertWebhookEvent struct {
 	Metric           string     `json:"metric"`
 	Operator         string     `json:"operator"`
 	Threshold        float64    `json:"threshold"`
+	StepPercent      *float64   `json:"step_percent,omitempty"`
 	Value            float64    `json:"value"`
 	UsedPercent      float64    `json:"used_percent"`
 	RemainingPercent float64    `json:"remaining_percent"`
@@ -174,7 +178,7 @@ type UsageAlertRepository interface {
 	DetachAccount(ctx context.Context, accountID int64) error
 
 	ListRules(ctx context.Context) ([]*UsageAlertRule, error)
-	ListEnabledRules(ctx context.Context, platform string) ([]*UsageAlertRule, error)
+	ListEnabledRules(ctx context.Context, realAccountID int64) ([]*UsageAlertRule, error)
 	GetRule(ctx context.Context, id int64) (*UsageAlertRule, error)
 	CreateRule(ctx context.Context, rule *UsageAlertRule) (*UsageAlertRule, error)
 	UpdateRule(ctx context.Context, rule *UsageAlertRule) (*UsageAlertRule, error)
@@ -261,11 +265,17 @@ func (s *UsageAlertService) CreateRule(ctx context.Context, rule *UsageAlertRule
 	if err := validateUsageAlertRule(rule); err != nil {
 		return nil, err
 	}
+	if err := s.populateUsageAlertRuleScope(ctx, rule); err != nil {
+		return nil, err
+	}
 	return s.repo.CreateRule(ctx, rule)
 }
 
 func (s *UsageAlertService) UpdateRule(ctx context.Context, rule *UsageAlertRule) (*UsageAlertRule, error) {
 	if err := validateUsageAlertRule(rule); err != nil {
+		return nil, err
+	}
+	if err := s.populateUsageAlertRuleScope(ctx, rule); err != nil {
 		return nil, err
 	}
 	return s.repo.UpdateRule(ctx, rule)
@@ -417,9 +427,9 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) {
 		return
 	}
 
-	rules, err := s.repo.ListEnabledRules(ctx, snapshot.Platform)
+	rules, err := s.repo.ListEnabledRules(ctx, snapshot.RealAccountID)
 	if err != nil {
-		slog.Warn("usage_alert_list_rules_failed", "platform", snapshot.Platform, "error", err)
+		slog.Warn("usage_alert_list_rules_failed", "real_account_id", snapshot.RealAccountID, "error", err)
 		return
 	}
 	if len(rules) == 0 {
@@ -452,7 +462,7 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 	now := time.Now().UTC()
 	triggers := make([]UsageAlertTrigger, 0)
 	for _, rule := range rules {
-		if rule == nil || !rule.Enabled || !ruleAppliesToPlatform(rule.Platform, current.Platform) {
+		if rule == nil || !rule.Enabled || !ruleAppliesToRealAccount(rule, current.RealAccountID) {
 			continue
 		}
 		window, ok := current.Windows[rule.Window]
@@ -470,7 +480,7 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 			s.updateRuleState(ctx, current.RealAccountID, rule, window, false, value)
 			continue
 		}
-		if !crossedThreshold(previous, current, rule, value) && !stateAllowsRepeat(state, rule, now) {
+		if !usageAlertRuleAllowsTrigger(previous, current, rule, state, value, now) {
 			continue
 		}
 		s.updateRuleState(ctx, current.RealAccountID, rule, window, true, value)
@@ -483,6 +493,28 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 		})
 	}
 	return triggers
+}
+
+func usageAlertRuleAllowsTrigger(previous, current *UsageAlertSnapshot, rule *UsageAlertRule, state *UsageAlertState, value float64, now time.Time) bool {
+	if usageAlertRuleStepPercent(rule) > 0 {
+		return usageAlertStepAllowsTrigger(state, rule, value, now)
+	}
+	return crossedThreshold(previous, current, rule, value) || stateAllowsRepeat(state, rule, now)
+}
+
+func (s *UsageAlertService) populateUsageAlertRuleScope(ctx context.Context, rule *UsageAlertRule) error {
+	if s == nil || s.repo == nil || rule == nil || rule.RealAccountID == nil || *rule.RealAccountID <= 0 {
+		return fmt.Errorf("real_account_id must be positive")
+	}
+	realAccount, err := s.repo.GetRealAccount(ctx, *rule.RealAccountID)
+	if err != nil {
+		return err
+	}
+	if realAccount == nil {
+		return fmt.Errorf("real account not found")
+	}
+	rule.Platform = realAccount.Platform
+	return nil
 }
 
 func (s *UsageAlertService) updateRuleState(ctx context.Context, realAccountID int64, rule *UsageAlertRule, window UsageAlertWindowSnapshot, triggered bool, value float64) {
@@ -641,10 +673,10 @@ func validateUsageAlertRule(rule *UsageAlertRule) error {
 	if rule.Name == "" {
 		return fmt.Errorf("rule name is required")
 	}
-	if rule.Platform == "" {
-		rule.Platform = UsageAlertPlatformAll
+	if rule.RealAccountID == nil || *rule.RealAccountID <= 0 {
+		return fmt.Errorf("real_account_id must be positive")
 	}
-	if rule.Platform != UsageAlertPlatformAll && rule.Platform != UsageAlertPlatformOpenAI && rule.Platform != UsageAlertPlatformAnthropic {
+	if rule.Platform != "" && rule.Platform != UsageAlertPlatformAll && rule.Platform != UsageAlertPlatformOpenAI && rule.Platform != UsageAlertPlatformAnthropic {
 		return ErrUsageAlertInvalidPlatform
 	}
 	if rule.Window != UsageAlertWindow5h && rule.Window != UsageAlertWindow7d && rule.Window != UsageAlertWindow7dSonnet {
@@ -661,6 +693,9 @@ func validateUsageAlertRule(rule *UsageAlertRule) error {
 	}
 	if rule.MinResetAfterHours != nil && (*rule.MinResetAfterHours < 0 || math.IsNaN(*rule.MinResetAfterHours) || math.IsInf(*rule.MinResetAfterHours, 0)) {
 		return fmt.Errorf("min_reset_after_hours must be non-negative")
+	}
+	if rule.StepPercent != nil && (*rule.StepPercent < 0 || *rule.StepPercent > 100 || math.IsNaN(*rule.StepPercent) || math.IsInf(*rule.StepPercent, 0)) {
+		return fmt.Errorf("step_percent must be between 0 and 100")
 	}
 	if rule.CooldownMinutes < 0 {
 		return fmt.Errorf("cooldown_minutes must be non-negative")
@@ -957,8 +992,8 @@ func redactUsageAlertSecret(message, secret string) string {
 	return strings.ReplaceAll(message, secret, "[redacted]")
 }
 
-func ruleAppliesToPlatform(rulePlatform, snapshotPlatform string) bool {
-	return rulePlatform == UsageAlertPlatformAll || rulePlatform == snapshotPlatform
+func ruleAppliesToRealAccount(rule *UsageAlertRule, realAccountID int64) bool {
+	return rule != nil && rule.RealAccountID != nil && *rule.RealAccountID == realAccountID
 }
 
 func resetConstraintSatisfied(window UsageAlertWindowSnapshot, minHours *float64, now time.Time) bool {
@@ -1010,6 +1045,33 @@ func stateAllowsRepeat(state *UsageAlertState, rule *UsageAlertRule, now time.Ti
 	return now.Sub(*state.LastTriggeredAt) >= time.Duration(rule.CooldownMinutes)*time.Minute
 }
 
+func usageAlertRuleStepPercent(rule *UsageAlertRule) float64 {
+	if rule == nil || rule.StepPercent == nil {
+		return 0
+	}
+	return *rule.StepPercent
+}
+
+func usageAlertStepAllowsTrigger(state *UsageAlertState, rule *UsageAlertRule, currentValue float64, now time.Time) bool {
+	step := usageAlertRuleStepPercent(rule)
+	if step <= 0 {
+		return false
+	}
+	if state == nil || state.LastStatus != UsageAlertStatusTriggered {
+		return true
+	}
+	if !stateAllowsRepeat(state, rule, now) {
+		return false
+	}
+	if state.LastValue == nil {
+		return true
+	}
+	if rule.Operator == UsageAlertOperatorLTE {
+		return currentValue <= *state.LastValue-step
+	}
+	return currentValue >= *state.LastValue+step
+}
+
 func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *RealAccount, trigger UsageAlertTrigger) UsageAlertWebhookEvent {
 	realAccountName := ""
 	if realAccount != nil {
@@ -1034,6 +1096,7 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 		UsedPercent:      trigger.WindowState.UsedPercent,
 		RemainingPercent: trigger.WindowState.RemainingPercent,
 		ResetAt:          trigger.WindowState.ResetAt,
+		StepPercent:      trigger.Rule.StepPercent,
 	}
 }
 

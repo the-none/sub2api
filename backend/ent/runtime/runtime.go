@@ -1767,7 +1767,7 @@ func init() {
 	// usagealertrule.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	usagealertrule.PlatformValidator = usagealertruleDescPlatform.Validators[0].(func(string) error)
 	// usagealertruleDescWindow is the schema descriptor for window field.
-	usagealertruleDescWindow := usagealertruleFields[2].Descriptor()
+	usagealertruleDescWindow := usagealertruleFields[3].Descriptor()
 	// usagealertrule.WindowValidator is a validator for the "window" field. It is called by the builders before save.
 	usagealertrule.WindowValidator = func() func(string) error {
 		validators := usagealertruleDescWindow.Validators
@@ -1785,7 +1785,7 @@ func init() {
 		}
 	}()
 	// usagealertruleDescMetric is the schema descriptor for metric field.
-	usagealertruleDescMetric := usagealertruleFields[3].Descriptor()
+	usagealertruleDescMetric := usagealertruleFields[4].Descriptor()
 	// usagealertrule.MetricValidator is a validator for the "metric" field. It is called by the builders before save.
 	usagealertrule.MetricValidator = func() func(string) error {
 		validators := usagealertruleDescMetric.Validators
@@ -1803,7 +1803,7 @@ func init() {
 		}
 	}()
 	// usagealertruleDescOperator is the schema descriptor for operator field.
-	usagealertruleDescOperator := usagealertruleFields[4].Descriptor()
+	usagealertruleDescOperator := usagealertruleFields[5].Descriptor()
 	// usagealertrule.OperatorValidator is a validator for the "operator" field. It is called by the builders before save.
 	usagealertrule.OperatorValidator = func() func(string) error {
 		validators := usagealertruleDescOperator.Validators
@@ -1821,13 +1821,13 @@ func init() {
 		}
 	}()
 	// usagealertruleDescCooldownMinutes is the schema descriptor for cooldown_minutes field.
-	usagealertruleDescCooldownMinutes := usagealertruleFields[7].Descriptor()
+	usagealertruleDescCooldownMinutes := usagealertruleFields[9].Descriptor()
 	// usagealertrule.DefaultCooldownMinutes holds the default value on creation for the cooldown_minutes field.
 	usagealertrule.DefaultCooldownMinutes = usagealertruleDescCooldownMinutes.Default.(int)
 	// usagealertrule.CooldownMinutesValidator is a validator for the "cooldown_minutes" field. It is called by the builders before save.
 	usagealertrule.CooldownMinutesValidator = usagealertruleDescCooldownMinutes.Validators[0].(func(int) error)
 	// usagealertruleDescEnabled is the schema descriptor for enabled field.
-	usagealertruleDescEnabled := usagealertruleFields[8].Descriptor()
+	usagealertruleDescEnabled := usagealertruleFields[10].Descriptor()
 	// usagealertrule.DefaultEnabled holds the default value on creation for the enabled field.
 	usagealertrule.DefaultEnabled = usagealertruleDescEnabled.Default.(bool)
 	usagealertstateMixin := schema.UsageAlertState{}.Mixin()

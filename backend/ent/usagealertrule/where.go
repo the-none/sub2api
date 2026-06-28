@@ -80,6 +80,11 @@ func Platform(v string) predicate.UsageAlertRule {
 	return predicate.UsageAlertRule(sql.FieldEQ(FieldPlatform, v))
 }
 
+// RealAccountID applies equality check predicate on the "real_account_id" field. It's identical to RealAccountIDEQ.
+func RealAccountID(v int64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldEQ(FieldRealAccountID, v))
+}
+
 // Window applies equality check predicate on the "window" field. It's identical to WindowEQ.
 func Window(v string) predicate.UsageAlertRule {
 	return predicate.UsageAlertRule(sql.FieldEQ(FieldWindow, v))
@@ -103,6 +108,11 @@ func Threshold(v float64) predicate.UsageAlertRule {
 // MinResetAfterHours applies equality check predicate on the "min_reset_after_hours" field. It's identical to MinResetAfterHoursEQ.
 func MinResetAfterHours(v float64) predicate.UsageAlertRule {
 	return predicate.UsageAlertRule(sql.FieldEQ(FieldMinResetAfterHours, v))
+}
+
+// StepPercent applies equality check predicate on the "step_percent" field. It's identical to StepPercentEQ.
+func StepPercent(v float64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldEQ(FieldStepPercent, v))
 }
 
 // CooldownMinutes applies equality check predicate on the "cooldown_minutes" field. It's identical to CooldownMinutesEQ.
@@ -373,6 +383,36 @@ func PlatformEqualFold(v string) predicate.UsageAlertRule {
 // PlatformContainsFold applies the ContainsFold predicate on the "platform" field.
 func PlatformContainsFold(v string) predicate.UsageAlertRule {
 	return predicate.UsageAlertRule(sql.FieldContainsFold(FieldPlatform, v))
+}
+
+// RealAccountIDEQ applies the EQ predicate on the "real_account_id" field.
+func RealAccountIDEQ(v int64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldEQ(FieldRealAccountID, v))
+}
+
+// RealAccountIDNEQ applies the NEQ predicate on the "real_account_id" field.
+func RealAccountIDNEQ(v int64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldNEQ(FieldRealAccountID, v))
+}
+
+// RealAccountIDIn applies the In predicate on the "real_account_id" field.
+func RealAccountIDIn(vs ...int64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldIn(FieldRealAccountID, vs...))
+}
+
+// RealAccountIDNotIn applies the NotIn predicate on the "real_account_id" field.
+func RealAccountIDNotIn(vs ...int64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldNotIn(FieldRealAccountID, vs...))
+}
+
+// RealAccountIDIsNil applies the IsNil predicate on the "real_account_id" field.
+func RealAccountIDIsNil() predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldIsNull(FieldRealAccountID))
+}
+
+// RealAccountIDNotNil applies the NotNil predicate on the "real_account_id" field.
+func RealAccountIDNotNil() predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldNotNull(FieldRealAccountID))
 }
 
 // WindowEQ applies the EQ predicate on the "window" field.
@@ -660,6 +700,56 @@ func MinResetAfterHoursNotNil() predicate.UsageAlertRule {
 	return predicate.UsageAlertRule(sql.FieldNotNull(FieldMinResetAfterHours))
 }
 
+// StepPercentEQ applies the EQ predicate on the "step_percent" field.
+func StepPercentEQ(v float64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldEQ(FieldStepPercent, v))
+}
+
+// StepPercentNEQ applies the NEQ predicate on the "step_percent" field.
+func StepPercentNEQ(v float64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldNEQ(FieldStepPercent, v))
+}
+
+// StepPercentIn applies the In predicate on the "step_percent" field.
+func StepPercentIn(vs ...float64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldIn(FieldStepPercent, vs...))
+}
+
+// StepPercentNotIn applies the NotIn predicate on the "step_percent" field.
+func StepPercentNotIn(vs ...float64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldNotIn(FieldStepPercent, vs...))
+}
+
+// StepPercentGT applies the GT predicate on the "step_percent" field.
+func StepPercentGT(v float64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldGT(FieldStepPercent, v))
+}
+
+// StepPercentGTE applies the GTE predicate on the "step_percent" field.
+func StepPercentGTE(v float64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldGTE(FieldStepPercent, v))
+}
+
+// StepPercentLT applies the LT predicate on the "step_percent" field.
+func StepPercentLT(v float64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldLT(FieldStepPercent, v))
+}
+
+// StepPercentLTE applies the LTE predicate on the "step_percent" field.
+func StepPercentLTE(v float64) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldLTE(FieldStepPercent, v))
+}
+
+// StepPercentIsNil applies the IsNil predicate on the "step_percent" field.
+func StepPercentIsNil() predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldIsNull(FieldStepPercent))
+}
+
+// StepPercentNotNil applies the NotNil predicate on the "step_percent" field.
+func StepPercentNotNil() predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldNotNull(FieldStepPercent))
+}
+
 // CooldownMinutesEQ applies the EQ predicate on the "cooldown_minutes" field.
 func CooldownMinutesEQ(v int) predicate.UsageAlertRule {
 	return predicate.UsageAlertRule(sql.FieldEQ(FieldCooldownMinutes, v))
@@ -708,6 +798,29 @@ func EnabledEQ(v bool) predicate.UsageAlertRule {
 // EnabledNEQ applies the NEQ predicate on the "enabled" field.
 func EnabledNEQ(v bool) predicate.UsageAlertRule {
 	return predicate.UsageAlertRule(sql.FieldNEQ(FieldEnabled, v))
+}
+
+// HasRealAccount applies the HasEdge predicate on the "real_account" edge.
+func HasRealAccount() predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, RealAccountTable, RealAccountColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasRealAccountWith applies the HasEdge predicate on the "real_account" edge with a given conditions (other predicates).
+func HasRealAccountWith(preds ...predicate.RealAccount) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(func(s *sql.Selector) {
+		step := newRealAccountStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
 }
 
 // HasStates applies the HasEdge predicate on the "states" edge.

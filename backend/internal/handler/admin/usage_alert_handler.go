@@ -51,12 +51,14 @@ type usageAlertRealAccountResponse struct {
 
 type usageAlertRuleRequest struct {
 	Name               string   `json:"name" binding:"required"`
+	RealAccountID      *int64   `json:"real_account_id"`
 	Platform           string   `json:"platform"`
 	Window             string   `json:"window" binding:"required"`
 	Metric             string   `json:"metric" binding:"required"`
 	Operator           string   `json:"operator" binding:"required"`
 	Threshold          float64  `json:"threshold"`
 	MinResetAfterHours *float64 `json:"min_reset_after_hours"`
+	StepPercent        *float64 `json:"step_percent"`
 	CooldownMinutes    *int     `json:"cooldown_minutes"`
 	Enabled            *bool    `json:"enabled"`
 }
@@ -304,12 +306,14 @@ func (h *UsageAlertHandler) CreateRule(c *gin.Context) {
 	}
 	item, err := h.service.CreateRule(c.Request.Context(), &service.UsageAlertRule{
 		Name:               req.Name,
+		RealAccountID:      req.RealAccountID,
 		Platform:           req.Platform,
 		Window:             req.Window,
 		Metric:             req.Metric,
 		Operator:           req.Operator,
 		Threshold:          req.Threshold,
 		MinResetAfterHours: req.MinResetAfterHours,
+		StepPercent:        req.StepPercent,
 		CooldownMinutes:    usageAlertCooldownOrDefault(req.CooldownMinutes),
 		Enabled:            usageAlertEnabledOrDefault(req.Enabled, true),
 	})
@@ -333,12 +337,14 @@ func (h *UsageAlertHandler) UpdateRule(c *gin.Context) {
 	item, err := h.service.UpdateRule(c.Request.Context(), &service.UsageAlertRule{
 		ID:                 id,
 		Name:               req.Name,
+		RealAccountID:      req.RealAccountID,
 		Platform:           req.Platform,
 		Window:             req.Window,
 		Metric:             req.Metric,
 		Operator:           req.Operator,
 		Threshold:          req.Threshold,
 		MinResetAfterHours: req.MinResetAfterHours,
+		StepPercent:        req.StepPercent,
 		CooldownMinutes:    usageAlertCooldownOrDefault(req.CooldownMinutes),
 		Enabled:            usageAlertEnabledOrDefault(req.Enabled, true),
 	})

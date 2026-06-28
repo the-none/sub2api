@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/realaccount"
 	"github.com/Wei-Shaw/sub2api/ent/realaccountusagesnapshot"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertbinding"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
 )
 
@@ -151,6 +152,21 @@ func (_c *RealAccountCreate) AddWebhookBindings(v ...*UsageAlertBinding) *RealAc
 		ids[i] = v[i].ID
 	}
 	return _c.AddWebhookBindingIDs(ids...)
+}
+
+// AddAlertRuleIDs adds the "alert_rules" edge to the UsageAlertRule entity by IDs.
+func (_c *RealAccountCreate) AddAlertRuleIDs(ids ...int64) *RealAccountCreate {
+	_c.mutation.AddAlertRuleIDs(ids...)
+	return _c
+}
+
+// AddAlertRules adds the "alert_rules" edges to the UsageAlertRule entity.
+func (_c *RealAccountCreate) AddAlertRules(v ...*UsageAlertRule) *RealAccountCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddAlertRuleIDs(ids...)
 }
 
 // AddAlertStateIDs adds the "alert_states" edge to the UsageAlertState entity by IDs.
@@ -347,6 +363,22 @@ func (_c *RealAccountCreate) createSpec() (*RealAccount, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(usagealertbinding.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.AlertRulesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: true,
+			Table:   realaccount.AlertRulesTable,
+			Columns: []string{realaccount.AlertRulesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagealertrule.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

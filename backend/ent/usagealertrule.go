@@ -9,6 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
 )
 
@@ -27,6 +28,8 @@ type UsageAlertRule struct {
 	Name string `json:"name,omitempty"`
 	// Platform holds the value of the "platform" field.
 	Platform string `json:"platform,omitempty"`
+	// RealAccountID holds the value of the "real_account_id" field.
+	RealAccountID *int64 `json:"real_account_id,omitempty"`
 	// Window holds the value of the "window" field.
 	Window string `json:"window,omitempty"`
 	// Metric holds the value of the "metric" field.
@@ -37,6 +40,8 @@ type UsageAlertRule struct {
 	Threshold float64 `json:"threshold,omitempty"`
 	// MinResetAfterHours holds the value of the "min_reset_after_hours" field.
 	MinResetAfterHours *float64 `json:"min_reset_after_hours,omitempty"`
+	// StepPercent holds the value of the "step_percent" field.
+	StepPercent *float64 `json:"step_percent,omitempty"`
 	// CooldownMinutes holds the value of the "cooldown_minutes" field.
 	CooldownMinutes int `json:"cooldown_minutes,omitempty"`
 	// Enabled holds the value of the "enabled" field.
@@ -49,17 +54,30 @@ type UsageAlertRule struct {
 
 // UsageAlertRuleEdges holds the relations/edges for other nodes in the graph.
 type UsageAlertRuleEdges struct {
+	// RealAccount holds the value of the real_account edge.
+	RealAccount *RealAccount `json:"real_account,omitempty"`
 	// States holds the value of the states edge.
 	States []*UsageAlertState `json:"states,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [1]bool
+	loadedTypes [2]bool
+}
+
+// RealAccountOrErr returns the RealAccount value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e UsageAlertRuleEdges) RealAccountOrErr() (*RealAccount, error) {
+	if e.RealAccount != nil {
+		return e.RealAccount, nil
+	} else if e.loadedTypes[0] {
+		return nil, &NotFoundError{label: realaccount.Label}
+	}
+	return nil, &NotLoadedError{edge: "real_account"}
 }
 
 // StatesOrErr returns the States value or an error if the edge
 // was not loaded in eager-loading.
 func (e UsageAlertRuleEdges) StatesOrErr() ([]*UsageAlertState, error) {
-	if e.loadedTypes[0] {
+	if e.loadedTypes[1] {
 		return e.States, nil
 	}
 	return nil, &NotLoadedError{edge: "states"}
@@ -72,9 +90,9 @@ func (*UsageAlertRule) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagealertrule.FieldEnabled:
 			values[i] = new(sql.NullBool)
-		case usagealertrule.FieldThreshold, usagealertrule.FieldMinResetAfterHours:
+		case usagealertrule.FieldThreshold, usagealertrule.FieldMinResetAfterHours, usagealertrule.FieldStepPercent:
 			values[i] = new(sql.NullFloat64)
-		case usagealertrule.FieldID, usagealertrule.FieldCooldownMinutes:
+		case usagealertrule.FieldID, usagealertrule.FieldRealAccountID, usagealertrule.FieldCooldownMinutes:
 			values[i] = new(sql.NullInt64)
 		case usagealertrule.FieldName, usagealertrule.FieldPlatform, usagealertrule.FieldWindow, usagealertrule.FieldMetric, usagealertrule.FieldOperator:
 			values[i] = new(sql.NullString)
@@ -132,6 +150,13 @@ func (_m *UsageAlertRule) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.Platform = value.String
 			}
+		case usagealertrule.FieldRealAccountID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field real_account_id", values[i])
+			} else if value.Valid {
+				_m.RealAccountID = new(int64)
+				*_m.RealAccountID = value.Int64
+			}
 		case usagealertrule.FieldWindow:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field window", values[i])
@@ -163,6 +188,13 @@ func (_m *UsageAlertRule) assignValues(columns []string, values []any) error {
 				_m.MinResetAfterHours = new(float64)
 				*_m.MinResetAfterHours = value.Float64
 			}
+		case usagealertrule.FieldStepPercent:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field step_percent", values[i])
+			} else if value.Valid {
+				_m.StepPercent = new(float64)
+				*_m.StepPercent = value.Float64
+			}
 		case usagealertrule.FieldCooldownMinutes:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field cooldown_minutes", values[i])
@@ -186,6 +218,11 @@ func (_m *UsageAlertRule) assignValues(columns []string, values []any) error {
 // This includes values selected through modifiers, order, etc.
 func (_m *UsageAlertRule) Value(name string) (ent.Value, error) {
 	return _m.selectValues.Get(name)
+}
+
+// QueryRealAccount queries the "real_account" edge of the UsageAlertRule entity.
+func (_m *UsageAlertRule) QueryRealAccount() *RealAccountQuery {
+	return NewUsageAlertRuleClient(_m.config).QueryRealAccount(_m)
 }
 
 // QueryStates queries the "states" edge of the UsageAlertRule entity.
@@ -233,6 +270,11 @@ func (_m *UsageAlertRule) String() string {
 	builder.WriteString("platform=")
 	builder.WriteString(_m.Platform)
 	builder.WriteString(", ")
+	if v := _m.RealAccountID; v != nil {
+		builder.WriteString("real_account_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
 	builder.WriteString("window=")
 	builder.WriteString(_m.Window)
 	builder.WriteString(", ")
@@ -247,6 +289,11 @@ func (_m *UsageAlertRule) String() string {
 	builder.WriteString(", ")
 	if v := _m.MinResetAfterHours; v != nil {
 		builder.WriteString("min_reset_after_hours=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.StepPercent; v != nil {
+		builder.WriteString("step_percent=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")

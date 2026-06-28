@@ -58,6 +58,8 @@ func (RealAccount) Edges() []ent.Edge {
 			Ref("real_account"),
 		edge.From("webhook_bindings", UsageAlertBinding.Type).
 			Ref("real_account"),
+		edge.From("alert_rules", UsageAlertRule.Type).
+			Ref("real_account"),
 		edge.From("alert_states", UsageAlertState.Type).
 			Ref("real_account"),
 	}

@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
 )
@@ -80,6 +81,26 @@ func (_u *UsageAlertRuleUpdate) SetNillablePlatform(v *string) *UsageAlertRuleUp
 	if v != nil {
 		_u.SetPlatform(*v)
 	}
+	return _u
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (_u *UsageAlertRuleUpdate) SetRealAccountID(v int64) *UsageAlertRuleUpdate {
+	_u.mutation.SetRealAccountID(v)
+	return _u
+}
+
+// SetNillableRealAccountID sets the "real_account_id" field if the given value is not nil.
+func (_u *UsageAlertRuleUpdate) SetNillableRealAccountID(v *int64) *UsageAlertRuleUpdate {
+	if v != nil {
+		_u.SetRealAccountID(*v)
+	}
+	return _u
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (_u *UsageAlertRuleUpdate) ClearRealAccountID() *UsageAlertRuleUpdate {
+	_u.mutation.ClearRealAccountID()
 	return _u
 }
 
@@ -173,6 +194,33 @@ func (_u *UsageAlertRuleUpdate) ClearMinResetAfterHours() *UsageAlertRuleUpdate 
 	return _u
 }
 
+// SetStepPercent sets the "step_percent" field.
+func (_u *UsageAlertRuleUpdate) SetStepPercent(v float64) *UsageAlertRuleUpdate {
+	_u.mutation.ResetStepPercent()
+	_u.mutation.SetStepPercent(v)
+	return _u
+}
+
+// SetNillableStepPercent sets the "step_percent" field if the given value is not nil.
+func (_u *UsageAlertRuleUpdate) SetNillableStepPercent(v *float64) *UsageAlertRuleUpdate {
+	if v != nil {
+		_u.SetStepPercent(*v)
+	}
+	return _u
+}
+
+// AddStepPercent adds value to the "step_percent" field.
+func (_u *UsageAlertRuleUpdate) AddStepPercent(v float64) *UsageAlertRuleUpdate {
+	_u.mutation.AddStepPercent(v)
+	return _u
+}
+
+// ClearStepPercent clears the value of the "step_percent" field.
+func (_u *UsageAlertRuleUpdate) ClearStepPercent() *UsageAlertRuleUpdate {
+	_u.mutation.ClearStepPercent()
+	return _u
+}
+
 // SetCooldownMinutes sets the "cooldown_minutes" field.
 func (_u *UsageAlertRuleUpdate) SetCooldownMinutes(v int) *UsageAlertRuleUpdate {
 	_u.mutation.ResetCooldownMinutes()
@@ -208,6 +256,11 @@ func (_u *UsageAlertRuleUpdate) SetNillableEnabled(v *bool) *UsageAlertRuleUpdat
 	return _u
 }
 
+// SetRealAccount sets the "real_account" edge to the RealAccount entity.
+func (_u *UsageAlertRuleUpdate) SetRealAccount(v *RealAccount) *UsageAlertRuleUpdate {
+	return _u.SetRealAccountID(v.ID)
+}
+
 // AddStateIDs adds the "states" edge to the UsageAlertState entity by IDs.
 func (_u *UsageAlertRuleUpdate) AddStateIDs(ids ...int64) *UsageAlertRuleUpdate {
 	_u.mutation.AddStateIDs(ids...)
@@ -226,6 +279,12 @@ func (_u *UsageAlertRuleUpdate) AddStates(v ...*UsageAlertState) *UsageAlertRule
 // Mutation returns the UsageAlertRuleMutation object of the builder.
 func (_u *UsageAlertRuleUpdate) Mutation() *UsageAlertRuleMutation {
 	return _u.mutation
+}
+
+// ClearRealAccount clears the "real_account" edge to the RealAccount entity.
+func (_u *UsageAlertRuleUpdate) ClearRealAccount() *UsageAlertRuleUpdate {
+	_u.mutation.ClearRealAccount()
+	return _u
 }
 
 // ClearStates clears all "states" edges to the UsageAlertState entity.
@@ -377,6 +436,15 @@ func (_u *UsageAlertRuleUpdate) sqlSave(ctx context.Context) (_node int, err err
 	if _u.mutation.MinResetAfterHoursCleared() {
 		_spec.ClearField(usagealertrule.FieldMinResetAfterHours, field.TypeFloat64)
 	}
+	if value, ok := _u.mutation.StepPercent(); ok {
+		_spec.SetField(usagealertrule.FieldStepPercent, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedStepPercent(); ok {
+		_spec.AddField(usagealertrule.FieldStepPercent, field.TypeFloat64, value)
+	}
+	if _u.mutation.StepPercentCleared() {
+		_spec.ClearField(usagealertrule.FieldStepPercent, field.TypeFloat64)
+	}
 	if value, ok := _u.mutation.CooldownMinutes(); ok {
 		_spec.SetField(usagealertrule.FieldCooldownMinutes, field.TypeInt, value)
 	}
@@ -385,6 +453,35 @@ func (_u *UsageAlertRuleUpdate) sqlSave(ctx context.Context) (_node int, err err
 	}
 	if value, ok := _u.mutation.Enabled(); ok {
 		_spec.SetField(usagealertrule.FieldEnabled, field.TypeBool, value)
+	}
+	if _u.mutation.RealAccountCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   usagealertrule.RealAccountTable,
+			Columns: []string{usagealertrule.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RealAccountIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   usagealertrule.RealAccountTable,
+			Columns: []string{usagealertrule.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.StatesCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -505,6 +602,26 @@ func (_u *UsageAlertRuleUpdateOne) SetNillablePlatform(v *string) *UsageAlertRul
 	return _u
 }
 
+// SetRealAccountID sets the "real_account_id" field.
+func (_u *UsageAlertRuleUpdateOne) SetRealAccountID(v int64) *UsageAlertRuleUpdateOne {
+	_u.mutation.SetRealAccountID(v)
+	return _u
+}
+
+// SetNillableRealAccountID sets the "real_account_id" field if the given value is not nil.
+func (_u *UsageAlertRuleUpdateOne) SetNillableRealAccountID(v *int64) *UsageAlertRuleUpdateOne {
+	if v != nil {
+		_u.SetRealAccountID(*v)
+	}
+	return _u
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (_u *UsageAlertRuleUpdateOne) ClearRealAccountID() *UsageAlertRuleUpdateOne {
+	_u.mutation.ClearRealAccountID()
+	return _u
+}
+
 // SetWindow sets the "window" field.
 func (_u *UsageAlertRuleUpdateOne) SetWindow(v string) *UsageAlertRuleUpdateOne {
 	_u.mutation.SetWindow(v)
@@ -595,6 +712,33 @@ func (_u *UsageAlertRuleUpdateOne) ClearMinResetAfterHours() *UsageAlertRuleUpda
 	return _u
 }
 
+// SetStepPercent sets the "step_percent" field.
+func (_u *UsageAlertRuleUpdateOne) SetStepPercent(v float64) *UsageAlertRuleUpdateOne {
+	_u.mutation.ResetStepPercent()
+	_u.mutation.SetStepPercent(v)
+	return _u
+}
+
+// SetNillableStepPercent sets the "step_percent" field if the given value is not nil.
+func (_u *UsageAlertRuleUpdateOne) SetNillableStepPercent(v *float64) *UsageAlertRuleUpdateOne {
+	if v != nil {
+		_u.SetStepPercent(*v)
+	}
+	return _u
+}
+
+// AddStepPercent adds value to the "step_percent" field.
+func (_u *UsageAlertRuleUpdateOne) AddStepPercent(v float64) *UsageAlertRuleUpdateOne {
+	_u.mutation.AddStepPercent(v)
+	return _u
+}
+
+// ClearStepPercent clears the value of the "step_percent" field.
+func (_u *UsageAlertRuleUpdateOne) ClearStepPercent() *UsageAlertRuleUpdateOne {
+	_u.mutation.ClearStepPercent()
+	return _u
+}
+
 // SetCooldownMinutes sets the "cooldown_minutes" field.
 func (_u *UsageAlertRuleUpdateOne) SetCooldownMinutes(v int) *UsageAlertRuleUpdateOne {
 	_u.mutation.ResetCooldownMinutes()
@@ -630,6 +774,11 @@ func (_u *UsageAlertRuleUpdateOne) SetNillableEnabled(v *bool) *UsageAlertRuleUp
 	return _u
 }
 
+// SetRealAccount sets the "real_account" edge to the RealAccount entity.
+func (_u *UsageAlertRuleUpdateOne) SetRealAccount(v *RealAccount) *UsageAlertRuleUpdateOne {
+	return _u.SetRealAccountID(v.ID)
+}
+
 // AddStateIDs adds the "states" edge to the UsageAlertState entity by IDs.
 func (_u *UsageAlertRuleUpdateOne) AddStateIDs(ids ...int64) *UsageAlertRuleUpdateOne {
 	_u.mutation.AddStateIDs(ids...)
@@ -648,6 +797,12 @@ func (_u *UsageAlertRuleUpdateOne) AddStates(v ...*UsageAlertState) *UsageAlertR
 // Mutation returns the UsageAlertRuleMutation object of the builder.
 func (_u *UsageAlertRuleUpdateOne) Mutation() *UsageAlertRuleMutation {
 	return _u.mutation
+}
+
+// ClearRealAccount clears the "real_account" edge to the RealAccount entity.
+func (_u *UsageAlertRuleUpdateOne) ClearRealAccount() *UsageAlertRuleUpdateOne {
+	_u.mutation.ClearRealAccount()
+	return _u
 }
 
 // ClearStates clears all "states" edges to the UsageAlertState entity.
@@ -829,6 +984,15 @@ func (_u *UsageAlertRuleUpdateOne) sqlSave(ctx context.Context) (_node *UsageAle
 	if _u.mutation.MinResetAfterHoursCleared() {
 		_spec.ClearField(usagealertrule.FieldMinResetAfterHours, field.TypeFloat64)
 	}
+	if value, ok := _u.mutation.StepPercent(); ok {
+		_spec.SetField(usagealertrule.FieldStepPercent, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedStepPercent(); ok {
+		_spec.AddField(usagealertrule.FieldStepPercent, field.TypeFloat64, value)
+	}
+	if _u.mutation.StepPercentCleared() {
+		_spec.ClearField(usagealertrule.FieldStepPercent, field.TypeFloat64)
+	}
 	if value, ok := _u.mutation.CooldownMinutes(); ok {
 		_spec.SetField(usagealertrule.FieldCooldownMinutes, field.TypeInt, value)
 	}
@@ -837,6 +1001,35 @@ func (_u *UsageAlertRuleUpdateOne) sqlSave(ctx context.Context) (_node *UsageAle
 	}
 	if value, ok := _u.mutation.Enabled(); ok {
 		_spec.SetField(usagealertrule.FieldEnabled, field.TypeBool, value)
+	}
+	if _u.mutation.RealAccountCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   usagealertrule.RealAccountTable,
+			Columns: []string{usagealertrule.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RealAccountIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   usagealertrule.RealAccountTable,
+			Columns: []string{usagealertrule.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.StatesCleared() {
 		edge := &sqlgraph.EdgeSpec{

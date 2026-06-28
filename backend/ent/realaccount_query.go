@@ -18,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/realaccount"
 	"github.com/Wei-Shaw/sub2api/ent/realaccountusagesnapshot"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertbinding"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
 )
 
@@ -31,6 +32,7 @@ type RealAccountQuery struct {
 	withAccounts        *AccountQuery
 	withUsageSnapshot   *RealAccountUsageSnapshotQuery
 	withWebhookBindings *UsageAlertBindingQuery
+	withAlertRules      *UsageAlertRuleQuery
 	withAlertStates     *UsageAlertStateQuery
 	modifiers           []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
@@ -128,6 +130,28 @@ func (_q *RealAccountQuery) QueryWebhookBindings() *UsageAlertBindingQuery {
 			sqlgraph.From(realaccount.Table, realaccount.FieldID, selector),
 			sqlgraph.To(usagealertbinding.Table, usagealertbinding.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, true, realaccount.WebhookBindingsTable, realaccount.WebhookBindingsColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryAlertRules chains the current query on the "alert_rules" edge.
+func (_q *RealAccountQuery) QueryAlertRules() *UsageAlertRuleQuery {
+	query := (&UsageAlertRuleClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(realaccount.Table, realaccount.FieldID, selector),
+			sqlgraph.To(usagealertrule.Table, usagealertrule.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, realaccount.AlertRulesTable, realaccount.AlertRulesColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -352,6 +376,7 @@ func (_q *RealAccountQuery) Clone() *RealAccountQuery {
 		withAccounts:        _q.withAccounts.Clone(),
 		withUsageSnapshot:   _q.withUsageSnapshot.Clone(),
 		withWebhookBindings: _q.withWebhookBindings.Clone(),
+		withAlertRules:      _q.withAlertRules.Clone(),
 		withAlertStates:     _q.withAlertStates.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
@@ -389,6 +414,17 @@ func (_q *RealAccountQuery) WithWebhookBindings(opts ...func(*UsageAlertBindingQ
 		opt(query)
 	}
 	_q.withWebhookBindings = query
+	return _q
+}
+
+// WithAlertRules tells the query-builder to eager-load the nodes that are connected to
+// the "alert_rules" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *RealAccountQuery) WithAlertRules(opts ...func(*UsageAlertRuleQuery)) *RealAccountQuery {
+	query := (&UsageAlertRuleClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withAlertRules = query
 	return _q
 }
 
@@ -481,10 +517,11 @@ func (_q *RealAccountQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*
 	var (
 		nodes       = []*RealAccount{}
 		_spec       = _q.querySpec()
-		loadedTypes = [4]bool{
+		loadedTypes = [5]bool{
 			_q.withAccounts != nil,
 			_q.withUsageSnapshot != nil,
 			_q.withWebhookBindings != nil,
+			_q.withAlertRules != nil,
 			_q.withAlertStates != nil,
 		}
 	)
@@ -531,6 +568,13 @@ func (_q *RealAccountQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*
 			func(n *RealAccount, e *UsageAlertBinding) {
 				n.Edges.WebhookBindings = append(n.Edges.WebhookBindings, e)
 			}); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withAlertRules; query != nil {
+		if err := _q.loadAlertRules(ctx, query, nodes,
+			func(n *RealAccount) { n.Edges.AlertRules = []*UsageAlertRule{} },
+			func(n *RealAccount, e *UsageAlertRule) { n.Edges.AlertRules = append(n.Edges.AlertRules, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -632,6 +676,39 @@ func (_q *RealAccountQuery) loadWebhookBindings(ctx context.Context, query *Usag
 		node, ok := nodeids[fk]
 		if !ok {
 			return fmt.Errorf(`unexpected referenced foreign-key "real_account_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *RealAccountQuery) loadAlertRules(ctx context.Context, query *UsageAlertRuleQuery, nodes []*RealAccount, init func(*RealAccount), assign func(*RealAccount, *UsageAlertRule)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*RealAccount)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(usagealertrule.FieldRealAccountID)
+	}
+	query.Where(predicate.UsageAlertRule(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(realaccount.AlertRulesColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.RealAccountID
+		if fk == nil {
+			return fmt.Errorf(`foreign-key "real_account_id" is nil for node %v`, n.ID)
+		}
+		node, ok := nodeids[*fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "real_account_id" returned %v for node %v`, *fk, n.ID)
 		}
 		assign(node, n)
 	}

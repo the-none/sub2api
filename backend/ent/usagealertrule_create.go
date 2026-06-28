@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
 )
@@ -85,6 +86,20 @@ func (_c *UsageAlertRuleCreate) SetNillablePlatform(v *string) *UsageAlertRuleCr
 	return _c
 }
 
+// SetRealAccountID sets the "real_account_id" field.
+func (_c *UsageAlertRuleCreate) SetRealAccountID(v int64) *UsageAlertRuleCreate {
+	_c.mutation.SetRealAccountID(v)
+	return _c
+}
+
+// SetNillableRealAccountID sets the "real_account_id" field if the given value is not nil.
+func (_c *UsageAlertRuleCreate) SetNillableRealAccountID(v *int64) *UsageAlertRuleCreate {
+	if v != nil {
+		_c.SetRealAccountID(*v)
+	}
+	return _c
+}
+
 // SetWindow sets the "window" field.
 func (_c *UsageAlertRuleCreate) SetWindow(v string) *UsageAlertRuleCreate {
 	_c.mutation.SetWindow(v)
@@ -123,6 +138,20 @@ func (_c *UsageAlertRuleCreate) SetNillableMinResetAfterHours(v *float64) *Usage
 	return _c
 }
 
+// SetStepPercent sets the "step_percent" field.
+func (_c *UsageAlertRuleCreate) SetStepPercent(v float64) *UsageAlertRuleCreate {
+	_c.mutation.SetStepPercent(v)
+	return _c
+}
+
+// SetNillableStepPercent sets the "step_percent" field if the given value is not nil.
+func (_c *UsageAlertRuleCreate) SetNillableStepPercent(v *float64) *UsageAlertRuleCreate {
+	if v != nil {
+		_c.SetStepPercent(*v)
+	}
+	return _c
+}
+
 // SetCooldownMinutes sets the "cooldown_minutes" field.
 func (_c *UsageAlertRuleCreate) SetCooldownMinutes(v int) *UsageAlertRuleCreate {
 	_c.mutation.SetCooldownMinutes(v)
@@ -149,6 +178,11 @@ func (_c *UsageAlertRuleCreate) SetNillableEnabled(v *bool) *UsageAlertRuleCreat
 		_c.SetEnabled(*v)
 	}
 	return _c
+}
+
+// SetRealAccount sets the "real_account" edge to the RealAccount entity.
+func (_c *UsageAlertRuleCreate) SetRealAccount(v *RealAccount) *UsageAlertRuleCreate {
+	return _c.SetRealAccountID(v.ID)
 }
 
 // AddStateIDs adds the "states" edge to the UsageAlertState entity by IDs.
@@ -361,6 +395,10 @@ func (_c *UsageAlertRuleCreate) createSpec() (*UsageAlertRule, *sqlgraph.CreateS
 		_spec.SetField(usagealertrule.FieldMinResetAfterHours, field.TypeFloat64, value)
 		_node.MinResetAfterHours = &value
 	}
+	if value, ok := _c.mutation.StepPercent(); ok {
+		_spec.SetField(usagealertrule.FieldStepPercent, field.TypeFloat64, value)
+		_node.StepPercent = &value
+	}
 	if value, ok := _c.mutation.CooldownMinutes(); ok {
 		_spec.SetField(usagealertrule.FieldCooldownMinutes, field.TypeInt, value)
 		_node.CooldownMinutes = value
@@ -368,6 +406,23 @@ func (_c *UsageAlertRuleCreate) createSpec() (*UsageAlertRule, *sqlgraph.CreateS
 	if value, ok := _c.mutation.Enabled(); ok {
 		_spec.SetField(usagealertrule.FieldEnabled, field.TypeBool, value)
 		_node.Enabled = value
+	}
+	if nodes := _c.mutation.RealAccountIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   usagealertrule.RealAccountTable,
+			Columns: []string{usagealertrule.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.RealAccountID = &nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
 	}
 	if nodes := _c.mutation.StatesIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -491,6 +546,24 @@ func (u *UsageAlertRuleUpsert) UpdatePlatform() *UsageAlertRuleUpsert {
 	return u
 }
 
+// SetRealAccountID sets the "real_account_id" field.
+func (u *UsageAlertRuleUpsert) SetRealAccountID(v int64) *UsageAlertRuleUpsert {
+	u.Set(usagealertrule.FieldRealAccountID, v)
+	return u
+}
+
+// UpdateRealAccountID sets the "real_account_id" field to the value that was provided on create.
+func (u *UsageAlertRuleUpsert) UpdateRealAccountID() *UsageAlertRuleUpsert {
+	u.SetExcluded(usagealertrule.FieldRealAccountID)
+	return u
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (u *UsageAlertRuleUpsert) ClearRealAccountID() *UsageAlertRuleUpsert {
+	u.SetNull(usagealertrule.FieldRealAccountID)
+	return u
+}
+
 // SetWindow sets the "window" field.
 func (u *UsageAlertRuleUpsert) SetWindow(v string) *UsageAlertRuleUpsert {
 	u.Set(usagealertrule.FieldWindow, v)
@@ -566,6 +639,30 @@ func (u *UsageAlertRuleUpsert) AddMinResetAfterHours(v float64) *UsageAlertRuleU
 // ClearMinResetAfterHours clears the value of the "min_reset_after_hours" field.
 func (u *UsageAlertRuleUpsert) ClearMinResetAfterHours() *UsageAlertRuleUpsert {
 	u.SetNull(usagealertrule.FieldMinResetAfterHours)
+	return u
+}
+
+// SetStepPercent sets the "step_percent" field.
+func (u *UsageAlertRuleUpsert) SetStepPercent(v float64) *UsageAlertRuleUpsert {
+	u.Set(usagealertrule.FieldStepPercent, v)
+	return u
+}
+
+// UpdateStepPercent sets the "step_percent" field to the value that was provided on create.
+func (u *UsageAlertRuleUpsert) UpdateStepPercent() *UsageAlertRuleUpsert {
+	u.SetExcluded(usagealertrule.FieldStepPercent)
+	return u
+}
+
+// AddStepPercent adds v to the "step_percent" field.
+func (u *UsageAlertRuleUpsert) AddStepPercent(v float64) *UsageAlertRuleUpsert {
+	u.Add(usagealertrule.FieldStepPercent, v)
+	return u
+}
+
+// ClearStepPercent clears the value of the "step_percent" field.
+func (u *UsageAlertRuleUpsert) ClearStepPercent() *UsageAlertRuleUpsert {
+	u.SetNull(usagealertrule.FieldStepPercent)
 	return u
 }
 
@@ -707,6 +804,27 @@ func (u *UsageAlertRuleUpsertOne) UpdatePlatform() *UsageAlertRuleUpsertOne {
 	})
 }
 
+// SetRealAccountID sets the "real_account_id" field.
+func (u *UsageAlertRuleUpsertOne) SetRealAccountID(v int64) *UsageAlertRuleUpsertOne {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.SetRealAccountID(v)
+	})
+}
+
+// UpdateRealAccountID sets the "real_account_id" field to the value that was provided on create.
+func (u *UsageAlertRuleUpsertOne) UpdateRealAccountID() *UsageAlertRuleUpsertOne {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.UpdateRealAccountID()
+	})
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (u *UsageAlertRuleUpsertOne) ClearRealAccountID() *UsageAlertRuleUpsertOne {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.ClearRealAccountID()
+	})
+}
+
 // SetWindow sets the "window" field.
 func (u *UsageAlertRuleUpsertOne) SetWindow(v string) *UsageAlertRuleUpsertOne {
 	return u.Update(func(s *UsageAlertRuleUpsert) {
@@ -795,6 +913,34 @@ func (u *UsageAlertRuleUpsertOne) UpdateMinResetAfterHours() *UsageAlertRuleUpse
 func (u *UsageAlertRuleUpsertOne) ClearMinResetAfterHours() *UsageAlertRuleUpsertOne {
 	return u.Update(func(s *UsageAlertRuleUpsert) {
 		s.ClearMinResetAfterHours()
+	})
+}
+
+// SetStepPercent sets the "step_percent" field.
+func (u *UsageAlertRuleUpsertOne) SetStepPercent(v float64) *UsageAlertRuleUpsertOne {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.SetStepPercent(v)
+	})
+}
+
+// AddStepPercent adds v to the "step_percent" field.
+func (u *UsageAlertRuleUpsertOne) AddStepPercent(v float64) *UsageAlertRuleUpsertOne {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.AddStepPercent(v)
+	})
+}
+
+// UpdateStepPercent sets the "step_percent" field to the value that was provided on create.
+func (u *UsageAlertRuleUpsertOne) UpdateStepPercent() *UsageAlertRuleUpsertOne {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.UpdateStepPercent()
+	})
+}
+
+// ClearStepPercent clears the value of the "step_percent" field.
+func (u *UsageAlertRuleUpsertOne) ClearStepPercent() *UsageAlertRuleUpsertOne {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.ClearStepPercent()
 	})
 }
 
@@ -1107,6 +1253,27 @@ func (u *UsageAlertRuleUpsertBulk) UpdatePlatform() *UsageAlertRuleUpsertBulk {
 	})
 }
 
+// SetRealAccountID sets the "real_account_id" field.
+func (u *UsageAlertRuleUpsertBulk) SetRealAccountID(v int64) *UsageAlertRuleUpsertBulk {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.SetRealAccountID(v)
+	})
+}
+
+// UpdateRealAccountID sets the "real_account_id" field to the value that was provided on create.
+func (u *UsageAlertRuleUpsertBulk) UpdateRealAccountID() *UsageAlertRuleUpsertBulk {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.UpdateRealAccountID()
+	})
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (u *UsageAlertRuleUpsertBulk) ClearRealAccountID() *UsageAlertRuleUpsertBulk {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.ClearRealAccountID()
+	})
+}
+
 // SetWindow sets the "window" field.
 func (u *UsageAlertRuleUpsertBulk) SetWindow(v string) *UsageAlertRuleUpsertBulk {
 	return u.Update(func(s *UsageAlertRuleUpsert) {
@@ -1195,6 +1362,34 @@ func (u *UsageAlertRuleUpsertBulk) UpdateMinResetAfterHours() *UsageAlertRuleUps
 func (u *UsageAlertRuleUpsertBulk) ClearMinResetAfterHours() *UsageAlertRuleUpsertBulk {
 	return u.Update(func(s *UsageAlertRuleUpsert) {
 		s.ClearMinResetAfterHours()
+	})
+}
+
+// SetStepPercent sets the "step_percent" field.
+func (u *UsageAlertRuleUpsertBulk) SetStepPercent(v float64) *UsageAlertRuleUpsertBulk {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.SetStepPercent(v)
+	})
+}
+
+// AddStepPercent adds v to the "step_percent" field.
+func (u *UsageAlertRuleUpsertBulk) AddStepPercent(v float64) *UsageAlertRuleUpsertBulk {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.AddStepPercent(v)
+	})
+}
+
+// UpdateStepPercent sets the "step_percent" field to the value that was provided on create.
+func (u *UsageAlertRuleUpsertBulk) UpdateStepPercent() *UsageAlertRuleUpsertBulk {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.UpdateStepPercent()
+	})
+}
+
+// ClearStepPercent clears the value of the "step_percent" field.
+func (u *UsageAlertRuleUpsertBulk) ClearStepPercent() *UsageAlertRuleUpsertBulk {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.ClearStepPercent()
 	})
 }
 

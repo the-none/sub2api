@@ -569,6 +569,29 @@ func HasWebhookBindingsWith(preds ...predicate.UsageAlertBinding) predicate.Real
 	})
 }
 
+// HasAlertRules applies the HasEdge predicate on the "alert_rules" edge.
+func HasAlertRules() predicate.RealAccount {
+	return predicate.RealAccount(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, AlertRulesTable, AlertRulesColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasAlertRulesWith applies the HasEdge predicate on the "alert_rules" edge with a given conditions (other predicates).
+func HasAlertRulesWith(preds ...predicate.UsageAlertRule) predicate.RealAccount {
+	return predicate.RealAccount(func(s *sql.Selector) {
+		step := newAlertRulesStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // HasAlertStates applies the HasEdge predicate on the "alert_states" edge.
 func HasAlertStates() predicate.RealAccount {
 	return predicate.RealAccount(func(s *sql.Selector) {

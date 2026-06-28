@@ -148,11 +148,10 @@
                 <input v-model.trim="ruleForm.name" class="input" required />
               </label>
               <label class="block">
-                <span class="input-label">{{ text.platform }}</span>
-                <select v-model="ruleForm.platform" class="input">
-                  <option value="all">{{ text.allPlatforms }}</option>
-                  <option value="anthropic">Claude</option>
-                  <option value="openai">OpenAI</option>
+                <span class="input-label">{{ text.realAccount }}</span>
+                <select v-model.number="ruleForm.realAccountID" class="input" required>
+                  <option :value="0">{{ text.selectRealAccount }}</option>
+                  <option v-for="item in realAccounts" :key="item.id" :value="item.id">{{ item.name }} · {{ platformLabel(item.platform) }}</option>
                 </select>
               </label>
               <label class="block">
@@ -186,6 +185,10 @@
                 <input v-model="ruleForm.minResetAfterHours" class="input" type="number" min="0" step="0.1" />
               </label>
               <label class="block">
+                <span class="input-label">{{ text.stepPercent }}</span>
+                <input v-model="ruleForm.stepPercent" class="input" type="number" min="0" max="100" step="0.1" />
+              </label>
+              <label class="block">
                 <span class="input-label">{{ text.cooldown }}</span>
                 <input v-model.number="ruleForm.cooldownMinutes" class="input" type="number" min="0" step="1" />
               </label>
@@ -194,7 +197,7 @@
                 {{ text.enabled }}
               </label>
               <div class="flex gap-2 md:col-span-2">
-                <button type="submit" class="btn btn-primary" :disabled="saving.rule">{{ ruleForm.id ? text.update : text.create }}</button>
+                <button type="submit" class="btn btn-primary" :disabled="saving.rule || !ruleForm.realAccountID">{{ ruleForm.id ? text.update : text.create }}</button>
                 <button type="button" class="btn btn-secondary" @click="resetRuleForm">{{ text.reset }}</button>
               </div>
             </form>
@@ -203,7 +206,7 @@
                 <div class="min-w-0">
                   <div class="truncate font-medium text-gray-900 dark:text-white">{{ rule.name }}</div>
                   <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ platformLabel(rule.platform) }} · {{ rule.window }} · {{ metricLabel(rule.metric) }} {{ rule.operator }} {{ rule.threshold }}%
+                    {{ ruleSummary(rule) }}
                   </div>
                 </div>
                 <div class="flex flex-shrink-0 gap-2">
@@ -373,6 +376,7 @@ const zhText = {
   refresh: '刷新',
   loading: '加载中',
   realAccounts: '真实账户',
+  realAccount: '真实账户',
   rules: '规则',
   webhooks: '通知渠道',
   bindings: '绑定',
@@ -399,7 +403,11 @@ const zhText = {
   operator: '条件',
   threshold: '阈值',
   minResetAfter: '重置至少还有小时',
+  minResetAfterShort: '重置剩余',
+  stepPercent: '步进百分比',
+  stepPercentShort: '步进',
   cooldown: '冷却分钟',
+  cooldownShort: '冷却',
   enabled: '启用',
   disabled: '停用',
   usedPercent: '已用百分比',
@@ -428,6 +436,7 @@ const enText: typeof zhText = {
   refresh: 'Refresh',
   loading: 'Loading',
   realAccounts: 'Real Accounts',
+  realAccount: 'Real Account',
   rules: 'Rules',
   webhooks: 'Notification Channels',
   bindings: 'Bindings',
@@ -454,7 +463,11 @@ const enText: typeof zhText = {
   operator: 'Operator',
   threshold: 'Threshold',
   minResetAfter: 'Min reset hours',
+  minResetAfterShort: 'Reset left',
+  stepPercent: 'Step percent',
+  stepPercentShort: 'Step',
   cooldown: 'Cooldown minutes',
+  cooldownShort: 'Cooldown',
   enabled: 'Enabled',
   disabled: 'Disabled',
   usedPercent: 'Used percent',
@@ -508,12 +521,13 @@ const realAccountForm = reactive({
 const ruleForm = reactive({
   id: null as number | null,
   name: '',
-  platform: 'all' as UsageAlertPlatform,
+  realAccountID: 0,
   window: '7d' as UsageAlertWindow,
   metric: 'remaining_percent' as UsageAlertMetric,
   operator: '<=' as '<=' | '>=',
   threshold: 20,
   minResetAfterHours: '',
+  stepPercent: '',
   cooldownMinutes: 240,
   enabled: true
 })
@@ -545,6 +559,7 @@ const bindingForm = reactive({
 })
 
 const selectedAttachRealAccount = computed(() => realAccounts.value.find((item) => item.id === attachRealAccountID.value) || null)
+const selectedRuleRealAccount = computed(() => realAccounts.value.find((item) => item.id === ruleForm.realAccountID) || null)
 const attachableAccounts = computed(() => {
   const realAccount = selectedAttachRealAccount.value
   return accounts.value.filter((account) => {
@@ -665,14 +680,17 @@ async function saveRule() {
   saving.rule = true
   try {
     const minReset = ruleForm.minResetAfterHours === '' ? null : Number(ruleForm.minResetAfterHours)
+    const stepPercent = ruleForm.stepPercent === '' ? null : Number(ruleForm.stepPercent)
     const payload = {
       name: ruleForm.name,
-      platform: ruleForm.platform,
+      real_account_id: ruleForm.realAccountID,
+      platform: (selectedRuleRealAccount.value?.platform || 'all') as UsageAlertPlatform,
       window: ruleForm.window,
       metric: ruleForm.metric,
       operator: ruleForm.operator,
       threshold: Number(ruleForm.threshold),
       min_reset_after_hours: minReset,
+      step_percent: stepPercent,
       cooldown_minutes: Number(ruleForm.cooldownMinutes),
       enabled: ruleForm.enabled
     }
@@ -694,12 +712,13 @@ async function saveRule() {
 function editRule(rule: UsageAlertRule) {
   ruleForm.id = rule.id
   ruleForm.name = rule.name
-  ruleForm.platform = rule.platform
+  ruleForm.realAccountID = rule.real_account_id || 0
   ruleForm.window = rule.window
   ruleForm.metric = rule.metric
   ruleForm.operator = rule.operator
   ruleForm.threshold = rule.threshold
   ruleForm.minResetAfterHours = rule.min_reset_after_hours == null ? '' : String(rule.min_reset_after_hours)
+  ruleForm.stepPercent = rule.step_percent == null ? '' : String(rule.step_percent)
   ruleForm.cooldownMinutes = rule.cooldown_minutes
   ruleForm.enabled = rule.enabled
 }
@@ -707,12 +726,13 @@ function editRule(rule: UsageAlertRule) {
 function resetRuleForm() {
   ruleForm.id = null
   ruleForm.name = ''
-  ruleForm.platform = 'all'
+  ruleForm.realAccountID = 0
   ruleForm.window = '7d'
   ruleForm.metric = 'remaining_percent'
   ruleForm.operator = '<='
   ruleForm.threshold = 20
   ruleForm.minResetAfterHours = ''
+  ruleForm.stepPercent = ''
   ruleForm.cooldownMinutes = 240
   ruleForm.enabled = true
 }
@@ -894,6 +914,23 @@ function metricLabel(metric: string) {
   return metric === 'remaining_percent' ? text.value.remainingPercent : text.value.usedPercent
 }
 
+function ruleSummary(rule: UsageAlertRule) {
+  const parts = [
+    rule.real_account?.name || realAccountName(rule.real_account_id || 0),
+    platformLabel(rule.real_account?.platform || rule.platform),
+    rule.window,
+    `${metricLabel(rule.metric)} ${rule.operator} ${formatRuleNumber(rule.threshold)}%`
+  ]
+  if (rule.step_percent != null) {
+    parts.push(`${text.value.stepPercentShort} ${formatRuleNumber(rule.step_percent)}%`)
+  }
+  if (rule.min_reset_after_hours != null) {
+    parts.push(`${text.value.minResetAfterShort} ${formatRuleNumber(rule.min_reset_after_hours)}h`)
+  }
+  parts.push(`${text.value.cooldownShort} ${rule.cooldown_minutes}m`)
+  return parts.join(' · ')
+}
+
 function realAccountName(id: number) {
   return realAccounts.value.find((item) => item.id === id)?.name || `#${id}`
 }
@@ -932,6 +969,10 @@ function configString(value: unknown) {
 function formatPercent(value?: number | null) {
   if (value == null || Number.isNaN(value)) return '-'
   return Number(value).toFixed(1)
+}
+
+function formatRuleNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : Number(value).toFixed(1)
 }
 
 function nullable(value: string) {

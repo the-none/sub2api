@@ -35,6 +35,8 @@ const (
 	EdgeUsageSnapshot = "usage_snapshot"
 	// EdgeWebhookBindings holds the string denoting the webhook_bindings edge name in mutations.
 	EdgeWebhookBindings = "webhook_bindings"
+	// EdgeAlertRules holds the string denoting the alert_rules edge name in mutations.
+	EdgeAlertRules = "alert_rules"
 	// EdgeAlertStates holds the string denoting the alert_states edge name in mutations.
 	EdgeAlertStates = "alert_states"
 	// Table holds the table name of the realaccount in the database.
@@ -60,6 +62,13 @@ const (
 	WebhookBindingsInverseTable = "usage_alert_bindings"
 	// WebhookBindingsColumn is the table column denoting the webhook_bindings relation/edge.
 	WebhookBindingsColumn = "real_account_id"
+	// AlertRulesTable is the table that holds the alert_rules relation/edge.
+	AlertRulesTable = "usage_alert_rules"
+	// AlertRulesInverseTable is the table name for the UsageAlertRule entity.
+	// It exists in this package in order to avoid circular dependency with the "usagealertrule" package.
+	AlertRulesInverseTable = "usage_alert_rules"
+	// AlertRulesColumn is the table column denoting the alert_rules relation/edge.
+	AlertRulesColumn = "real_account_id"
 	// AlertStatesTable is the table that holds the alert_states relation/edge.
 	AlertStatesTable = "usage_alert_states"
 	// AlertStatesInverseTable is the table name for the UsageAlertState entity.
@@ -198,6 +207,20 @@ func ByWebhookBindings(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByAlertRulesCount orders the results by alert_rules count.
+func ByAlertRulesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newAlertRulesStep(), opts...)
+	}
+}
+
+// ByAlertRules orders the results by alert_rules terms.
+func ByAlertRules(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newAlertRulesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByAlertStatesCount orders the results by alert_states count.
 func ByAlertStatesCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -230,6 +253,13 @@ func newWebhookBindingsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(WebhookBindingsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, true, WebhookBindingsTable, WebhookBindingsColumn),
+	)
+}
+func newAlertRulesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(AlertRulesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, true, AlertRulesTable, AlertRulesColumn),
 	)
 }
 func newAlertStatesStep() *sqlgraph.Step {

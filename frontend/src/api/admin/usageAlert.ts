@@ -45,11 +45,14 @@ export interface UsageAlertRule {
   id: number
   name: string
   platform: UsageAlertPlatform
+  real_account_id?: number | null
+  real_account?: RealAccount | null
   window: UsageAlertWindow
   metric: UsageAlertMetric
   operator: UsageAlertOperator
   threshold: number
   min_reset_after_hours?: number | null
+  step_percent?: number | null
   cooldown_minutes: number
   enabled: boolean
   created_at: string

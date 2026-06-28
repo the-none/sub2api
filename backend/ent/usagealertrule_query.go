@@ -14,6 +14,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
 	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
 )
@@ -21,12 +22,13 @@ import (
 // UsageAlertRuleQuery is the builder for querying UsageAlertRule entities.
 type UsageAlertRuleQuery struct {
 	config
-	ctx        *QueryContext
-	order      []usagealertrule.OrderOption
-	inters     []Interceptor
-	predicates []predicate.UsageAlertRule
-	withStates *UsageAlertStateQuery
-	modifiers  []func(*sql.Selector)
+	ctx             *QueryContext
+	order           []usagealertrule.OrderOption
+	inters          []Interceptor
+	predicates      []predicate.UsageAlertRule
+	withRealAccount *RealAccountQuery
+	withStates      *UsageAlertStateQuery
+	modifiers       []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
@@ -61,6 +63,28 @@ func (_q *UsageAlertRuleQuery) Unique(unique bool) *UsageAlertRuleQuery {
 func (_q *UsageAlertRuleQuery) Order(o ...usagealertrule.OrderOption) *UsageAlertRuleQuery {
 	_q.order = append(_q.order, o...)
 	return _q
+}
+
+// QueryRealAccount chains the current query on the "real_account" edge.
+func (_q *UsageAlertRuleQuery) QueryRealAccount() *RealAccountQuery {
+	query := (&RealAccountClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagealertrule.Table, usagealertrule.FieldID, selector),
+			sqlgraph.To(realaccount.Table, realaccount.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, usagealertrule.RealAccountTable, usagealertrule.RealAccountColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
 }
 
 // QueryStates chains the current query on the "states" edge.
@@ -272,16 +296,28 @@ func (_q *UsageAlertRuleQuery) Clone() *UsageAlertRuleQuery {
 		return nil
 	}
 	return &UsageAlertRuleQuery{
-		config:     _q.config,
-		ctx:        _q.ctx.Clone(),
-		order:      append([]usagealertrule.OrderOption{}, _q.order...),
-		inters:     append([]Interceptor{}, _q.inters...),
-		predicates: append([]predicate.UsageAlertRule{}, _q.predicates...),
-		withStates: _q.withStates.Clone(),
+		config:          _q.config,
+		ctx:             _q.ctx.Clone(),
+		order:           append([]usagealertrule.OrderOption{}, _q.order...),
+		inters:          append([]Interceptor{}, _q.inters...),
+		predicates:      append([]predicate.UsageAlertRule{}, _q.predicates...),
+		withRealAccount: _q.withRealAccount.Clone(),
+		withStates:      _q.withStates.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
 	}
+}
+
+// WithRealAccount tells the query-builder to eager-load the nodes that are connected to
+// the "real_account" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UsageAlertRuleQuery) WithRealAccount(opts ...func(*RealAccountQuery)) *UsageAlertRuleQuery {
+	query := (&RealAccountClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withRealAccount = query
+	return _q
 }
 
 // WithStates tells the query-builder to eager-load the nodes that are connected to
@@ -373,7 +409,8 @@ func (_q *UsageAlertRuleQuery) sqlAll(ctx context.Context, hooks ...queryHook) (
 	var (
 		nodes       = []*UsageAlertRule{}
 		_spec       = _q.querySpec()
-		loadedTypes = [1]bool{
+		loadedTypes = [2]bool{
+			_q.withRealAccount != nil,
 			_q.withStates != nil,
 		}
 	)
@@ -398,6 +435,12 @@ func (_q *UsageAlertRuleQuery) sqlAll(ctx context.Context, hooks ...queryHook) (
 	if len(nodes) == 0 {
 		return nodes, nil
 	}
+	if query := _q.withRealAccount; query != nil {
+		if err := _q.loadRealAccount(ctx, query, nodes, nil,
+			func(n *UsageAlertRule, e *RealAccount) { n.Edges.RealAccount = e }); err != nil {
+			return nil, err
+		}
+	}
 	if query := _q.withStates; query != nil {
 		if err := _q.loadStates(ctx, query, nodes,
 			func(n *UsageAlertRule) { n.Edges.States = []*UsageAlertState{} },
@@ -408,6 +451,38 @@ func (_q *UsageAlertRuleQuery) sqlAll(ctx context.Context, hooks ...queryHook) (
 	return nodes, nil
 }
 
+func (_q *UsageAlertRuleQuery) loadRealAccount(ctx context.Context, query *RealAccountQuery, nodes []*UsageAlertRule, init func(*UsageAlertRule), assign func(*UsageAlertRule, *RealAccount)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*UsageAlertRule)
+	for i := range nodes {
+		if nodes[i].RealAccountID == nil {
+			continue
+		}
+		fk := *nodes[i].RealAccountID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(realaccount.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "real_account_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
+}
 func (_q *UsageAlertRuleQuery) loadStates(ctx context.Context, query *UsageAlertStateQuery, nodes []*UsageAlertRule, init func(*UsageAlertRule), assign func(*UsageAlertRule, *UsageAlertState)) error {
 	fks := make([]driver.Value, 0, len(nodes))
 	nodeids := make(map[int64]*UsageAlertRule)
@@ -466,6 +541,9 @@ func (_q *UsageAlertRuleQuery) querySpec() *sqlgraph.QuerySpec {
 			if fields[i] != usagealertrule.FieldID {
 				_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
 			}
+		}
+		if _q.withRealAccount != nil {
+			_spec.Node.AddColumnOnce(usagealertrule.FieldRealAccountID)
 		}
 	}
 	if ps := _q.predicates; len(ps) > 0 {

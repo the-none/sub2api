@@ -45,11 +45,13 @@ type RealAccountEdges struct {
 	UsageSnapshot []*RealAccountUsageSnapshot `json:"usage_snapshot,omitempty"`
 	// WebhookBindings holds the value of the webhook_bindings edge.
 	WebhookBindings []*UsageAlertBinding `json:"webhook_bindings,omitempty"`
+	// AlertRules holds the value of the alert_rules edge.
+	AlertRules []*UsageAlertRule `json:"alert_rules,omitempty"`
 	// AlertStates holds the value of the alert_states edge.
 	AlertStates []*UsageAlertState `json:"alert_states,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [4]bool
+	loadedTypes [5]bool
 }
 
 // AccountsOrErr returns the Accounts value or an error if the edge
@@ -79,10 +81,19 @@ func (e RealAccountEdges) WebhookBindingsOrErr() ([]*UsageAlertBinding, error) {
 	return nil, &NotLoadedError{edge: "webhook_bindings"}
 }
 
+// AlertRulesOrErr returns the AlertRules value or an error if the edge
+// was not loaded in eager-loading.
+func (e RealAccountEdges) AlertRulesOrErr() ([]*UsageAlertRule, error) {
+	if e.loadedTypes[3] {
+		return e.AlertRules, nil
+	}
+	return nil, &NotLoadedError{edge: "alert_rules"}
+}
+
 // AlertStatesOrErr returns the AlertStates value or an error if the edge
 // was not loaded in eager-loading.
 func (e RealAccountEdges) AlertStatesOrErr() ([]*UsageAlertState, error) {
-	if e.loadedTypes[3] {
+	if e.loadedTypes[4] {
 		return e.AlertStates, nil
 	}
 	return nil, &NotLoadedError{edge: "alert_states"}
@@ -191,6 +202,11 @@ func (_m *RealAccount) QueryUsageSnapshot() *RealAccountUsageSnapshotQuery {
 // QueryWebhookBindings queries the "webhook_bindings" edge of the RealAccount entity.
 func (_m *RealAccount) QueryWebhookBindings() *UsageAlertBindingQuery {
 	return NewRealAccountClient(_m.config).QueryWebhookBindings(_m)
+}
+
+// QueryAlertRules queries the "alert_rules" edge of the RealAccount entity.
+func (_m *RealAccount) QueryAlertRules() *UsageAlertRuleQuery {
+	return NewRealAccountClient(_m.config).QueryAlertRules(_m)
 }
 
 // QueryAlertStates queries the "alert_states" edge of the RealAccount entity.

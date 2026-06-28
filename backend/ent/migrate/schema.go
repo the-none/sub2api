@@ -1427,19 +1427,34 @@ var (
 		{Name: "operator", Type: field.TypeString, Size: 4},
 		{Name: "threshold", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "min_reset_after_hours", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
+		{Name: "step_percent", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "cooldown_minutes", Type: field.TypeInt, Default: 240},
 		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "real_account_id", Type: field.TypeInt64, Nullable: true},
 	}
 	// UsageAlertRulesTable holds the schema information for the "usage_alert_rules" table.
 	UsageAlertRulesTable = &schema.Table{
 		Name:       "usage_alert_rules",
 		Columns:    UsageAlertRulesColumns,
 		PrimaryKey: []*schema.Column{UsageAlertRulesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "usage_alert_rules_real_accounts_real_account",
+				Columns:    []*schema.Column{UsageAlertRulesColumns[14]},
+				RefColumns: []*schema.Column{RealAccountsColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+		},
 		Indexes: []*schema.Index{
 			{
 				Name:    "usagealertrule_enabled_platform",
 				Unique:  false,
-				Columns: []*schema.Column{UsageAlertRulesColumns[12], UsageAlertRulesColumns[5]},
+				Columns: []*schema.Column{UsageAlertRulesColumns[13], UsageAlertRulesColumns[5]},
+			},
+			{
+				Name:    "usagealertrule_enabled_real_account_id",
+				Unique:  false,
+				Columns: []*schema.Column{UsageAlertRulesColumns[13], UsageAlertRulesColumns[14]},
 			},
 			{
 				Name:    "usagealertrule_window",
@@ -2174,6 +2189,7 @@ func init() {
 	UsageAlertBindingsTable.Annotation = &entsql.Annotation{
 		Table: "usage_alert_bindings",
 	}
+	UsageAlertRulesTable.ForeignKeys[0].RefTable = RealAccountsTable
 	UsageAlertRulesTable.Annotation = &entsql.Annotation{
 		Table: "usage_alert_rules",
 	}

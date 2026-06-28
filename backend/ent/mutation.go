@@ -29433,6 +29433,9 @@ type RealAccountMutation struct {
 	webhook_bindings        map[int64]struct{}
 	removedwebhook_bindings map[int64]struct{}
 	clearedwebhook_bindings bool
+	alert_rules             map[int64]struct{}
+	removedalert_rules      map[int64]struct{}
+	clearedalert_rules      bool
 	alert_states            map[int64]struct{}
 	removedalert_states     map[int64]struct{}
 	clearedalert_states     bool
@@ -29992,6 +29995,60 @@ func (m *RealAccountMutation) ResetWebhookBindings() {
 	m.removedwebhook_bindings = nil
 }
 
+// AddAlertRuleIDs adds the "alert_rules" edge to the UsageAlertRule entity by ids.
+func (m *RealAccountMutation) AddAlertRuleIDs(ids ...int64) {
+	if m.alert_rules == nil {
+		m.alert_rules = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.alert_rules[ids[i]] = struct{}{}
+	}
+}
+
+// ClearAlertRules clears the "alert_rules" edge to the UsageAlertRule entity.
+func (m *RealAccountMutation) ClearAlertRules() {
+	m.clearedalert_rules = true
+}
+
+// AlertRulesCleared reports if the "alert_rules" edge to the UsageAlertRule entity was cleared.
+func (m *RealAccountMutation) AlertRulesCleared() bool {
+	return m.clearedalert_rules
+}
+
+// RemoveAlertRuleIDs removes the "alert_rules" edge to the UsageAlertRule entity by IDs.
+func (m *RealAccountMutation) RemoveAlertRuleIDs(ids ...int64) {
+	if m.removedalert_rules == nil {
+		m.removedalert_rules = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.alert_rules, ids[i])
+		m.removedalert_rules[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedAlertRules returns the removed IDs of the "alert_rules" edge to the UsageAlertRule entity.
+func (m *RealAccountMutation) RemovedAlertRulesIDs() (ids []int64) {
+	for id := range m.removedalert_rules {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// AlertRulesIDs returns the "alert_rules" edge IDs in the mutation.
+func (m *RealAccountMutation) AlertRulesIDs() (ids []int64) {
+	for id := range m.alert_rules {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetAlertRules resets all changes to the "alert_rules" edge.
+func (m *RealAccountMutation) ResetAlertRules() {
+	m.alert_rules = nil
+	m.clearedalert_rules = false
+	m.removedalert_rules = nil
+}
+
 // AddAlertStateIDs adds the "alert_states" edge to the UsageAlertState entity by ids.
 func (m *RealAccountMutation) AddAlertStateIDs(ids ...int64) {
 	if m.alert_states == nil {
@@ -30302,7 +30359,7 @@ func (m *RealAccountMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *RealAccountMutation) AddedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.accounts != nil {
 		edges = append(edges, realaccount.EdgeAccounts)
 	}
@@ -30311,6 +30368,9 @@ func (m *RealAccountMutation) AddedEdges() []string {
 	}
 	if m.webhook_bindings != nil {
 		edges = append(edges, realaccount.EdgeWebhookBindings)
+	}
+	if m.alert_rules != nil {
+		edges = append(edges, realaccount.EdgeAlertRules)
 	}
 	if m.alert_states != nil {
 		edges = append(edges, realaccount.EdgeAlertStates)
@@ -30340,6 +30400,12 @@ func (m *RealAccountMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case realaccount.EdgeAlertRules:
+		ids := make([]ent.Value, 0, len(m.alert_rules))
+		for id := range m.alert_rules {
+			ids = append(ids, id)
+		}
+		return ids
 	case realaccount.EdgeAlertStates:
 		ids := make([]ent.Value, 0, len(m.alert_states))
 		for id := range m.alert_states {
@@ -30352,7 +30418,7 @@ func (m *RealAccountMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *RealAccountMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.removedaccounts != nil {
 		edges = append(edges, realaccount.EdgeAccounts)
 	}
@@ -30361,6 +30427,9 @@ func (m *RealAccountMutation) RemovedEdges() []string {
 	}
 	if m.removedwebhook_bindings != nil {
 		edges = append(edges, realaccount.EdgeWebhookBindings)
+	}
+	if m.removedalert_rules != nil {
+		edges = append(edges, realaccount.EdgeAlertRules)
 	}
 	if m.removedalert_states != nil {
 		edges = append(edges, realaccount.EdgeAlertStates)
@@ -30390,6 +30459,12 @@ func (m *RealAccountMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case realaccount.EdgeAlertRules:
+		ids := make([]ent.Value, 0, len(m.removedalert_rules))
+		for id := range m.removedalert_rules {
+			ids = append(ids, id)
+		}
+		return ids
 	case realaccount.EdgeAlertStates:
 		ids := make([]ent.Value, 0, len(m.removedalert_states))
 		for id := range m.removedalert_states {
@@ -30402,7 +30477,7 @@ func (m *RealAccountMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *RealAccountMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.clearedaccounts {
 		edges = append(edges, realaccount.EdgeAccounts)
 	}
@@ -30411,6 +30486,9 @@ func (m *RealAccountMutation) ClearedEdges() []string {
 	}
 	if m.clearedwebhook_bindings {
 		edges = append(edges, realaccount.EdgeWebhookBindings)
+	}
+	if m.clearedalert_rules {
+		edges = append(edges, realaccount.EdgeAlertRules)
 	}
 	if m.clearedalert_states {
 		edges = append(edges, realaccount.EdgeAlertStates)
@@ -30428,6 +30506,8 @@ func (m *RealAccountMutation) EdgeCleared(name string) bool {
 		return m.clearedusage_snapshot
 	case realaccount.EdgeWebhookBindings:
 		return m.clearedwebhook_bindings
+	case realaccount.EdgeAlertRules:
+		return m.clearedalert_rules
 	case realaccount.EdgeAlertStates:
 		return m.clearedalert_states
 	}
@@ -30454,6 +30534,9 @@ func (m *RealAccountMutation) ResetEdge(name string) error {
 		return nil
 	case realaccount.EdgeWebhookBindings:
 		m.ResetWebhookBindings()
+		return nil
+	case realaccount.EdgeAlertRules:
+		m.ResetAlertRules()
 		return nil
 	case realaccount.EdgeAlertStates:
 		m.ResetAlertStates()
@@ -36439,10 +36522,14 @@ type UsageAlertRuleMutation struct {
 	addthreshold             *float64
 	min_reset_after_hours    *float64
 	addmin_reset_after_hours *float64
+	step_percent             *float64
+	addstep_percent          *float64
 	cooldown_minutes         *int
 	addcooldown_minutes      *int
 	enabled                  *bool
 	clearedFields            map[string]struct{}
+	real_account             *int64
+	clearedreal_account      bool
 	states                   map[int64]struct{}
 	removedstates            map[int64]struct{}
 	clearedstates            bool
@@ -36742,6 +36829,55 @@ func (m *UsageAlertRuleMutation) ResetPlatform() {
 	m.platform = nil
 }
 
+// SetRealAccountID sets the "real_account_id" field.
+func (m *UsageAlertRuleMutation) SetRealAccountID(i int64) {
+	m.real_account = &i
+}
+
+// RealAccountID returns the value of the "real_account_id" field in the mutation.
+func (m *UsageAlertRuleMutation) RealAccountID() (r int64, exists bool) {
+	v := m.real_account
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRealAccountID returns the old "real_account_id" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldRealAccountID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRealAccountID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRealAccountID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRealAccountID: %w", err)
+	}
+	return oldValue.RealAccountID, nil
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (m *UsageAlertRuleMutation) ClearRealAccountID() {
+	m.real_account = nil
+	m.clearedFields[usagealertrule.FieldRealAccountID] = struct{}{}
+}
+
+// RealAccountIDCleared returns if the "real_account_id" field was cleared in this mutation.
+func (m *UsageAlertRuleMutation) RealAccountIDCleared() bool {
+	_, ok := m.clearedFields[usagealertrule.FieldRealAccountID]
+	return ok
+}
+
+// ResetRealAccountID resets all changes to the "real_account_id" field.
+func (m *UsageAlertRuleMutation) ResetRealAccountID() {
+	m.real_account = nil
+	delete(m.clearedFields, usagealertrule.FieldRealAccountID)
+}
+
 // SetWindow sets the "window" field.
 func (m *UsageAlertRuleMutation) SetWindow(s string) {
 	m.window = &s
@@ -36976,6 +37112,76 @@ func (m *UsageAlertRuleMutation) ResetMinResetAfterHours() {
 	delete(m.clearedFields, usagealertrule.FieldMinResetAfterHours)
 }
 
+// SetStepPercent sets the "step_percent" field.
+func (m *UsageAlertRuleMutation) SetStepPercent(f float64) {
+	m.step_percent = &f
+	m.addstep_percent = nil
+}
+
+// StepPercent returns the value of the "step_percent" field in the mutation.
+func (m *UsageAlertRuleMutation) StepPercent() (r float64, exists bool) {
+	v := m.step_percent
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStepPercent returns the old "step_percent" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldStepPercent(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStepPercent is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStepPercent requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStepPercent: %w", err)
+	}
+	return oldValue.StepPercent, nil
+}
+
+// AddStepPercent adds f to the "step_percent" field.
+func (m *UsageAlertRuleMutation) AddStepPercent(f float64) {
+	if m.addstep_percent != nil {
+		*m.addstep_percent += f
+	} else {
+		m.addstep_percent = &f
+	}
+}
+
+// AddedStepPercent returns the value that was added to the "step_percent" field in this mutation.
+func (m *UsageAlertRuleMutation) AddedStepPercent() (r float64, exists bool) {
+	v := m.addstep_percent
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearStepPercent clears the value of the "step_percent" field.
+func (m *UsageAlertRuleMutation) ClearStepPercent() {
+	m.step_percent = nil
+	m.addstep_percent = nil
+	m.clearedFields[usagealertrule.FieldStepPercent] = struct{}{}
+}
+
+// StepPercentCleared returns if the "step_percent" field was cleared in this mutation.
+func (m *UsageAlertRuleMutation) StepPercentCleared() bool {
+	_, ok := m.clearedFields[usagealertrule.FieldStepPercent]
+	return ok
+}
+
+// ResetStepPercent resets all changes to the "step_percent" field.
+func (m *UsageAlertRuleMutation) ResetStepPercent() {
+	m.step_percent = nil
+	m.addstep_percent = nil
+	delete(m.clearedFields, usagealertrule.FieldStepPercent)
+}
+
 // SetCooldownMinutes sets the "cooldown_minutes" field.
 func (m *UsageAlertRuleMutation) SetCooldownMinutes(i int) {
 	m.cooldown_minutes = &i
@@ -37068,6 +37274,33 @@ func (m *UsageAlertRuleMutation) ResetEnabled() {
 	m.enabled = nil
 }
 
+// ClearRealAccount clears the "real_account" edge to the RealAccount entity.
+func (m *UsageAlertRuleMutation) ClearRealAccount() {
+	m.clearedreal_account = true
+	m.clearedFields[usagealertrule.FieldRealAccountID] = struct{}{}
+}
+
+// RealAccountCleared reports if the "real_account" edge to the RealAccount entity was cleared.
+func (m *UsageAlertRuleMutation) RealAccountCleared() bool {
+	return m.RealAccountIDCleared() || m.clearedreal_account
+}
+
+// RealAccountIDs returns the "real_account" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// RealAccountID instead. It exists only for internal usage by the builders.
+func (m *UsageAlertRuleMutation) RealAccountIDs() (ids []int64) {
+	if id := m.real_account; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetRealAccount resets all changes to the "real_account" edge.
+func (m *UsageAlertRuleMutation) ResetRealAccount() {
+	m.real_account = nil
+	m.clearedreal_account = false
+}
+
 // AddStateIDs adds the "states" edge to the UsageAlertState entity by ids.
 func (m *UsageAlertRuleMutation) AddStateIDs(ids ...int64) {
 	if m.states == nil {
@@ -37156,7 +37389,7 @@ func (m *UsageAlertRuleMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageAlertRuleMutation) Fields() []string {
-	fields := make([]string, 0, 12)
+	fields := make([]string, 0, 14)
 	if m.created_at != nil {
 		fields = append(fields, usagealertrule.FieldCreatedAt)
 	}
@@ -37172,6 +37405,9 @@ func (m *UsageAlertRuleMutation) Fields() []string {
 	if m.platform != nil {
 		fields = append(fields, usagealertrule.FieldPlatform)
 	}
+	if m.real_account != nil {
+		fields = append(fields, usagealertrule.FieldRealAccountID)
+	}
 	if m.window != nil {
 		fields = append(fields, usagealertrule.FieldWindow)
 	}
@@ -37186,6 +37422,9 @@ func (m *UsageAlertRuleMutation) Fields() []string {
 	}
 	if m.min_reset_after_hours != nil {
 		fields = append(fields, usagealertrule.FieldMinResetAfterHours)
+	}
+	if m.step_percent != nil {
+		fields = append(fields, usagealertrule.FieldStepPercent)
 	}
 	if m.cooldown_minutes != nil {
 		fields = append(fields, usagealertrule.FieldCooldownMinutes)
@@ -37211,6 +37450,8 @@ func (m *UsageAlertRuleMutation) Field(name string) (ent.Value, bool) {
 		return m.Name()
 	case usagealertrule.FieldPlatform:
 		return m.Platform()
+	case usagealertrule.FieldRealAccountID:
+		return m.RealAccountID()
 	case usagealertrule.FieldWindow:
 		return m.Window()
 	case usagealertrule.FieldMetric:
@@ -37221,6 +37462,8 @@ func (m *UsageAlertRuleMutation) Field(name string) (ent.Value, bool) {
 		return m.Threshold()
 	case usagealertrule.FieldMinResetAfterHours:
 		return m.MinResetAfterHours()
+	case usagealertrule.FieldStepPercent:
+		return m.StepPercent()
 	case usagealertrule.FieldCooldownMinutes:
 		return m.CooldownMinutes()
 	case usagealertrule.FieldEnabled:
@@ -37244,6 +37487,8 @@ func (m *UsageAlertRuleMutation) OldField(ctx context.Context, name string) (ent
 		return m.OldName(ctx)
 	case usagealertrule.FieldPlatform:
 		return m.OldPlatform(ctx)
+	case usagealertrule.FieldRealAccountID:
+		return m.OldRealAccountID(ctx)
 	case usagealertrule.FieldWindow:
 		return m.OldWindow(ctx)
 	case usagealertrule.FieldMetric:
@@ -37254,6 +37499,8 @@ func (m *UsageAlertRuleMutation) OldField(ctx context.Context, name string) (ent
 		return m.OldThreshold(ctx)
 	case usagealertrule.FieldMinResetAfterHours:
 		return m.OldMinResetAfterHours(ctx)
+	case usagealertrule.FieldStepPercent:
+		return m.OldStepPercent(ctx)
 	case usagealertrule.FieldCooldownMinutes:
 		return m.OldCooldownMinutes(ctx)
 	case usagealertrule.FieldEnabled:
@@ -37302,6 +37549,13 @@ func (m *UsageAlertRuleMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetPlatform(v)
 		return nil
+	case usagealertrule.FieldRealAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRealAccountID(v)
+		return nil
 	case usagealertrule.FieldWindow:
 		v, ok := value.(string)
 		if !ok {
@@ -37337,6 +37591,13 @@ func (m *UsageAlertRuleMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetMinResetAfterHours(v)
 		return nil
+	case usagealertrule.FieldStepPercent:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStepPercent(v)
+		return nil
 	case usagealertrule.FieldCooldownMinutes:
 		v, ok := value.(int)
 		if !ok {
@@ -37365,6 +37626,9 @@ func (m *UsageAlertRuleMutation) AddedFields() []string {
 	if m.addmin_reset_after_hours != nil {
 		fields = append(fields, usagealertrule.FieldMinResetAfterHours)
 	}
+	if m.addstep_percent != nil {
+		fields = append(fields, usagealertrule.FieldStepPercent)
+	}
 	if m.addcooldown_minutes != nil {
 		fields = append(fields, usagealertrule.FieldCooldownMinutes)
 	}
@@ -37380,6 +37644,8 @@ func (m *UsageAlertRuleMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedThreshold()
 	case usagealertrule.FieldMinResetAfterHours:
 		return m.AddedMinResetAfterHours()
+	case usagealertrule.FieldStepPercent:
+		return m.AddedStepPercent()
 	case usagealertrule.FieldCooldownMinutes:
 		return m.AddedCooldownMinutes()
 	}
@@ -37405,6 +37671,13 @@ func (m *UsageAlertRuleMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddMinResetAfterHours(v)
 		return nil
+	case usagealertrule.FieldStepPercent:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddStepPercent(v)
+		return nil
 	case usagealertrule.FieldCooldownMinutes:
 		v, ok := value.(int)
 		if !ok {
@@ -37423,8 +37696,14 @@ func (m *UsageAlertRuleMutation) ClearedFields() []string {
 	if m.FieldCleared(usagealertrule.FieldDeletedAt) {
 		fields = append(fields, usagealertrule.FieldDeletedAt)
 	}
+	if m.FieldCleared(usagealertrule.FieldRealAccountID) {
+		fields = append(fields, usagealertrule.FieldRealAccountID)
+	}
 	if m.FieldCleared(usagealertrule.FieldMinResetAfterHours) {
 		fields = append(fields, usagealertrule.FieldMinResetAfterHours)
+	}
+	if m.FieldCleared(usagealertrule.FieldStepPercent) {
+		fields = append(fields, usagealertrule.FieldStepPercent)
 	}
 	return fields
 }
@@ -37443,8 +37722,14 @@ func (m *UsageAlertRuleMutation) ClearField(name string) error {
 	case usagealertrule.FieldDeletedAt:
 		m.ClearDeletedAt()
 		return nil
+	case usagealertrule.FieldRealAccountID:
+		m.ClearRealAccountID()
+		return nil
 	case usagealertrule.FieldMinResetAfterHours:
 		m.ClearMinResetAfterHours()
+		return nil
+	case usagealertrule.FieldStepPercent:
+		m.ClearStepPercent()
 		return nil
 	}
 	return fmt.Errorf("unknown UsageAlertRule nullable field %s", name)
@@ -37469,6 +37754,9 @@ func (m *UsageAlertRuleMutation) ResetField(name string) error {
 	case usagealertrule.FieldPlatform:
 		m.ResetPlatform()
 		return nil
+	case usagealertrule.FieldRealAccountID:
+		m.ResetRealAccountID()
+		return nil
 	case usagealertrule.FieldWindow:
 		m.ResetWindow()
 		return nil
@@ -37484,6 +37772,9 @@ func (m *UsageAlertRuleMutation) ResetField(name string) error {
 	case usagealertrule.FieldMinResetAfterHours:
 		m.ResetMinResetAfterHours()
 		return nil
+	case usagealertrule.FieldStepPercent:
+		m.ResetStepPercent()
+		return nil
 	case usagealertrule.FieldCooldownMinutes:
 		m.ResetCooldownMinutes()
 		return nil
@@ -37496,7 +37787,10 @@ func (m *UsageAlertRuleMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *UsageAlertRuleMutation) AddedEdges() []string {
-	edges := make([]string, 0, 1)
+	edges := make([]string, 0, 2)
+	if m.real_account != nil {
+		edges = append(edges, usagealertrule.EdgeRealAccount)
+	}
 	if m.states != nil {
 		edges = append(edges, usagealertrule.EdgeStates)
 	}
@@ -37507,6 +37801,10 @@ func (m *UsageAlertRuleMutation) AddedEdges() []string {
 // name in this mutation.
 func (m *UsageAlertRuleMutation) AddedIDs(name string) []ent.Value {
 	switch name {
+	case usagealertrule.EdgeRealAccount:
+		if id := m.real_account; id != nil {
+			return []ent.Value{*id}
+		}
 	case usagealertrule.EdgeStates:
 		ids := make([]ent.Value, 0, len(m.states))
 		for id := range m.states {
@@ -37519,7 +37817,7 @@ func (m *UsageAlertRuleMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *UsageAlertRuleMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 1)
+	edges := make([]string, 0, 2)
 	if m.removedstates != nil {
 		edges = append(edges, usagealertrule.EdgeStates)
 	}
@@ -37542,7 +37840,10 @@ func (m *UsageAlertRuleMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *UsageAlertRuleMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 1)
+	edges := make([]string, 0, 2)
+	if m.clearedreal_account {
+		edges = append(edges, usagealertrule.EdgeRealAccount)
+	}
 	if m.clearedstates {
 		edges = append(edges, usagealertrule.EdgeStates)
 	}
@@ -37553,6 +37854,8 @@ func (m *UsageAlertRuleMutation) ClearedEdges() []string {
 // was cleared in this mutation.
 func (m *UsageAlertRuleMutation) EdgeCleared(name string) bool {
 	switch name {
+	case usagealertrule.EdgeRealAccount:
+		return m.clearedreal_account
 	case usagealertrule.EdgeStates:
 		return m.clearedstates
 	}
@@ -37563,6 +37866,9 @@ func (m *UsageAlertRuleMutation) EdgeCleared(name string) bool {
 // if that edge is not defined in the schema.
 func (m *UsageAlertRuleMutation) ClearEdge(name string) error {
 	switch name {
+	case usagealertrule.EdgeRealAccount:
+		m.ClearRealAccount()
+		return nil
 	}
 	return fmt.Errorf("unknown UsageAlertRule unique edge %s", name)
 }
@@ -37571,6 +37877,9 @@ func (m *UsageAlertRuleMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *UsageAlertRuleMutation) ResetEdge(name string) error {
 	switch name {
+	case usagealertrule.EdgeRealAccount:
+		m.ResetRealAccount()
+		return nil
 	case usagealertrule.EdgeStates:
 		m.ResetStates()
 		return nil

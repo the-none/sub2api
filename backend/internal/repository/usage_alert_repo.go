@@ -224,6 +224,7 @@ func (r *usageAlertRepository) EnsureRealAccountForAccount(ctx context.Context, 
 
 func (r *usageAlertRepository) ListRules(ctx context.Context) ([]*service.UsageAlertRule, error) {
 	rows, err := r.client.UsageAlertRule.Query().
+		WithRealAccount().
 		Order(dbent.Asc(dbusagealertrule.FieldID)).
 		All(ctx)
 	if err != nil {
@@ -236,14 +237,11 @@ func (r *usageAlertRepository) ListRules(ctx context.Context) ([]*service.UsageA
 	return out, nil
 }
 
-func (r *usageAlertRepository) ListEnabledRules(ctx context.Context, platform string) ([]*service.UsageAlertRule, error) {
+func (r *usageAlertRepository) ListEnabledRules(ctx context.Context, realAccountID int64) ([]*service.UsageAlertRule, error) {
 	rows, err := r.client.UsageAlertRule.Query().
 		Where(
 			dbusagealertrule.EnabledEQ(true),
-			dbusagealertrule.Or(
-				dbusagealertrule.PlatformEQ(service.UsageAlertPlatformAll),
-				dbusagealertrule.PlatformEQ(platform),
-			),
+			dbusagealertrule.RealAccountIDEQ(realAccountID),
 		).
 		Order(dbent.Asc(dbusagealertrule.FieldID)).
 		All(ctx)
@@ -258,7 +256,10 @@ func (r *usageAlertRepository) ListEnabledRules(ctx context.Context, platform st
 }
 
 func (r *usageAlertRepository) GetRule(ctx context.Context, id int64) (*service.UsageAlertRule, error) {
-	row, err := r.client.UsageAlertRule.Get(ctx, id)
+	row, err := r.client.UsageAlertRule.Query().
+		Where(dbusagealertrule.IDEQ(id)).
+		WithRealAccount().
+		Only(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -275,8 +276,14 @@ func (r *usageAlertRepository) CreateRule(ctx context.Context, rule *service.Usa
 		SetThreshold(rule.Threshold).
 		SetCooldownMinutes(rule.CooldownMinutes).
 		SetEnabled(rule.Enabled)
+	if rule.RealAccountID != nil {
+		builder.SetRealAccountID(*rule.RealAccountID)
+	}
 	if rule.MinResetAfterHours != nil {
 		builder.SetMinResetAfterHours(*rule.MinResetAfterHours)
+	}
+	if rule.StepPercent != nil {
+		builder.SetStepPercent(*rule.StepPercent)
 	}
 	row, err := builder.Save(ctx)
 	if err != nil {
@@ -295,10 +302,20 @@ func (r *usageAlertRepository) UpdateRule(ctx context.Context, rule *service.Usa
 		SetThreshold(rule.Threshold).
 		SetCooldownMinutes(rule.CooldownMinutes).
 		SetEnabled(rule.Enabled)
+	if rule.RealAccountID != nil {
+		builder.SetRealAccountID(*rule.RealAccountID)
+	} else {
+		builder.ClearRealAccountID()
+	}
 	if rule.MinResetAfterHours != nil {
 		builder.SetMinResetAfterHours(*rule.MinResetAfterHours)
 	} else {
 		builder.ClearMinResetAfterHours()
+	}
+	if rule.StepPercent != nil {
+		builder.SetStepPercent(*rule.StepPercent)
+	} else {
+		builder.ClearStepPercent()
 	}
 	row, err := builder.Save(ctx)
 	if err != nil {
@@ -575,20 +592,26 @@ func usageAlertRuleEntityToService(row *dbent.UsageAlertRule) *service.UsageAler
 	if row == nil {
 		return nil
 	}
-	return &service.UsageAlertRule{
+	out := &service.UsageAlertRule{
 		ID:                 row.ID,
 		Name:               row.Name,
 		Platform:           row.Platform,
+		RealAccountID:      row.RealAccountID,
 		Window:             row.Window,
 		Metric:             row.Metric,
 		Operator:           row.Operator,
 		Threshold:          row.Threshold,
 		MinResetAfterHours: row.MinResetAfterHours,
+		StepPercent:        row.StepPercent,
 		CooldownMinutes:    row.CooldownMinutes,
 		Enabled:            row.Enabled,
 		CreatedAt:          row.CreatedAt,
 		UpdatedAt:          row.UpdatedAt,
 	}
+	if row.Edges.RealAccount != nil {
+		out.RealAccount = realAccountEntityToService(row.Edges.RealAccount, false)
+	}
+	return out
 }
 
 func usageAlertWebhookEntityToService(row *dbent.UsageAlertWebhook) *service.UsageAlertWebhook {

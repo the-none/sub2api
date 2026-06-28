@@ -39,6 +39,9 @@ func (UsageAlertRule) Fields() []ent.Field {
 		field.String("platform").
 			Default("all").
 			MaxLen(50),
+		field.Int64("real_account_id").
+			Optional().
+			Nillable(),
 		field.String("window").
 			NotEmpty().
 			MaxLen(32),
@@ -54,6 +57,10 @@ func (UsageAlertRule) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}),
+		field.Float("step_percent").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}),
 		field.Int("cooldown_minutes").
 			Default(240).
 			NonNegative(),
@@ -64,6 +71,9 @@ func (UsageAlertRule) Fields() []ent.Field {
 
 func (UsageAlertRule) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.To("real_account", RealAccount.Type).
+			Field("real_account_id").
+			Unique(),
 		edge.From("states", UsageAlertState.Type).
 			Ref("rule"),
 	}
@@ -72,6 +82,7 @@ func (UsageAlertRule) Edges() []ent.Edge {
 func (UsageAlertRule) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("enabled", "platform"),
+		index.Fields("enabled", "real_account_id"),
 		index.Fields("window"),
 	}
 }

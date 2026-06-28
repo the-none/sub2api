@@ -4246,6 +4246,22 @@ func (c *RealAccountClient) QueryWebhookBindings(_m *RealAccount) *UsageAlertBin
 	return query
 }
 
+// QueryAlertRules queries the alert_rules edge of a RealAccount.
+func (c *RealAccountClient) QueryAlertRules(_m *RealAccount) *UsageAlertRuleQuery {
+	query := (&UsageAlertRuleClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(realaccount.Table, realaccount.FieldID, id),
+			sqlgraph.To(usagealertrule.Table, usagealertrule.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, realaccount.AlertRulesTable, realaccount.AlertRulesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryAlertStates queries the alert_states edge of a RealAccount.
 func (c *RealAccountClient) QueryAlertStates(_m *RealAccount) *UsageAlertStateQuery {
 	query := (&UsageAlertStateClient{config: c.config}).Query()
@@ -5406,6 +5422,22 @@ func (c *UsageAlertRuleClient) GetX(ctx context.Context, id int64) *UsageAlertRu
 		panic(err)
 	}
 	return obj
+}
+
+// QueryRealAccount queries the real_account edge of a UsageAlertRule.
+func (c *UsageAlertRuleClient) QueryRealAccount(_m *UsageAlertRule) *RealAccountQuery {
+	query := (&RealAccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagealertrule.Table, usagealertrule.FieldID, id),
+			sqlgraph.To(realaccount.Table, realaccount.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, usagealertrule.RealAccountTable, usagealertrule.RealAccountColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
 }
 
 // QueryStates queries the states edge of a UsageAlertRule.

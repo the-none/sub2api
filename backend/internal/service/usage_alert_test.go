@@ -31,6 +31,68 @@ func TestValidateUsageAlertWebhookByType(t *testing.T) {
 	require.NoError(t, validateUsageAlertWebhook(telegram))
 }
 
+func TestValidateUsageAlertRuleRejectsInvalidStepPercent(t *testing.T) {
+	negative := -0.1
+	rule := validUsageAlertRuleForTest()
+	rule.StepPercent = &negative
+	require.ErrorContains(t, validateUsageAlertRule(rule), "step_percent must be between 0 and 100")
+
+	tooLarge := 100.1
+	rule = validUsageAlertRuleForTest()
+	rule.StepPercent = &tooLarge
+	require.ErrorContains(t, validateUsageAlertRule(rule), "step_percent must be between 0 and 100")
+
+	zero := 0.0
+	rule = validUsageAlertRuleForTest()
+	rule.StepPercent = &zero
+	require.NoError(t, validateUsageAlertRule(rule))
+}
+
+func TestUsageAlertStepAllowsTriggerRequiresCooldownAndStep(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	step := 5.0
+	lastValue := 18.0
+	lastTriggeredAt := now.Add(-30 * time.Minute)
+	rule := &UsageAlertRule{
+		Operator:        UsageAlertOperatorLTE,
+		StepPercent:     &step,
+		CooldownMinutes: 60,
+	}
+	state := &UsageAlertState{
+		LastStatus:      UsageAlertStatusTriggered,
+		LastTriggeredAt: &lastTriggeredAt,
+		LastValue:       &lastValue,
+	}
+
+	require.True(t, usageAlertStepAllowsTrigger(nil, rule, 18, now))
+	require.False(t, usageAlertStepAllowsTrigger(state, rule, 12, now))
+
+	lastTriggeredAt = now.Add(-2 * time.Hour)
+	state.LastTriggeredAt = &lastTriggeredAt
+	require.False(t, usageAlertStepAllowsTrigger(state, rule, 14, now))
+	require.True(t, usageAlertStepAllowsTrigger(state, rule, 13, now))
+}
+
+func TestUsageAlertStepAllowsTriggerSupportsIncreasingMetric(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	step := 5.0
+	lastValue := 80.0
+	lastTriggeredAt := now.Add(-2 * time.Hour)
+	rule := &UsageAlertRule{
+		Operator:        UsageAlertOperatorGTE,
+		StepPercent:     &step,
+		CooldownMinutes: 60,
+	}
+	state := &UsageAlertState{
+		LastStatus:      UsageAlertStatusTriggered,
+		LastTriggeredAt: &lastTriggeredAt,
+		LastValue:       &lastValue,
+	}
+
+	require.False(t, usageAlertStepAllowsTrigger(state, rule, 84, now))
+	require.True(t, usageAlertStepAllowsTrigger(state, rule, 85, now))
+}
+
 func TestDeliverJSONPostWebhook(t *testing.T) {
 	var got UsageAlertWebhookEvent
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -104,4 +166,19 @@ func TestUsageAlertTelegramConfigRejectsInvalidTimezone(t *testing.T) {
 		"timezone":  "Mars/Olympus",
 	})
 	require.ErrorContains(t, err, "telegram timezone is invalid")
+}
+
+func validUsageAlertRuleForTest() *UsageAlertRule {
+	realAccountID := int64(1)
+	return &UsageAlertRule{
+		Name:            "weekly remaining low",
+		Platform:        UsageAlertPlatformOpenAI,
+		RealAccountID:   &realAccountID,
+		Window:          UsageAlertWindow7d,
+		Metric:          UsageAlertMetricRemaining,
+		Operator:        UsageAlertOperatorLTE,
+		Threshold:       20,
+		CooldownMinutes: 60,
+		Enabled:         true,
+	}
 }

@@ -25,6 +25,8 @@ const (
 	FieldName = "name"
 	// FieldPlatform holds the string denoting the platform field in the database.
 	FieldPlatform = "platform"
+	// FieldRealAccountID holds the string denoting the real_account_id field in the database.
+	FieldRealAccountID = "real_account_id"
 	// FieldWindow holds the string denoting the window field in the database.
 	FieldWindow = "window"
 	// FieldMetric holds the string denoting the metric field in the database.
@@ -35,14 +37,25 @@ const (
 	FieldThreshold = "threshold"
 	// FieldMinResetAfterHours holds the string denoting the min_reset_after_hours field in the database.
 	FieldMinResetAfterHours = "min_reset_after_hours"
+	// FieldStepPercent holds the string denoting the step_percent field in the database.
+	FieldStepPercent = "step_percent"
 	// FieldCooldownMinutes holds the string denoting the cooldown_minutes field in the database.
 	FieldCooldownMinutes = "cooldown_minutes"
 	// FieldEnabled holds the string denoting the enabled field in the database.
 	FieldEnabled = "enabled"
+	// EdgeRealAccount holds the string denoting the real_account edge name in mutations.
+	EdgeRealAccount = "real_account"
 	// EdgeStates holds the string denoting the states edge name in mutations.
 	EdgeStates = "states"
 	// Table holds the table name of the usagealertrule in the database.
 	Table = "usage_alert_rules"
+	// RealAccountTable is the table that holds the real_account relation/edge.
+	RealAccountTable = "usage_alert_rules"
+	// RealAccountInverseTable is the table name for the RealAccount entity.
+	// It exists in this package in order to avoid circular dependency with the "realaccount" package.
+	RealAccountInverseTable = "real_accounts"
+	// RealAccountColumn is the table column denoting the real_account relation/edge.
+	RealAccountColumn = "real_account_id"
 	// StatesTable is the table that holds the states relation/edge.
 	StatesTable = "usage_alert_states"
 	// StatesInverseTable is the table name for the UsageAlertState entity.
@@ -60,11 +73,13 @@ var Columns = []string{
 	FieldDeletedAt,
 	FieldName,
 	FieldPlatform,
+	FieldRealAccountID,
 	FieldWindow,
 	FieldMetric,
 	FieldOperator,
 	FieldThreshold,
 	FieldMinResetAfterHours,
+	FieldStepPercent,
 	FieldCooldownMinutes,
 	FieldEnabled,
 }
@@ -146,6 +161,11 @@ func ByPlatform(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPlatform, opts...).ToFunc()
 }
 
+// ByRealAccountID orders the results by the real_account_id field.
+func ByRealAccountID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRealAccountID, opts...).ToFunc()
+}
+
 // ByWindow orders the results by the window field.
 func ByWindow(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldWindow, opts...).ToFunc()
@@ -171,6 +191,11 @@ func ByMinResetAfterHours(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMinResetAfterHours, opts...).ToFunc()
 }
 
+// ByStepPercent orders the results by the step_percent field.
+func ByStepPercent(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldStepPercent, opts...).ToFunc()
+}
+
 // ByCooldownMinutes orders the results by the cooldown_minutes field.
 func ByCooldownMinutes(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCooldownMinutes, opts...).ToFunc()
@@ -179,6 +204,13 @@ func ByCooldownMinutes(opts ...sql.OrderTermOption) OrderOption {
 // ByEnabled orders the results by the enabled field.
 func ByEnabled(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldEnabled, opts...).ToFunc()
+}
+
+// ByRealAccountField orders the results by real_account field.
+func ByRealAccountField(field string, opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newRealAccountStep(), sql.OrderByField(field, opts...))
+	}
 }
 
 // ByStatesCount orders the results by states count.
@@ -193,6 +225,13 @@ func ByStates(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	return func(s *sql.Selector) {
 		sqlgraph.OrderByNeighborTerms(s, newStatesStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
+}
+func newRealAccountStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(RealAccountInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2O, false, RealAccountTable, RealAccountColumn),
+	)
 }
 func newStatesStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
