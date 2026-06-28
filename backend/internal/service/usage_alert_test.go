@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,36 @@ func TestValidateUsageAlertRuleRejectsInvalidStepPercent(t *testing.T) {
 	rule = validUsageAlertRuleForTest()
 	rule.StepPercent = &zero
 	require.NoError(t, validateUsageAlertRule(rule))
+}
+
+func TestEnsureUsageAlertRuleNameBuildsDefault(t *testing.T) {
+	step := 5.0
+	minReset := 24.0
+	rule := validUsageAlertRuleForTest()
+	rule.Name = " "
+	rule.RealAccount = &RealAccount{Name: "OpenAI Main"}
+	rule.StepPercent = &step
+	rule.MinResetAfterHours = &minReset
+
+	ensureUsageAlertRuleName(rule)
+
+	require.Contains(t, rule.Name, "OpenAI Main")
+	require.Contains(t, rule.Name, "OpenAI")
+	require.Contains(t, rule.Name, "7d")
+	require.Contains(t, rule.Name, "remaining")
+	require.Contains(t, rule.Name, "<= 20%")
+	require.Contains(t, rule.Name, "step 5%")
+	require.Contains(t, rule.Name, "reset left 24h")
+	require.Contains(t, rule.Name, "cooldown 60m")
+}
+
+func TestEnsureUsageAlertRuleNameTruncatesByRune(t *testing.T) {
+	rule := validUsageAlertRuleForTest()
+	rule.Name = strings.Repeat("测", usageAlertRuleNameMaxLength+5)
+
+	ensureUsageAlertRuleName(rule)
+
+	require.Len(t, []rune(rule.Name), usageAlertRuleNameMaxLength)
 }
 
 func TestUsageAlertStepAllowsTriggerRequiresCooldownAndStep(t *testing.T) {
@@ -129,6 +160,31 @@ func TestRedactUsageAlertSecret(t *testing.T) {
 	require.Contains(t, got, "[redacted]")
 }
 
+func TestBuildUsageAlertWebhookEventUsesResolvedType(t *testing.T) {
+	rule := validUsageAlertRuleForTest()
+	rule.ID = 7
+	triggeredAt := time.Date(2026, 6, 28, 10, 30, 0, 0, time.UTC)
+	snapshot := &UsageAlertSnapshot{
+		AccountID:     11,
+		RealAccountID: 22,
+		Platform:      UsageAlertPlatformOpenAI,
+		Source:        UsageAlertSourceOpenAICodexHeaders,
+	}
+
+	event := buildUsageAlertWebhookEvent(snapshot, &RealAccount{Name: "OpenAI Main"}, UsageAlertTrigger{
+		Rule:        rule,
+		Window:      rule.Window,
+		Value:       90,
+		WindowState: UsageAlertWindowSnapshot{UsedPercent: 10, RemainingPercent: 90},
+		TriggeredAt: triggeredAt,
+		Resolved:    true,
+	})
+
+	require.Equal(t, UsageAlertEventResolved, event.Event)
+	require.Equal(t, "OpenAI Main", event.RealAccountName)
+	require.Equal(t, 90.0, event.Value)
+}
+
 func TestFormatUsageAlertTelegramMessageUsesLanguageAndTimezone(t *testing.T) {
 	resetAt := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	event := UsageAlertWebhookEvent{
@@ -157,6 +213,36 @@ func TestFormatUsageAlertTelegramMessageUsesLanguageAndTimezone(t *testing.T) {
 	require.Contains(t, message, "触发时间：2026-06-28 18:30:00")
 	require.Contains(t, message, "重置时间：2026-06-28 20:00:00")
 	require.NotContains(t, message, "UTC")
+}
+
+func TestFormatUsageAlertTelegramMessageUsesResetTitle(t *testing.T) {
+	event := UsageAlertWebhookEvent{
+		Event:            UsageAlertEventResolved,
+		TriggeredAt:      time.Date(2026, 6, 28, 10, 30, 0, 0, time.UTC),
+		RealAccountName:  "OpenAI Main",
+		Platform:         UsageAlertPlatformOpenAI,
+		RuleName:         "weekly remaining low",
+		Window:           UsageAlertWindow7d,
+		Metric:           UsageAlertMetricRemaining,
+		Operator:         UsageAlertOperatorLTE,
+		Threshold:        20,
+		UsedPercent:      10,
+		RemainingPercent: 90,
+	}
+
+	zh := formatUsageAlertTelegramMessage(event, UsageAlertTelegramConfig{
+		Language: "zh",
+		Timezone: "Asia/Shanghai",
+	})
+	require.Contains(t, zh, "[Sub2API] 用量告警已重置")
+	require.Contains(t, zh, "重置通知时间：2026-06-28 18:30:00")
+
+	en := formatUsageAlertTelegramMessage(event, UsageAlertTelegramConfig{
+		Language: "en",
+		Timezone: "UTC",
+	})
+	require.Contains(t, en, "[Sub2API] Usage alert reset")
+	require.Contains(t, en, "Reset notified: 2026-06-28 10:30:00")
 }
 
 func TestUsageAlertTelegramConfigRejectsInvalidTimezone(t *testing.T) {

@@ -145,7 +145,7 @@
             <form class="grid gap-3 p-6 md:grid-cols-2" @submit.prevent="saveRule">
               <label class="block md:col-span-2">
                 <span class="input-label">{{ text.name }}</span>
-                <input v-model.trim="ruleForm.name" class="input" required />
+                <input v-model.trim="ruleForm.name" class="input" />
               </label>
               <label class="block">
                 <span class="input-label">{{ text.realAccount }}</span>
@@ -204,9 +204,15 @@
             <div class="border-t border-gray-100 dark:border-dark-700">
               <div v-for="rule in rules" :key="rule.id" class="flex items-center justify-between gap-3 px-6 py-3 text-sm">
                 <div class="min-w-0">
-                  <div class="truncate font-medium text-gray-900 dark:text-white">{{ rule.name }}</div>
-                  <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ ruleSummary(rule) }}
+                  <div class="break-words font-medium text-gray-900 dark:text-white">{{ rule.name }}</div>
+                  <div class="mt-2 flex flex-wrap gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    <span
+                      v-for="detail in ruleDetailItems(rule)"
+                      :key="detail"
+                      class="inline-flex max-w-full items-center rounded bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+                    >
+                      {{ detail }}
+                    </span>
                   </div>
                 </div>
                 <div class="flex flex-shrink-0 gap-2">
@@ -914,21 +920,21 @@ function metricLabel(metric: string) {
   return metric === 'remaining_percent' ? text.value.remainingPercent : text.value.usedPercent
 }
 
-function ruleSummary(rule: UsageAlertRule) {
-  const parts = [
-    rule.real_account?.name || realAccountName(rule.real_account_id || 0),
+function ruleRealAccountLabel(rule: UsageAlertRule) {
+  return rule.real_account?.name || (rule.real_account_id ? realAccountName(rule.real_account_id) : '-')
+}
+
+function ruleDetailItems(rule: UsageAlertRule) {
+  return [
+    ruleRealAccountLabel(rule),
     platformLabel(rule.real_account?.platform || rule.platform),
     rule.window,
-    `${metricLabel(rule.metric)} ${rule.operator} ${formatRuleNumber(rule.threshold)}%`
+    `${metricLabel(rule.metric)} ${rule.operator} ${formatRuleNumber(rule.threshold)}%`,
+    `${text.value.stepPercentShort} ${rule.step_percent == null ? '-' : `${formatRuleNumber(rule.step_percent)}%`}`,
+    `${text.value.minResetAfterShort} ${rule.min_reset_after_hours == null ? '-' : `${formatRuleNumber(rule.min_reset_after_hours)}h`}`,
+    `${text.value.cooldownShort} ${rule.cooldown_minutes}m`,
+    rule.enabled ? text.value.enabled : text.value.disabled
   ]
-  if (rule.step_percent != null) {
-    parts.push(`${text.value.stepPercentShort} ${formatRuleNumber(rule.step_percent)}%`)
-  }
-  if (rule.min_reset_after_hours != null) {
-    parts.push(`${text.value.minResetAfterShort} ${formatRuleNumber(rule.min_reset_after_hours)}h`)
-  }
-  parts.push(`${text.value.cooldownShort} ${rule.cooldown_minutes}m`)
-  return parts.join(' · ')
 }
 
 function realAccountName(id: number) {

@@ -50,7 +50,7 @@ type usageAlertRealAccountResponse struct {
 }
 
 type usageAlertRuleRequest struct {
-	Name               string   `json:"name" binding:"required"`
+	Name               string   `json:"name"`
 	RealAccountID      *int64   `json:"real_account_id"`
 	Platform           string   `json:"platform"`
 	Window             string   `json:"window" binding:"required"`

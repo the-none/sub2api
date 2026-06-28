@@ -32,8 +32,13 @@ const (
 	UsageAlertWebhookTypeJSONPost = "json_post"
 	UsageAlertWebhookTypeTelegram = "telegram"
 
+	UsageAlertEventTriggered = "account.usage_alert"
+	UsageAlertEventResolved  = "account.usage_alert.resolved"
+
 	UsageAlertStatusNormal    = "normal"
 	UsageAlertStatusTriggered = "triggered"
+
+	usageAlertRuleNameMaxLength = 100
 
 	UsageAlertSourceOpenAICodexHeaders = "openai_codex_headers"
 	UsageAlertSourceOpenAICodexProbe   = "openai_codex_probe"
@@ -144,6 +149,7 @@ type UsageAlertTrigger struct {
 	Value       float64
 	WindowState UsageAlertWindowSnapshot
 	TriggeredAt time.Time
+	Resolved    bool
 }
 
 type UsageAlertWebhookEvent struct {
@@ -268,6 +274,7 @@ func (s *UsageAlertService) CreateRule(ctx context.Context, rule *UsageAlertRule
 	if err := s.populateUsageAlertRuleScope(ctx, rule); err != nil {
 		return nil, err
 	}
+	ensureUsageAlertRuleName(rule)
 	return s.repo.CreateRule(ctx, rule)
 }
 
@@ -278,6 +285,7 @@ func (s *UsageAlertService) UpdateRule(ctx context.Context, rule *UsageAlertRule
 	if err := s.populateUsageAlertRuleScope(ctx, rule); err != nil {
 		return nil, err
 	}
+	ensureUsageAlertRuleName(rule)
 	return s.repo.UpdateRule(ctx, rule)
 }
 
@@ -469,14 +477,20 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 		if !ok {
 			continue
 		}
+		state, _ := s.repo.GetState(ctx, current.RealAccountID, rule.ID, rule.Window)
+		value := metricValue(window, rule.Metric)
 		if !resetConstraintSatisfied(window, rule.MinResetAfterHours, now) {
-			s.updateRuleState(ctx, current.RealAccountID, rule, window, false, 0)
+			if usageAlertStateWasTriggered(state) {
+				triggers = append(triggers, usageAlertResolvedTrigger(rule, window, value, now))
+			}
+			s.updateRuleState(ctx, current.RealAccountID, rule, window, false, value)
 			continue
 		}
-		value := metricValue(window, rule.Metric)
 		matched := compareUsageAlertValue(value, rule.Operator, rule.Threshold)
-		state, _ := s.repo.GetState(ctx, current.RealAccountID, rule.ID, rule.Window)
 		if !matched {
+			if usageAlertStateWasTriggered(state) {
+				triggers = append(triggers, usageAlertResolvedTrigger(rule, window, value, now))
+			}
 			s.updateRuleState(ctx, current.RealAccountID, rule, window, false, value)
 			continue
 		}
@@ -502,6 +516,21 @@ func usageAlertRuleAllowsTrigger(previous, current *UsageAlertSnapshot, rule *Us
 	return crossedThreshold(previous, current, rule, value) || stateAllowsRepeat(state, rule, now)
 }
 
+func usageAlertStateWasTriggered(state *UsageAlertState) bool {
+	return state != nil && state.LastStatus == UsageAlertStatusTriggered
+}
+
+func usageAlertResolvedTrigger(rule *UsageAlertRule, window UsageAlertWindowSnapshot, value float64, now time.Time) UsageAlertTrigger {
+	return UsageAlertTrigger{
+		Rule:        rule,
+		Window:      rule.Window,
+		Value:       value,
+		WindowState: window,
+		TriggeredAt: now,
+		Resolved:    true,
+	}
+}
+
 func (s *UsageAlertService) populateUsageAlertRuleScope(ctx context.Context, rule *UsageAlertRule) error {
 	if s == nil || s.repo == nil || rule == nil || rule.RealAccountID == nil || *rule.RealAccountID <= 0 {
 		return fmt.Errorf("real_account_id must be positive")
@@ -514,6 +543,7 @@ func (s *UsageAlertService) populateUsageAlertRuleScope(ctx context.Context, rul
 		return fmt.Errorf("real account not found")
 	}
 	rule.Platform = realAccount.Platform
+	rule.RealAccount = realAccount
 	return nil
 }
 
@@ -670,9 +700,6 @@ func validateUsageAlertRule(rule *UsageAlertRule) error {
 	rule.Window = strings.TrimSpace(rule.Window)
 	rule.Metric = strings.TrimSpace(rule.Metric)
 	rule.Operator = strings.TrimSpace(rule.Operator)
-	if rule.Name == "" {
-		return fmt.Errorf("rule name is required")
-	}
 	if rule.RealAccountID == nil || *rule.RealAccountID <= 0 {
 		return fmt.Errorf("real_account_id must be positive")
 	}
@@ -701,6 +728,60 @@ func validateUsageAlertRule(rule *UsageAlertRule) error {
 		return fmt.Errorf("cooldown_minutes must be non-negative")
 	}
 	return nil
+}
+
+func ensureUsageAlertRuleName(rule *UsageAlertRule) {
+	if rule == nil {
+		return
+	}
+	rule.Name = strings.TrimSpace(rule.Name)
+	if rule.Name == "" {
+		rule.Name = buildUsageAlertRuleDefaultName(rule)
+	}
+	rule.Name = truncateUsageAlertRuleName(rule.Name)
+}
+
+func buildUsageAlertRuleDefaultName(rule *UsageAlertRule) string {
+	accountName := ""
+	if rule.RealAccount != nil {
+		accountName = strings.TrimSpace(rule.RealAccount.Name)
+	}
+	if accountName == "" && rule.RealAccountID != nil && *rule.RealAccountID > 0 {
+		accountName = fmt.Sprintf("real-account-%d", *rule.RealAccountID)
+	}
+	if accountName == "" {
+		accountName = "real-account"
+	}
+
+	parts := []string{
+		accountName,
+		usageAlertPlatformDisplayName(rule.Platform, "en"),
+		usageAlertWindowDisplayName(rule.Window, "en"),
+		usageAlertMetricDisplayName(rule.Metric, "en"),
+		fmt.Sprintf("%s %s%%", rule.Operator, formatUsageAlertRuleNumber(rule.Threshold)),
+	}
+	if rule.StepPercent != nil {
+		parts = append(parts, fmt.Sprintf("step %s%%", formatUsageAlertRuleNumber(*rule.StepPercent)))
+	}
+	if rule.MinResetAfterHours != nil {
+		parts = append(parts, fmt.Sprintf("reset left %sh", formatUsageAlertRuleNumber(*rule.MinResetAfterHours)))
+	}
+	if rule.CooldownMinutes > 0 {
+		parts = append(parts, fmt.Sprintf("cooldown %dm", rule.CooldownMinutes))
+	}
+	return strings.Join(parts, " ")
+}
+
+func truncateUsageAlertRuleName(name string) string {
+	runes := []rune(strings.TrimSpace(name))
+	if len(runes) <= usageAlertRuleNameMaxLength {
+		return string(runes)
+	}
+	return string(runes[:usageAlertRuleNameMaxLength])
+}
+
+func formatUsageAlertRuleNumber(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func validateUsageAlertWebhook(webhook *UsageAlertWebhook) error {
@@ -870,11 +951,15 @@ func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent, cfg UsageAler
 	triggeredAt := usageAlertFormatTime(&event.TriggeredAt, location)
 	if cfg.Language == "zh" {
 		title := "[Sub2API] 用量告警"
+		timeLabel := "触发时间"
 		if event.Event == "account.usage_alert.test" {
 			title = "[Sub2API] 测试通知"
+		} else if event.Event == UsageAlertEventResolved {
+			title = "[Sub2API] 用量告警已重置"
+			timeLabel = "重置通知时间"
 		}
 		return fmt.Sprintf(
-			"%s\n账户：%s\n平台：%s\n规则：%s\n窗口：%s\n已用：%.1f%%\n剩余：%.1f%%\n阈值：%s %s %.1f%%\n重置时间：%s\n触发时间：%s",
+			"%s\n账户：%s\n平台：%s\n规则：%s\n窗口：%s\n已用：%.1f%%\n剩余：%.1f%%\n阈值：%s %s %.1f%%\n重置时间：%s\n%s：%s",
 			title,
 			accountName,
 			usageAlertPlatformDisplayName(event.Platform, "zh"),
@@ -886,15 +971,20 @@ func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent, cfg UsageAler
 			event.Operator,
 			event.Threshold,
 			resetAt,
+			timeLabel,
 			triggeredAt,
 		)
 	}
 	title := "[Sub2API] Usage alert"
+	timeLabel := "Triggered"
 	if event.Event == "account.usage_alert.test" {
 		title = "[Sub2API] Test notification"
+	} else if event.Event == UsageAlertEventResolved {
+		title = "[Sub2API] Usage alert reset"
+		timeLabel = "Reset notified"
 	}
 	return fmt.Sprintf(
-		"%s\nAccount: %s\nPlatform: %s\nRule: %s\nWindow: %s\nUsed: %.1f%%\nRemaining: %.1f%%\nThreshold: %s %s %.1f%%\nReset: %s\nTriggered: %s",
+		"%s\nAccount: %s\nPlatform: %s\nRule: %s\nWindow: %s\nUsed: %.1f%%\nRemaining: %.1f%%\nThreshold: %s %s %.1f%%\nReset: %s\n%s: %s",
 		title,
 		accountName,
 		usageAlertPlatformDisplayName(event.Platform, "en"),
@@ -906,6 +996,7 @@ func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent, cfg UsageAler
 		event.Operator,
 		event.Threshold,
 		resetAt,
+		timeLabel,
 		triggeredAt,
 	)
 }
@@ -1077,8 +1168,12 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 	if realAccount != nil {
 		realAccountName = realAccount.Name
 	}
+	eventName := UsageAlertEventTriggered
+	if trigger.Resolved {
+		eventName = UsageAlertEventResolved
+	}
 	return UsageAlertWebhookEvent{
-		Event:            "account.usage_alert",
+		Event:            eventName,
 		EventID:          fmt.Sprintf("%d-%d-%s-%d", snapshot.RealAccountID, trigger.Rule.ID, trigger.Window, trigger.TriggeredAt.UnixNano()),
 		TriggeredAt:      trigger.TriggeredAt,
 		AccountID:        snapshot.AccountID,
