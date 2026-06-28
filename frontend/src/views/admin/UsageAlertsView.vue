@@ -195,6 +195,9 @@
                 <input v-model="ruleForm.enabled" type="checkbox" class="rounded border-gray-300 text-primary-600" />
                 {{ text.enabled }}
               </label>
+              <p class="text-xs leading-5 text-gray-500 dark:text-gray-400 md:col-span-2">
+                {{ text.resolveNotificationHint }}
+              </p>
               <div class="flex gap-2 md:col-span-2">
                 <button type="submit" class="btn btn-primary" :disabled="saving.rule || !ruleForm.realAccountID">{{ ruleForm.id ? text.update : text.create }}</button>
                 <button type="button" class="btn btn-secondary" @click="resetRuleForm">{{ text.reset }}</button>
@@ -415,6 +418,7 @@ const zhText = {
   cooldownShort: '冷却',
   enabled: '启用',
   disabled: '停用',
+  resolveNotificationHint: '规则恢复正常时会发送“用量告警已重置”通知。',
   usedPercent: '已用百分比',
   remainingPercent: '剩余百分比',
   retry: '重试',
@@ -475,6 +479,7 @@ const enText: typeof zhText = {
   cooldownShort: 'Cooldown',
   enabled: 'Enabled',
   disabled: 'Disabled',
+  resolveNotificationHint: 'A reset notification is sent when a rule returns to normal.',
   usedPercent: 'Used percent',
   remainingPercent: 'Remaining percent',
   retry: 'Retry',

@@ -38,7 +38,8 @@ func TestUsageAlertRealAccountResponseUsesLinkedAccountJSONShape(t *testing.T) {
 	accounts, ok := decoded["accounts"].([]any)
 	require.True(t, ok)
 	require.Len(t, accounts, 1)
-	account := accounts[0].(map[string]any)
+	account, ok := accounts[0].(map[string]any)
+	require.True(t, ok)
 
 	require.Equal(t, float64(42), account["id"])
 	require.Equal(t, "claude-a", account["name"])

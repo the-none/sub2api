@@ -951,9 +951,10 @@ func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent, cfg UsageAler
 	if cfg.Language == "zh" {
 		title := "[Sub2API] 用量告警"
 		timeLabel := "触发时间"
-		if event.Event == "account.usage_alert.test" {
+		switch event.Event {
+		case "account.usage_alert.test":
 			title = "[Sub2API] 测试通知"
-		} else if event.Event == UsageAlertEventResolved {
+		case UsageAlertEventResolved:
 			title = "[Sub2API] 用量告警已重置"
 			timeLabel = "重置通知时间"
 		}
@@ -976,9 +977,10 @@ func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent, cfg UsageAler
 	}
 	title := "[Sub2API] Usage alert"
 	timeLabel := "Triggered"
-	if event.Event == "account.usage_alert.test" {
+	switch event.Event {
+	case "account.usage_alert.test":
 		title = "[Sub2API] Test notification"
-	} else if event.Event == UsageAlertEventResolved {
+	case UsageAlertEventResolved:
 		title = "[Sub2API] Usage alert reset"
 		timeLabel = "Reset notified"
 	}
