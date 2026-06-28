@@ -14,12 +14,13 @@ on:
         description: 'Simple release: only x86_64 GHCR image, skip other artifacts'
         required: false
         type: boolean
-        default: false
+        default: true
 
-# 环境变量：合并 workflow_dispatch 输入和 repository variable
-# tag push 触发时读取 vars.SIMPLE_RELEASE，workflow_dispatch 时使用输入参数
+# Simple release is the fork default:
+# - tag push: simple unless repository variable SIMPLE_RELEASE is explicitly "false"
+# - workflow_dispatch: use the checkbox value, defaulting to simple
 env:
-  SIMPLE_RELEASE: ${{ github.event.inputs.simple_release == 'true' || vars.SIMPLE_RELEASE == 'true' }}
+  SIMPLE_RELEASE: ${{ (github.event_name == 'workflow_dispatch' && inputs.simple_release) || (github.event_name != 'workflow_dispatch' && vars.SIMPLE_RELEASE != 'false') }}
 
 permissions:
   contents: write

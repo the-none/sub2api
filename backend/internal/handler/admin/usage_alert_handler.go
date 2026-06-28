@@ -2,6 +2,7 @@ package admin
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -26,6 +27,26 @@ type realAccountRequest struct {
 
 type attachAccountsRequest struct {
 	AccountIDs []int64 `json:"account_ids" binding:"required"`
+}
+
+type usageAlertAccountResponse struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Platform      string `json:"platform"`
+	Type          string `json:"type"`
+	Status        string `json:"status"`
+	RealAccountID *int64 `json:"real_account_id,omitempty"`
+}
+
+type usageAlertRealAccountResponse struct {
+	ID         int64                        `json:"id"`
+	Name       string                       `json:"name"`
+	Platform   string                       `json:"platform"`
+	Identifier *string                      `json:"identifier,omitempty"`
+	Notes      *string                      `json:"notes,omitempty"`
+	Accounts   []*usageAlertAccountResponse `json:"accounts,omitempty"`
+	CreatedAt  time.Time                    `json:"created_at"`
+	UpdatedAt  time.Time                    `json:"updated_at"`
 }
 
 type usageAlertRuleRequest struct {
@@ -85,6 +106,50 @@ func usageAlertRetryOrDefault(value *int) int {
 	return *value
 }
 
+func usageAlertRealAccountResponsesFromService(items []*service.RealAccount) []*usageAlertRealAccountResponse {
+	out := make([]*usageAlertRealAccountResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, usageAlertRealAccountResponseFromService(item))
+	}
+	return out
+}
+
+func usageAlertRealAccountResponseFromService(item *service.RealAccount) *usageAlertRealAccountResponse {
+	if item == nil {
+		return nil
+	}
+	out := &usageAlertRealAccountResponse{
+		ID:         item.ID,
+		Name:       item.Name,
+		Platform:   item.Platform,
+		Identifier: item.Identifier,
+		Notes:      item.Notes,
+		CreatedAt:  item.CreatedAt,
+		UpdatedAt:  item.UpdatedAt,
+	}
+	if len(item.Accounts) > 0 {
+		out.Accounts = make([]*usageAlertAccountResponse, 0, len(item.Accounts))
+		for _, account := range item.Accounts {
+			out.Accounts = append(out.Accounts, usageAlertAccountResponseFromService(account))
+		}
+	}
+	return out
+}
+
+func usageAlertAccountResponseFromService(account *service.Account) *usageAlertAccountResponse {
+	if account == nil {
+		return nil
+	}
+	return &usageAlertAccountResponse{
+		ID:            account.ID,
+		Name:          account.Name,
+		Platform:      account.Platform,
+		Type:          account.Type,
+		Status:        account.Status,
+		RealAccountID: account.RealAccountID,
+	}
+}
+
 // ListRealAccounts lists real upstream accounts.
 func (h *UsageAlertHandler) ListRealAccounts(c *gin.Context) {
 	items, err := h.service.ListRealAccounts(c.Request.Context())
@@ -92,7 +157,7 @@ func (h *UsageAlertHandler) ListRealAccounts(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, items)
+	response.Success(c, usageAlertRealAccountResponsesFromService(items))
 }
 
 // GetRealAccount returns a real upstream account.
@@ -110,7 +175,7 @@ func (h *UsageAlertHandler) GetRealAccount(c *gin.Context) {
 		response.NotFound(c, "Real account not found")
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, usageAlertRealAccountResponseFromService(item))
 }
 
 // CreateRealAccount creates a real upstream account.
@@ -130,7 +195,7 @@ func (h *UsageAlertHandler) CreateRealAccount(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, usageAlertRealAccountResponseFromService(item))
 }
 
 // UpdateRealAccount updates a real upstream account.
@@ -155,7 +220,7 @@ func (h *UsageAlertHandler) UpdateRealAccount(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, usageAlertRealAccountResponseFromService(item))
 }
 
 // DeleteRealAccount deletes a real upstream account and detaches bound sub accounts.

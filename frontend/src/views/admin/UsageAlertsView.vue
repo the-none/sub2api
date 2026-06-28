@@ -253,6 +253,17 @@
                     <span class="input-label">{{ text.telegramTopicID }}</span>
                     <input v-model.trim="webhookForm.telegramMessageThreadID" class="input" inputmode="numeric" />
                   </label>
+                  <label class="block">
+                    <span class="input-label">{{ text.notificationLanguage }}</span>
+                    <select v-model="webhookForm.telegramLanguage" class="input">
+                      <option value="zh">中文</option>
+                      <option value="en">English</option>
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="input-label">{{ text.notificationTimezone }}</span>
+                    <input v-model.trim="webhookForm.telegramTimezone" class="input" placeholder="Asia/Shanghai" />
+                  </label>
                   <label class="flex items-center gap-2 pt-6 text-sm text-gray-700 dark:text-gray-300">
                     <input v-model="webhookForm.telegramDisableNotification" type="checkbox" class="rounded border-gray-300 text-primary-600" />
                     {{ text.disableNotification }}
@@ -398,6 +409,8 @@ const zhText = {
   telegramBotToken: 'Bot Token',
   telegramChatID: 'Chat ID',
   telegramTopicID: 'Topic ID',
+  notificationLanguage: '通知语言',
+  notificationTimezone: '通知时区',
   disableNotification: '静默通知',
   testSend: '测试发送',
   testing: '测试中',
@@ -451,6 +464,8 @@ const enText: typeof zhText = {
   telegramBotToken: 'Bot Token',
   telegramChatID: 'Chat ID',
   telegramTopicID: 'Topic ID',
+  notificationLanguage: 'Language',
+  notificationTimezone: 'Timezone',
   disableNotification: 'Silent notification',
   testSend: 'Test',
   testing: 'Testing',
@@ -503,6 +518,10 @@ const ruleForm = reactive({
   enabled: true
 })
 
+function defaultWebhookLanguage() {
+  return locale.value.startsWith('zh') ? 'zh' : 'en'
+}
+
 const webhookForm = reactive({
   id: null as number | null,
   name: '',
@@ -511,6 +530,8 @@ const webhookForm = reactive({
   telegramBotToken: '',
   telegramChatID: '',
   telegramMessageThreadID: '',
+  telegramLanguage: defaultWebhookLanguage(),
+  telegramTimezone: 'Asia/Shanghai',
   telegramDisableNotification: false,
   retryCount: 2,
   enabled: true
@@ -751,6 +772,8 @@ function buildWebhookPayload(forceEnabled = false): UsageAlertWebhookPayload {
     const config: Record<string, unknown> = {
       bot_token: webhookForm.telegramBotToken,
       chat_id: webhookForm.telegramChatID,
+      language: webhookForm.telegramLanguage,
+      timezone: nullable(webhookForm.telegramTimezone) || 'Asia/Shanghai',
       disable_notification: webhookForm.telegramDisableNotification
     }
     const threadID = nullable(webhookForm.telegramMessageThreadID)
@@ -771,6 +794,8 @@ function editWebhook(webhook: UsageAlertWebhook) {
   webhookForm.telegramBotToken = configString(config.bot_token)
   webhookForm.telegramChatID = configString(config.chat_id)
   webhookForm.telegramMessageThreadID = configString(config.message_thread_id)
+  webhookForm.telegramLanguage = normalizeWebhookLanguage(configString(config.language))
+  webhookForm.telegramTimezone = configString(config.timezone) || 'Asia/Shanghai'
   webhookForm.telegramDisableNotification = Boolean(config.disable_notification)
   webhookForm.retryCount = webhook.retry_count
   webhookForm.enabled = webhook.enabled
@@ -784,6 +809,8 @@ function resetWebhookForm() {
   webhookForm.telegramBotToken = ''
   webhookForm.telegramChatID = ''
   webhookForm.telegramMessageThreadID = ''
+  webhookForm.telegramLanguage = defaultWebhookLanguage()
+  webhookForm.telegramTimezone = 'Asia/Shanghai'
   webhookForm.telegramDisableNotification = false
   webhookForm.retryCount = 2
   webhookForm.enabled = true
@@ -885,9 +912,16 @@ function webhookSummary(webhook: UsageAlertWebhook) {
     const config = webhook.config || {}
     const chatID = configString(config.chat_id)
     const threadID = configString(config.message_thread_id)
-    return threadID ? `${chatID} / topic ${threadID}` : chatID
+    const language = normalizeWebhookLanguage(configString(config.language)).toUpperCase()
+    const timezone = configString(config.timezone) || 'Asia/Shanghai'
+    const target = threadID ? `${chatID} / topic ${threadID}` : chatID
+    return `${target} · ${language} · ${timezone}`
   }
   return webhook.url || '-'
+}
+
+function normalizeWebhookLanguage(language: string) {
+  return language === 'zh' ? 'zh' : 'en'
 }
 
 function configString(value: unknown) {

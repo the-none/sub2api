@@ -91,6 +91,8 @@ type UsageAlertTelegramConfig struct {
 	BotToken            string `json:"bot_token"`
 	ChatID              string `json:"chat_id"`
 	MessageThreadID     *int64 `json:"message_thread_id,omitempty"`
+	Language            string `json:"language,omitempty"`
+	Timezone            string `json:"timezone,omitempty"`
 	DisableNotification bool   `json:"disable_notification,omitempty"`
 }
 
@@ -573,7 +575,7 @@ func (s *UsageAlertService) deliverTelegramWebhook(ctx context.Context, webhook 
 	}
 	payload := map[string]any{
 		"chat_id":              cfg.ChatID,
-		"text":                 formatUsageAlertTelegramMessage(event),
+		"text":                 formatUsageAlertTelegramMessage(event, cfg),
 		"disable_notification": cfg.DisableNotification,
 	}
 	if cfg.MessageThreadID != nil && *cfg.MessageThreadID > 0 {
@@ -708,6 +710,8 @@ func usageAlertTelegramConfig(config map[string]any) (UsageAlertTelegramConfig, 
 	cfg := UsageAlertTelegramConfig{
 		BotToken:            strings.TrimSpace(usageAlertConfigString(config, "bot_token")),
 		ChatID:              strings.TrimSpace(usageAlertConfigString(config, "chat_id")),
+		Language:            normalizeUsageAlertLanguage(usageAlertConfigString(config, "language")),
+		Timezone:            strings.TrimSpace(usageAlertConfigString(config, "timezone")),
 		DisableNotification: usageAlertConfigBool(config, "disable_notification"),
 	}
 	if cfg.BotToken == "" {
@@ -731,7 +735,21 @@ func usageAlertTelegramConfig(config map[string]any) (UsageAlertTelegramConfig, 
 			cfg.MessageThreadID = &threadID
 		}
 	}
+	if cfg.Timezone != "" {
+		if _, err := time.LoadLocation(cfg.Timezone); err != nil {
+			return cfg, fmt.Errorf("telegram timezone is invalid")
+		}
+	}
 	return cfg, nil
+}
+
+func normalizeUsageAlertLanguage(language string) string {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case "zh", "zh-cn", "zh_hans", "zh-hans", "cn":
+		return "zh"
+	default:
+		return "en"
+	}
 }
 
 func usageAlertConfigString(config map[string]any, key string) string {
@@ -804,34 +822,132 @@ func usageAlertConfigInt64(config map[string]any, key string) (int64, bool, erro
 	}
 }
 
-func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent) string {
-	title := "[Sub2API] Usage alert"
-	if event.Event == "account.usage_alert.test" {
-		title = "[Sub2API] Test notification"
-	}
+func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent, cfg UsageAlertTelegramConfig) string {
+	location := usageAlertTelegramLocation(cfg.Timezone)
 	accountName := strings.TrimSpace(event.RealAccountName)
 	if accountName == "" {
 		accountName = fmt.Sprintf("#%d", event.RealAccountID)
 	}
-	resetAt := "-"
+	resetAt := usageAlertFormatTime(nil, location)
 	if event.ResetAt != nil {
-		resetAt = event.ResetAt.UTC().Format(time.RFC3339)
+		resetAt = usageAlertFormatTime(event.ResetAt, location)
+	}
+	triggeredAt := usageAlertFormatTime(&event.TriggeredAt, location)
+	if cfg.Language == "zh" {
+		title := "[Sub2API] 用量告警"
+		if event.Event == "account.usage_alert.test" {
+			title = "[Sub2API] 测试通知"
+		}
+		return fmt.Sprintf(
+			"%s\n账户：%s\n平台：%s\n规则：%s\n窗口：%s\n已用：%.1f%%\n剩余：%.1f%%\n阈值：%s %s %.1f%%\n重置时间：%s\n触发时间：%s",
+			title,
+			accountName,
+			usageAlertPlatformDisplayName(event.Platform, "zh"),
+			event.RuleName,
+			usageAlertWindowDisplayName(event.Window, "zh"),
+			event.UsedPercent,
+			event.RemainingPercent,
+			usageAlertMetricDisplayName(event.Metric, "zh"),
+			event.Operator,
+			event.Threshold,
+			resetAt,
+			triggeredAt,
+		)
+	}
+	title := "[Sub2API] Usage alert"
+	if event.Event == "account.usage_alert.test" {
+		title = "[Sub2API] Test notification"
 	}
 	return fmt.Sprintf(
 		"%s\nAccount: %s\nPlatform: %s\nRule: %s\nWindow: %s\nUsed: %.1f%%\nRemaining: %.1f%%\nThreshold: %s %s %.1f%%\nReset: %s\nTriggered: %s",
 		title,
 		accountName,
-		event.Platform,
+		usageAlertPlatformDisplayName(event.Platform, "en"),
 		event.RuleName,
-		event.Window,
+		usageAlertWindowDisplayName(event.Window, "en"),
 		event.UsedPercent,
 		event.RemainingPercent,
-		event.Metric,
+		usageAlertMetricDisplayName(event.Metric, "en"),
 		event.Operator,
 		event.Threshold,
 		resetAt,
-		event.TriggeredAt.UTC().Format(time.RFC3339),
+		triggeredAt,
 	)
+}
+
+func usageAlertTelegramLocation(timezone string) *time.Location {
+	timezone = strings.TrimSpace(timezone)
+	if timezone == "" {
+		return time.Local
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return time.Local
+	}
+	return location
+}
+
+func usageAlertFormatTime(value *time.Time, location *time.Location) string {
+	if value == nil || value.IsZero() {
+		return "-"
+	}
+	if location == nil {
+		location = time.Local
+	}
+	return value.In(location).Format("2006-01-02 15:04:05 MST")
+}
+
+func usageAlertPlatformDisplayName(platform, language string) string {
+	switch platform {
+	case UsageAlertPlatformOpenAI:
+		return "OpenAI"
+	case UsageAlertPlatformAnthropic:
+		return "Claude"
+	default:
+		if language == "zh" {
+			return "全部"
+		}
+		return platform
+	}
+}
+
+func usageAlertWindowDisplayName(window, language string) string {
+	switch window {
+	case UsageAlertWindow5h:
+		if language == "zh" {
+			return "5 小时"
+		}
+		return "5h"
+	case UsageAlertWindow7d:
+		if language == "zh" {
+			return "7 天"
+		}
+		return "7d"
+	case UsageAlertWindow7dSonnet:
+		if language == "zh" {
+			return "7 天 Sonnet"
+		}
+		return "7d Sonnet"
+	default:
+		return window
+	}
+}
+
+func usageAlertMetricDisplayName(metric, language string) string {
+	switch metric {
+	case UsageAlertMetricUsed:
+		if language == "zh" {
+			return "已用"
+		}
+		return "used"
+	case UsageAlertMetricRemaining:
+		if language == "zh" {
+			return "剩余"
+		}
+		return "remaining"
+	default:
+		return metric
+	}
 }
 
 func redactUsageAlertSecret(message, secret string) string {

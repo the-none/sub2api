@@ -1,5 +1,4 @@
 import { apiClient } from '../client'
-import type { Account } from '@/types'
 
 export type UsageAlertPlatform = 'all' | 'openai' | 'anthropic'
 export type UsageAlertWindow = '5h' | '7d' | '7d_sonnet'
@@ -7,13 +6,22 @@ export type UsageAlertMetric = 'used_percent' | 'remaining_percent'
 export type UsageAlertOperator = '>=' | '<='
 export type UsageAlertWebhookType = 'json_post' | 'telegram'
 
+export interface RealAccountLinkedAccount {
+  id: number
+  name: string
+  platform: Exclude<UsageAlertPlatform, 'all'>
+  type: string
+  status: string
+  real_account_id?: number | null
+}
+
 export interface RealAccount {
   id: number
   name: string
   platform: Exclude<UsageAlertPlatform, 'all'>
   identifier?: string | null
   notes?: string | null
-  accounts?: Account[]
+  accounts?: RealAccountLinkedAccount[]
   created_at: string
   updated_at: string
 }
