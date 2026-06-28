@@ -27,12 +27,18 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
+	"github.com/Wei-Shaw/sub2api/ent/realaccountusagesnapshot"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/schema"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertbinding"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertwebhook"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -223,33 +229,33 @@ func init() {
 	// account.DefaultExtra holds the default value on creation for the extra field.
 	account.DefaultExtra = accountDescExtra.Default.(func() map[string]interface{})
 	// accountDescConcurrency is the schema descriptor for concurrency field.
-	accountDescConcurrency := accountFields[8].Descriptor()
+	accountDescConcurrency := accountFields[9].Descriptor()
 	// account.DefaultConcurrency holds the default value on creation for the concurrency field.
 	account.DefaultConcurrency = accountDescConcurrency.Default.(int)
 	// accountDescPriority is the schema descriptor for priority field.
-	accountDescPriority := accountFields[10].Descriptor()
+	accountDescPriority := accountFields[11].Descriptor()
 	// account.DefaultPriority holds the default value on creation for the priority field.
 	account.DefaultPriority = accountDescPriority.Default.(int)
 	// accountDescRateMultiplier is the schema descriptor for rate_multiplier field.
-	accountDescRateMultiplier := accountFields[11].Descriptor()
+	accountDescRateMultiplier := accountFields[12].Descriptor()
 	// account.DefaultRateMultiplier holds the default value on creation for the rate_multiplier field.
 	account.DefaultRateMultiplier = accountDescRateMultiplier.Default.(float64)
 	// accountDescStatus is the schema descriptor for status field.
-	accountDescStatus := accountFields[12].Descriptor()
+	accountDescStatus := accountFields[13].Descriptor()
 	// account.DefaultStatus holds the default value on creation for the status field.
 	account.DefaultStatus = accountDescStatus.Default.(string)
 	// account.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	account.StatusValidator = accountDescStatus.Validators[0].(func(string) error)
 	// accountDescAutoPauseOnExpired is the schema descriptor for auto_pause_on_expired field.
-	accountDescAutoPauseOnExpired := accountFields[16].Descriptor()
+	accountDescAutoPauseOnExpired := accountFields[17].Descriptor()
 	// account.DefaultAutoPauseOnExpired holds the default value on creation for the auto_pause_on_expired field.
 	account.DefaultAutoPauseOnExpired = accountDescAutoPauseOnExpired.Default.(bool)
 	// accountDescSchedulable is the schema descriptor for schedulable field.
-	accountDescSchedulable := accountFields[17].Descriptor()
+	accountDescSchedulable := accountFields[18].Descriptor()
 	// account.DefaultSchedulable holds the default value on creation for the schedulable field.
 	account.DefaultSchedulable = accountDescSchedulable.Default.(bool)
 	// accountDescSessionWindowStatus is the schema descriptor for session_window_status field.
-	accountDescSessionWindowStatus := accountFields[25].Descriptor()
+	accountDescSessionWindowStatus := accountFields[26].Descriptor()
 	// account.SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.
 	account.SessionWindowStatusValidator = accountDescSessionWindowStatus.Validators[0].(func(string) error)
 	accountgroupFields := schema.AccountGroup{}.Fields()
@@ -1378,6 +1384,120 @@ func init() {
 	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
+	realaccountMixin := schema.RealAccount{}.Mixin()
+	realaccountMixinHooks1 := realaccountMixin[1].Hooks()
+	realaccount.Hooks[0] = realaccountMixinHooks1[0]
+	realaccountMixinInters1 := realaccountMixin[1].Interceptors()
+	realaccount.Interceptors[0] = realaccountMixinInters1[0]
+	realaccountMixinFields0 := realaccountMixin[0].Fields()
+	_ = realaccountMixinFields0
+	realaccountFields := schema.RealAccount{}.Fields()
+	_ = realaccountFields
+	// realaccountDescCreatedAt is the schema descriptor for created_at field.
+	realaccountDescCreatedAt := realaccountMixinFields0[0].Descriptor()
+	// realaccount.DefaultCreatedAt holds the default value on creation for the created_at field.
+	realaccount.DefaultCreatedAt = realaccountDescCreatedAt.Default.(func() time.Time)
+	// realaccountDescUpdatedAt is the schema descriptor for updated_at field.
+	realaccountDescUpdatedAt := realaccountMixinFields0[1].Descriptor()
+	// realaccount.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	realaccount.DefaultUpdatedAt = realaccountDescUpdatedAt.Default.(func() time.Time)
+	// realaccount.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	realaccount.UpdateDefaultUpdatedAt = realaccountDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// realaccountDescName is the schema descriptor for name field.
+	realaccountDescName := realaccountFields[0].Descriptor()
+	// realaccount.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	realaccount.NameValidator = func() func(string) error {
+		validators := realaccountDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// realaccountDescPlatform is the schema descriptor for platform field.
+	realaccountDescPlatform := realaccountFields[1].Descriptor()
+	// realaccount.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	realaccount.PlatformValidator = func() func(string) error {
+		validators := realaccountDescPlatform.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(platform string) error {
+			for _, fn := range fns {
+				if err := fn(platform); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// realaccountDescIdentifier is the schema descriptor for identifier field.
+	realaccountDescIdentifier := realaccountFields[2].Descriptor()
+	// realaccount.IdentifierValidator is a validator for the "identifier" field. It is called by the builders before save.
+	realaccount.IdentifierValidator = realaccountDescIdentifier.Validators[0].(func(string) error)
+	realaccountusagesnapshotMixin := schema.RealAccountUsageSnapshot{}.Mixin()
+	realaccountusagesnapshotMixinFields0 := realaccountusagesnapshotMixin[0].Fields()
+	_ = realaccountusagesnapshotMixinFields0
+	realaccountusagesnapshotFields := schema.RealAccountUsageSnapshot{}.Fields()
+	_ = realaccountusagesnapshotFields
+	// realaccountusagesnapshotDescCreatedAt is the schema descriptor for created_at field.
+	realaccountusagesnapshotDescCreatedAt := realaccountusagesnapshotMixinFields0[0].Descriptor()
+	// realaccountusagesnapshot.DefaultCreatedAt holds the default value on creation for the created_at field.
+	realaccountusagesnapshot.DefaultCreatedAt = realaccountusagesnapshotDescCreatedAt.Default.(func() time.Time)
+	// realaccountusagesnapshotDescUpdatedAt is the schema descriptor for updated_at field.
+	realaccountusagesnapshotDescUpdatedAt := realaccountusagesnapshotMixinFields0[1].Descriptor()
+	// realaccountusagesnapshot.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	realaccountusagesnapshot.DefaultUpdatedAt = realaccountusagesnapshotDescUpdatedAt.Default.(func() time.Time)
+	// realaccountusagesnapshot.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	realaccountusagesnapshot.UpdateDefaultUpdatedAt = realaccountusagesnapshotDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// realaccountusagesnapshotDescPlatform is the schema descriptor for platform field.
+	realaccountusagesnapshotDescPlatform := realaccountusagesnapshotFields[1].Descriptor()
+	// realaccountusagesnapshot.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	realaccountusagesnapshot.PlatformValidator = func() func(string) error {
+		validators := realaccountusagesnapshotDescPlatform.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(platform string) error {
+			for _, fn := range fns {
+				if err := fn(platform); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// realaccountusagesnapshotDescSource is the schema descriptor for source field.
+	realaccountusagesnapshotDescSource := realaccountusagesnapshotFields[2].Descriptor()
+	// realaccountusagesnapshot.SourceValidator is a validator for the "source" field. It is called by the builders before save.
+	realaccountusagesnapshot.SourceValidator = func() func(string) error {
+		validators := realaccountusagesnapshotDescSource.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(source string) error {
+			for _, fn := range fns {
+				if err := fn(source); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// realaccountusagesnapshotDescSnapshotJSON is the schema descriptor for snapshot_json field.
+	realaccountusagesnapshotDescSnapshotJSON := realaccountusagesnapshotFields[3].Descriptor()
+	// realaccountusagesnapshot.DefaultSnapshotJSON holds the default value on creation for the snapshot_json field.
+	realaccountusagesnapshot.DefaultSnapshotJSON = realaccountusagesnapshotDescSnapshotJSON.Default.(func() map[string]interface{})
 	redeemcodeFields := schema.RedeemCode{}.Fields()
 	_ = redeemcodeFields
 	// redeemcodeDescCode is the schema descriptor for code field.
@@ -1584,6 +1704,222 @@ func init() {
 	tlsfingerprintprofileDescEnableGrease := tlsfingerprintprofileFields[2].Descriptor()
 	// tlsfingerprintprofile.DefaultEnableGrease holds the default value on creation for the enable_grease field.
 	tlsfingerprintprofile.DefaultEnableGrease = tlsfingerprintprofileDescEnableGrease.Default.(bool)
+	usagealertbindingMixin := schema.UsageAlertBinding{}.Mixin()
+	usagealertbindingMixinFields0 := usagealertbindingMixin[0].Fields()
+	_ = usagealertbindingMixinFields0
+	usagealertbindingFields := schema.UsageAlertBinding{}.Fields()
+	_ = usagealertbindingFields
+	// usagealertbindingDescCreatedAt is the schema descriptor for created_at field.
+	usagealertbindingDescCreatedAt := usagealertbindingMixinFields0[0].Descriptor()
+	// usagealertbinding.DefaultCreatedAt holds the default value on creation for the created_at field.
+	usagealertbinding.DefaultCreatedAt = usagealertbindingDescCreatedAt.Default.(func() time.Time)
+	// usagealertbindingDescUpdatedAt is the schema descriptor for updated_at field.
+	usagealertbindingDescUpdatedAt := usagealertbindingMixinFields0[1].Descriptor()
+	// usagealertbinding.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	usagealertbinding.DefaultUpdatedAt = usagealertbindingDescUpdatedAt.Default.(func() time.Time)
+	// usagealertbinding.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	usagealertbinding.UpdateDefaultUpdatedAt = usagealertbindingDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// usagealertbindingDescEnabled is the schema descriptor for enabled field.
+	usagealertbindingDescEnabled := usagealertbindingFields[2].Descriptor()
+	// usagealertbinding.DefaultEnabled holds the default value on creation for the enabled field.
+	usagealertbinding.DefaultEnabled = usagealertbindingDescEnabled.Default.(bool)
+	usagealertruleMixin := schema.UsageAlertRule{}.Mixin()
+	usagealertruleMixinHooks1 := usagealertruleMixin[1].Hooks()
+	usagealertrule.Hooks[0] = usagealertruleMixinHooks1[0]
+	usagealertruleMixinInters1 := usagealertruleMixin[1].Interceptors()
+	usagealertrule.Interceptors[0] = usagealertruleMixinInters1[0]
+	usagealertruleMixinFields0 := usagealertruleMixin[0].Fields()
+	_ = usagealertruleMixinFields0
+	usagealertruleFields := schema.UsageAlertRule{}.Fields()
+	_ = usagealertruleFields
+	// usagealertruleDescCreatedAt is the schema descriptor for created_at field.
+	usagealertruleDescCreatedAt := usagealertruleMixinFields0[0].Descriptor()
+	// usagealertrule.DefaultCreatedAt holds the default value on creation for the created_at field.
+	usagealertrule.DefaultCreatedAt = usagealertruleDescCreatedAt.Default.(func() time.Time)
+	// usagealertruleDescUpdatedAt is the schema descriptor for updated_at field.
+	usagealertruleDescUpdatedAt := usagealertruleMixinFields0[1].Descriptor()
+	// usagealertrule.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	usagealertrule.DefaultUpdatedAt = usagealertruleDescUpdatedAt.Default.(func() time.Time)
+	// usagealertrule.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	usagealertrule.UpdateDefaultUpdatedAt = usagealertruleDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// usagealertruleDescName is the schema descriptor for name field.
+	usagealertruleDescName := usagealertruleFields[0].Descriptor()
+	// usagealertrule.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	usagealertrule.NameValidator = func() func(string) error {
+		validators := usagealertruleDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// usagealertruleDescPlatform is the schema descriptor for platform field.
+	usagealertruleDescPlatform := usagealertruleFields[1].Descriptor()
+	// usagealertrule.DefaultPlatform holds the default value on creation for the platform field.
+	usagealertrule.DefaultPlatform = usagealertruleDescPlatform.Default.(string)
+	// usagealertrule.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	usagealertrule.PlatformValidator = usagealertruleDescPlatform.Validators[0].(func(string) error)
+	// usagealertruleDescWindow is the schema descriptor for window field.
+	usagealertruleDescWindow := usagealertruleFields[2].Descriptor()
+	// usagealertrule.WindowValidator is a validator for the "window" field. It is called by the builders before save.
+	usagealertrule.WindowValidator = func() func(string) error {
+		validators := usagealertruleDescWindow.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(window string) error {
+			for _, fn := range fns {
+				if err := fn(window); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// usagealertruleDescMetric is the schema descriptor for metric field.
+	usagealertruleDescMetric := usagealertruleFields[3].Descriptor()
+	// usagealertrule.MetricValidator is a validator for the "metric" field. It is called by the builders before save.
+	usagealertrule.MetricValidator = func() func(string) error {
+		validators := usagealertruleDescMetric.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(metric string) error {
+			for _, fn := range fns {
+				if err := fn(metric); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// usagealertruleDescOperator is the schema descriptor for operator field.
+	usagealertruleDescOperator := usagealertruleFields[4].Descriptor()
+	// usagealertrule.OperatorValidator is a validator for the "operator" field. It is called by the builders before save.
+	usagealertrule.OperatorValidator = func() func(string) error {
+		validators := usagealertruleDescOperator.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(operator string) error {
+			for _, fn := range fns {
+				if err := fn(operator); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// usagealertruleDescCooldownMinutes is the schema descriptor for cooldown_minutes field.
+	usagealertruleDescCooldownMinutes := usagealertruleFields[7].Descriptor()
+	// usagealertrule.DefaultCooldownMinutes holds the default value on creation for the cooldown_minutes field.
+	usagealertrule.DefaultCooldownMinutes = usagealertruleDescCooldownMinutes.Default.(int)
+	// usagealertrule.CooldownMinutesValidator is a validator for the "cooldown_minutes" field. It is called by the builders before save.
+	usagealertrule.CooldownMinutesValidator = usagealertruleDescCooldownMinutes.Validators[0].(func(int) error)
+	// usagealertruleDescEnabled is the schema descriptor for enabled field.
+	usagealertruleDescEnabled := usagealertruleFields[8].Descriptor()
+	// usagealertrule.DefaultEnabled holds the default value on creation for the enabled field.
+	usagealertrule.DefaultEnabled = usagealertruleDescEnabled.Default.(bool)
+	usagealertstateMixin := schema.UsageAlertState{}.Mixin()
+	usagealertstateMixinFields0 := usagealertstateMixin[0].Fields()
+	_ = usagealertstateMixinFields0
+	usagealertstateFields := schema.UsageAlertState{}.Fields()
+	_ = usagealertstateFields
+	// usagealertstateDescCreatedAt is the schema descriptor for created_at field.
+	usagealertstateDescCreatedAt := usagealertstateMixinFields0[0].Descriptor()
+	// usagealertstate.DefaultCreatedAt holds the default value on creation for the created_at field.
+	usagealertstate.DefaultCreatedAt = usagealertstateDescCreatedAt.Default.(func() time.Time)
+	// usagealertstateDescUpdatedAt is the schema descriptor for updated_at field.
+	usagealertstateDescUpdatedAt := usagealertstateMixinFields0[1].Descriptor()
+	// usagealertstate.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	usagealertstate.DefaultUpdatedAt = usagealertstateDescUpdatedAt.Default.(func() time.Time)
+	// usagealertstate.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	usagealertstate.UpdateDefaultUpdatedAt = usagealertstateDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// usagealertstateDescWindow is the schema descriptor for window field.
+	usagealertstateDescWindow := usagealertstateFields[2].Descriptor()
+	// usagealertstate.WindowValidator is a validator for the "window" field. It is called by the builders before save.
+	usagealertstate.WindowValidator = func() func(string) error {
+		validators := usagealertstateDescWindow.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(window string) error {
+			for _, fn := range fns {
+				if err := fn(window); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// usagealertstateDescLastStatus is the schema descriptor for last_status field.
+	usagealertstateDescLastStatus := usagealertstateFields[3].Descriptor()
+	// usagealertstate.DefaultLastStatus holds the default value on creation for the last_status field.
+	usagealertstate.DefaultLastStatus = usagealertstateDescLastStatus.Default.(string)
+	// usagealertstate.LastStatusValidator is a validator for the "last_status" field. It is called by the builders before save.
+	usagealertstate.LastStatusValidator = usagealertstateDescLastStatus.Validators[0].(func(string) error)
+	usagealertwebhookMixin := schema.UsageAlertWebhook{}.Mixin()
+	usagealertwebhookMixinHooks1 := usagealertwebhookMixin[1].Hooks()
+	usagealertwebhook.Hooks[0] = usagealertwebhookMixinHooks1[0]
+	usagealertwebhookMixinInters1 := usagealertwebhookMixin[1].Interceptors()
+	usagealertwebhook.Interceptors[0] = usagealertwebhookMixinInters1[0]
+	usagealertwebhookMixinFields0 := usagealertwebhookMixin[0].Fields()
+	_ = usagealertwebhookMixinFields0
+	usagealertwebhookFields := schema.UsageAlertWebhook{}.Fields()
+	_ = usagealertwebhookFields
+	// usagealertwebhookDescCreatedAt is the schema descriptor for created_at field.
+	usagealertwebhookDescCreatedAt := usagealertwebhookMixinFields0[0].Descriptor()
+	// usagealertwebhook.DefaultCreatedAt holds the default value on creation for the created_at field.
+	usagealertwebhook.DefaultCreatedAt = usagealertwebhookDescCreatedAt.Default.(func() time.Time)
+	// usagealertwebhookDescUpdatedAt is the schema descriptor for updated_at field.
+	usagealertwebhookDescUpdatedAt := usagealertwebhookMixinFields0[1].Descriptor()
+	// usagealertwebhook.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	usagealertwebhook.DefaultUpdatedAt = usagealertwebhookDescUpdatedAt.Default.(func() time.Time)
+	// usagealertwebhook.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	usagealertwebhook.UpdateDefaultUpdatedAt = usagealertwebhookDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// usagealertwebhookDescName is the schema descriptor for name field.
+	usagealertwebhookDescName := usagealertwebhookFields[0].Descriptor()
+	// usagealertwebhook.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	usagealertwebhook.NameValidator = func() func(string) error {
+		validators := usagealertwebhookDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// usagealertwebhookDescURL is the schema descriptor for url field.
+	usagealertwebhookDescURL := usagealertwebhookFields[1].Descriptor()
+	// usagealertwebhook.URLValidator is a validator for the "url" field. It is called by the builders before save.
+	usagealertwebhook.URLValidator = usagealertwebhookDescURL.Validators[0].(func(string) error)
+	// usagealertwebhookDescEnabled is the schema descriptor for enabled field.
+	usagealertwebhookDescEnabled := usagealertwebhookFields[2].Descriptor()
+	// usagealertwebhook.DefaultEnabled holds the default value on creation for the enabled field.
+	usagealertwebhook.DefaultEnabled = usagealertwebhookDescEnabled.Default.(bool)
+	// usagealertwebhookDescRetryCount is the schema descriptor for retry_count field.
+	usagealertwebhookDescRetryCount := usagealertwebhookFields[3].Descriptor()
+	// usagealertwebhook.DefaultRetryCount holds the default value on creation for the retry_count field.
+	usagealertwebhook.DefaultRetryCount = usagealertwebhookDescRetryCount.Default.(int)
+	// usagealertwebhook.RetryCountValidator is a validator for the "retry_count" field. It is called by the builders before save.
+	usagealertwebhook.RetryCountValidator = usagealertwebhookDescRetryCount.Validators[0].(func(int) error)
 	usagecleanuptaskMixin := schema.UsageCleanupTask{}.Mixin()
 	usagecleanuptaskMixinFields0 := usagecleanuptaskMixin[0].Fields()
 	_ = usagecleanuptaskMixinFields0

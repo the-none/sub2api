@@ -72,6 +72,12 @@ type PromoCodeUsage func(*sql.Selector)
 // Proxy is the predicate function for proxy builders.
 type Proxy func(*sql.Selector)
 
+// RealAccount is the predicate function for realaccount builders.
+type RealAccount func(*sql.Selector)
+
+// RealAccountUsageSnapshot is the predicate function for realaccountusagesnapshot builders.
+type RealAccountUsageSnapshot func(*sql.Selector)
+
 // RedeemCode is the predicate function for redeemcode builders.
 type RedeemCode func(*sql.Selector)
 
@@ -86,6 +92,18 @@ type SubscriptionPlan func(*sql.Selector)
 
 // TLSFingerprintProfile is the predicate function for tlsfingerprintprofile builders.
 type TLSFingerprintProfile func(*sql.Selector)
+
+// UsageAlertBinding is the predicate function for usagealertbinding builders.
+type UsageAlertBinding func(*sql.Selector)
+
+// UsageAlertRule is the predicate function for usagealertrule builders.
+type UsageAlertRule func(*sql.Selector)
+
+// UsageAlertState is the predicate function for usagealertstate builders.
+type UsageAlertState func(*sql.Selector)
+
+// UsageAlertWebhook is the predicate function for usagealertwebhook builders.
+type UsageAlertWebhook func(*sql.Selector)
 
 // UsageCleanupTask is the predicate function for usagecleanuptask builders.
 type UsageCleanupTask func(*sql.Selector)

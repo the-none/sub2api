@@ -391,6 +391,7 @@ export default {
     availableChannels: '可用渠道',
     subscriptions: '订阅管理',
     accounts: '账号管理',
+    usageAlerts: '用量告警',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
@@ -1433,6 +1434,10 @@ export default {
 
   // Admin
   admin: {
+    usageAlerts: {
+      title: '用量告警',
+      description: 'OAuth 账号真实账户、规则和 Webhook 配置'
+    },
     // Dashboard
     dashboard: {
       title: '管理控制台',

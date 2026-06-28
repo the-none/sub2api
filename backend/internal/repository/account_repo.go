@@ -107,6 +107,9 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	if account.ProxyID != nil {
 		builder.SetProxyID(*account.ProxyID)
 	}
+	if account.RealAccountID != nil {
+		builder.SetRealAccountID(*account.RealAccountID)
+	}
 	if account.LastUsedAt != nil {
 		builder.SetLastUsedAt(*account.LastUsedAt)
 	}
@@ -351,6 +354,11 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 		builder.SetProxyID(*account.ProxyID)
 	} else {
 		builder.ClearProxyID()
+	}
+	if account.RealAccountID != nil {
+		builder.SetRealAccountID(*account.RealAccountID)
+	} else {
+		builder.ClearRealAccountID()
 	}
 	if account.LastUsedAt != nil {
 		builder.SetLastUsedAt(*account.LastUsedAt)
@@ -1910,6 +1918,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		Extra:                   copyJSONMap(m.Extra),
 		ProxyID:                 m.ProxyID,
 		ProxyFallbackOriginID:   m.ProxyFallbackOriginID,
+		RealAccountID:           m.RealAccountID,
 		Concurrency:             m.Concurrency,
 		Priority:                m.Priority,
 		RateMultiplier:          &rateMultiplier,

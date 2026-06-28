@@ -58,6 +58,10 @@ type Tx struct {
 	PromoCodeUsage *PromoCodeUsageClient
 	// Proxy is the client for interacting with the Proxy builders.
 	Proxy *ProxyClient
+	// RealAccount is the client for interacting with the RealAccount builders.
+	RealAccount *RealAccountClient
+	// RealAccountUsageSnapshot is the client for interacting with the RealAccountUsageSnapshot builders.
+	RealAccountUsageSnapshot *RealAccountUsageSnapshotClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
 	RedeemCode *RedeemCodeClient
 	// SecuritySecret is the client for interacting with the SecuritySecret builders.
@@ -68,6 +72,14 @@ type Tx struct {
 	SubscriptionPlan *SubscriptionPlanClient
 	// TLSFingerprintProfile is the client for interacting with the TLSFingerprintProfile builders.
 	TLSFingerprintProfile *TLSFingerprintProfileClient
+	// UsageAlertBinding is the client for interacting with the UsageAlertBinding builders.
+	UsageAlertBinding *UsageAlertBindingClient
+	// UsageAlertRule is the client for interacting with the UsageAlertRule builders.
+	UsageAlertRule *UsageAlertRuleClient
+	// UsageAlertState is the client for interacting with the UsageAlertState builders.
+	UsageAlertState *UsageAlertStateClient
+	// UsageAlertWebhook is the client for interacting with the UsageAlertWebhook builders.
+	UsageAlertWebhook *UsageAlertWebhookClient
 	// UsageCleanupTask is the client for interacting with the UsageCleanupTask builders.
 	UsageCleanupTask *UsageCleanupTaskClient
 	// UsageLog is the client for interacting with the UsageLog builders.
@@ -237,11 +249,17 @@ func (tx *Tx) init() {
 	tx.PromoCode = NewPromoCodeClient(tx.config)
 	tx.PromoCodeUsage = NewPromoCodeUsageClient(tx.config)
 	tx.Proxy = NewProxyClient(tx.config)
+	tx.RealAccount = NewRealAccountClient(tx.config)
+	tx.RealAccountUsageSnapshot = NewRealAccountUsageSnapshotClient(tx.config)
 	tx.RedeemCode = NewRedeemCodeClient(tx.config)
 	tx.SecuritySecret = NewSecuritySecretClient(tx.config)
 	tx.Setting = NewSettingClient(tx.config)
 	tx.SubscriptionPlan = NewSubscriptionPlanClient(tx.config)
 	tx.TLSFingerprintProfile = NewTLSFingerprintProfileClient(tx.config)
+	tx.UsageAlertBinding = NewUsageAlertBindingClient(tx.config)
+	tx.UsageAlertRule = NewUsageAlertRuleClient(tx.config)
+	tx.UsageAlertState = NewUsageAlertStateClient(tx.config)
+	tx.UsageAlertWebhook = NewUsageAlertWebhookClient(tx.config)
 	tx.UsageCleanupTask = NewUsageCleanupTaskClient(tx.config)
 	tx.UsageLog = NewUsageLogClient(tx.config)
 	tx.User = NewUserClient(tx.config)

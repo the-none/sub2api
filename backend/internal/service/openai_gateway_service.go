@@ -358,6 +358,7 @@ type OpenAIGatewayService struct {
 	balanceNotifyService  *BalanceNotifyService
 	settingService        *SettingService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	usageAlertService     *UsageAlertService
 
 	openaiWSPoolOnce              sync.Once
 	openaiWSStateStoreOnce        sync.Once
@@ -448,6 +449,10 @@ func NewOpenAIGatewayService(
 	}
 	svc.logOpenAIWSModeBootstrap()
 	return svc
+}
+
+func (s *OpenAIGatewayService) SetUsageAlertService(alertService *UsageAlertService) {
+	s.usageAlertService = alertService
 }
 
 // ResolveChannelMapping 解析渠道级模型映射（代理到 ChannelService）
@@ -6686,6 +6691,9 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
 	}
 	if !s.getCodexSnapshotThrottle().Allow(accountID, now) {
 		return
+	}
+	if s.usageAlertService != nil {
+		s.usageAlertService.Observe(ctx, usageAlertSnapshotFromCodexExtra(accountID, UsageAlertSourceOpenAICodexHeaders, updates, now))
 	}
 
 	go func() {

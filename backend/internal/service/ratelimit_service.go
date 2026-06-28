@@ -30,6 +30,7 @@ type RateLimitService struct {
 	settingService        *SettingService
 	tokenCacheInvalidator TokenCacheInvalidator
 	runtimeBlocker        AccountRuntimeBlocker
+	usageAlertService     *UsageAlertService
 	usageCacheMu          sync.RWMutex
 	usageCache            map[int64]*geminiUsageCacheEntry
 }
@@ -114,6 +115,10 @@ func (s *RateLimitService) SetTokenCacheInvalidator(invalidator TokenCacheInvali
 
 func (s *RateLimitService) SetAccountRuntimeBlocker(blocker AccountRuntimeBlocker) {
 	s.runtimeBlocker = blocker
+}
+
+func (s *RateLimitService) SetUsageAlertService(alertService *UsageAlertService) {
+	s.usageAlertService = alertService
 }
 
 func (s *RateLimitService) notifyAccountSchedulingBlocked(account *Account, until time.Time, reason string) {
@@ -1554,6 +1559,7 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 			slog.Warn("passive_usage_update_failed", "account_id", account.ID, "error", err)
 		}
 	}
+	s.observeClaudeUsageHeaders(ctx, account, headers, windowEnd)
 
 	// 如果状态为allowed且之前有限流，说明窗口已重置，清除限流状态
 	if status == "allowed" && account.IsRateLimited() {
@@ -1561,6 +1567,65 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 			slog.Warn("rate_limit_clear_failed", "account_id", account.ID, "error", err)
 		}
 	}
+}
+
+func (s *RateLimitService) observeClaudeUsageHeaders(ctx context.Context, account *Account, headers http.Header, windowEnd *time.Time) {
+	if s == nil || s.usageAlertService == nil || account == nil || headers == nil {
+		return
+	}
+	if account.Platform != PlatformAnthropic {
+		return
+	}
+	windows := make(map[string]UsageAlertWindowSnapshot, 2)
+	if used, ok := parseAnthropicUtilizationPercent(headers.Get("anthropic-ratelimit-unified-5h-utilization")); ok {
+		resetAt := parseAnthropicUnixHeaderTime(headers.Get("anthropic-ratelimit-unified-5h-reset"))
+		if resetAt == nil && windowEnd != nil {
+			resetAt = windowEnd
+		}
+		if resetAt == nil && account.SessionWindowEnd != nil {
+			resetAt = account.SessionWindowEnd
+		}
+		windows[UsageAlertWindow5h] = UsageAlertWindowSnapshot{
+			UsedPercent:      used,
+			RemainingPercent: usageAlertRemainingPercent(used),
+			ResetAt:          resetAt,
+		}
+	}
+	if used, ok := parseAnthropicUtilizationPercent(headers.Get("anthropic-ratelimit-unified-7d-utilization")); ok {
+		windows[UsageAlertWindow7d] = UsageAlertWindowSnapshot{
+			UsedPercent:      used,
+			RemainingPercent: usageAlertRemainingPercent(used),
+			ResetAt:          parseAnthropicUnixHeaderTime(headers.Get("anthropic-ratelimit-unified-7d-reset")),
+		}
+	}
+	snapshot := usageAlertSnapshotFromWindows(account.ID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeHeaders, windows, time.Now())
+	s.usageAlertService.Observe(ctx, snapshot)
+}
+
+func parseAnthropicUtilizationPercent(raw string) (float64, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false
+	}
+	return value * 100, true
+}
+
+func parseAnthropicUnixHeaderTime(raw string) *time.Time {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	ts, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil
+	}
+	if ts > 1e11 {
+		ts = ts / 1000
+	}
+	t := time.Unix(ts, 0)
+	return &t
 }
 
 // ClearRateLimit 清除账号的限流状态

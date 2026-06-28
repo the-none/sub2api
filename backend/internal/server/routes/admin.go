@@ -80,6 +80,9 @@ func RegisterAdminRoutes(
 		// 使用记录管理
 		registerUsageRoutes(admin, h)
 
+		// OAuth 用量告警
+		registerUsageAlertRoutes(admin, h)
+
 		// 用户属性管理
 		registerUserAttributeRoutes(admin, h)
 
@@ -578,6 +581,47 @@ func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		usage.GET("/cleanup-tasks", h.Admin.Usage.ListCleanupTasks)
 		usage.POST("/cleanup-tasks", h.Admin.Usage.CreateCleanupTask)
 		usage.POST("/cleanup-tasks/:id/cancel", h.Admin.Usage.CancelCleanupTask)
+	}
+}
+
+func registerUsageAlertRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	alerts := admin.Group("/usage-alert")
+	{
+		realAccounts := alerts.Group("/real-accounts")
+		{
+			realAccounts.GET("", h.Admin.UsageAlert.ListRealAccounts)
+			realAccounts.POST("", h.Admin.UsageAlert.CreateRealAccount)
+			realAccounts.GET("/:id", h.Admin.UsageAlert.GetRealAccount)
+			realAccounts.PUT("/:id", h.Admin.UsageAlert.UpdateRealAccount)
+			realAccounts.DELETE("/:id", h.Admin.UsageAlert.DeleteRealAccount)
+			realAccounts.GET("/:id/snapshot", h.Admin.UsageAlert.GetSnapshot)
+			realAccounts.POST("/:id/accounts", h.Admin.UsageAlert.AttachAccounts)
+			realAccounts.DELETE("/:id/accounts/:account_id", h.Admin.UsageAlert.DetachAccount)
+		}
+
+		rules := alerts.Group("/rules")
+		{
+			rules.GET("", h.Admin.UsageAlert.ListRules)
+			rules.POST("", h.Admin.UsageAlert.CreateRule)
+			rules.PUT("/:id", h.Admin.UsageAlert.UpdateRule)
+			rules.DELETE("/:id", h.Admin.UsageAlert.DeleteRule)
+		}
+
+		webhooks := alerts.Group("/webhooks")
+		{
+			webhooks.GET("", h.Admin.UsageAlert.ListWebhooks)
+			webhooks.POST("", h.Admin.UsageAlert.CreateWebhook)
+			webhooks.PUT("/:id", h.Admin.UsageAlert.UpdateWebhook)
+			webhooks.DELETE("/:id", h.Admin.UsageAlert.DeleteWebhook)
+		}
+
+		bindings := alerts.Group("/bindings")
+		{
+			bindings.GET("", h.Admin.UsageAlert.ListBindings)
+			bindings.POST("", h.Admin.UsageAlert.CreateBinding)
+			bindings.PUT("/:id", h.Admin.UsageAlert.UpdateBinding)
+			bindings.DELETE("/:id", h.Admin.UsageAlert.DeleteBinding)
+		}
 	}
 }
 

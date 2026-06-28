@@ -37,11 +37,17 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
+	"github.com/Wei-Shaw/sub2api/ent/realaccountusagesnapshot"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertbinding"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertwebhook"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -103,6 +109,10 @@ type Client struct {
 	PromoCodeUsage *PromoCodeUsageClient
 	// Proxy is the client for interacting with the Proxy builders.
 	Proxy *ProxyClient
+	// RealAccount is the client for interacting with the RealAccount builders.
+	RealAccount *RealAccountClient
+	// RealAccountUsageSnapshot is the client for interacting with the RealAccountUsageSnapshot builders.
+	RealAccountUsageSnapshot *RealAccountUsageSnapshotClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
 	RedeemCode *RedeemCodeClient
 	// SecuritySecret is the client for interacting with the SecuritySecret builders.
@@ -113,6 +123,14 @@ type Client struct {
 	SubscriptionPlan *SubscriptionPlanClient
 	// TLSFingerprintProfile is the client for interacting with the TLSFingerprintProfile builders.
 	TLSFingerprintProfile *TLSFingerprintProfileClient
+	// UsageAlertBinding is the client for interacting with the UsageAlertBinding builders.
+	UsageAlertBinding *UsageAlertBindingClient
+	// UsageAlertRule is the client for interacting with the UsageAlertRule builders.
+	UsageAlertRule *UsageAlertRuleClient
+	// UsageAlertState is the client for interacting with the UsageAlertState builders.
+	UsageAlertState *UsageAlertStateClient
+	// UsageAlertWebhook is the client for interacting with the UsageAlertWebhook builders.
+	UsageAlertWebhook *UsageAlertWebhookClient
 	// UsageCleanupTask is the client for interacting with the UsageCleanupTask builders.
 	UsageCleanupTask *UsageCleanupTaskClient
 	// UsageLog is the client for interacting with the UsageLog builders.
@@ -162,11 +180,17 @@ func (c *Client) init() {
 	c.PromoCode = NewPromoCodeClient(c.config)
 	c.PromoCodeUsage = NewPromoCodeUsageClient(c.config)
 	c.Proxy = NewProxyClient(c.config)
+	c.RealAccount = NewRealAccountClient(c.config)
+	c.RealAccountUsageSnapshot = NewRealAccountUsageSnapshotClient(c.config)
 	c.RedeemCode = NewRedeemCodeClient(c.config)
 	c.SecuritySecret = NewSecuritySecretClient(c.config)
 	c.Setting = NewSettingClient(c.config)
 	c.SubscriptionPlan = NewSubscriptionPlanClient(c.config)
 	c.TLSFingerprintProfile = NewTLSFingerprintProfileClient(c.config)
+	c.UsageAlertBinding = NewUsageAlertBindingClient(c.config)
+	c.UsageAlertRule = NewUsageAlertRuleClient(c.config)
+	c.UsageAlertState = NewUsageAlertStateClient(c.config)
+	c.UsageAlertWebhook = NewUsageAlertWebhookClient(c.config)
 	c.UsageCleanupTask = NewUsageCleanupTaskClient(c.config)
 	c.UsageLog = NewUsageLogClient(c.config)
 	c.User = NewUserClient(c.config)
@@ -289,11 +313,17 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
+		RealAccount:                   NewRealAccountClient(cfg),
+		RealAccountUsageSnapshot:      NewRealAccountUsageSnapshotClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
 		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
+		UsageAlertBinding:             NewUsageAlertBindingClient(cfg),
+		UsageAlertRule:                NewUsageAlertRuleClient(cfg),
+		UsageAlertState:               NewUsageAlertStateClient(cfg),
+		UsageAlertWebhook:             NewUsageAlertWebhookClient(cfg),
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
 		UsageLog:                      NewUsageLogClient(cfg),
 		User:                          NewUserClient(cfg),
@@ -343,11 +373,17 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
+		RealAccount:                   NewRealAccountClient(cfg),
+		RealAccountUsageSnapshot:      NewRealAccountUsageSnapshotClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
 		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
+		UsageAlertBinding:             NewUsageAlertBindingClient(cfg),
+		UsageAlertRule:                NewUsageAlertRuleClient(cfg),
+		UsageAlertState:               NewUsageAlertStateClient(cfg),
+		UsageAlertWebhook:             NewUsageAlertWebhookClient(cfg),
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
 		UsageLog:                      NewUsageLogClient(cfg),
 		User:                          NewUserClient(cfg),
@@ -391,9 +427,11 @@ func (c *Client) Use(hooks ...Hook) {
 		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
-		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
-		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.PromoCodeUsage, c.Proxy, c.RealAccount, c.RealAccountUsageSnapshot,
+		c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
+		c.TLSFingerprintProfile, c.UsageAlertBinding, c.UsageAlertRule,
+		c.UsageAlertState, c.UsageAlertWebhook, c.UsageCleanupTask, c.UsageLog, c.User,
+		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
@@ -410,9 +448,11 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
-		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
-		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.PromoCodeUsage, c.Proxy, c.RealAccount, c.RealAccountUsageSnapshot,
+		c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
+		c.TLSFingerprintProfile, c.UsageAlertBinding, c.UsageAlertRule,
+		c.UsageAlertState, c.UsageAlertWebhook, c.UsageCleanupTask, c.UsageLog, c.User,
+		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
@@ -466,6 +506,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.PromoCodeUsage.mutate(ctx, m)
 	case *ProxyMutation:
 		return c.Proxy.mutate(ctx, m)
+	case *RealAccountMutation:
+		return c.RealAccount.mutate(ctx, m)
+	case *RealAccountUsageSnapshotMutation:
+		return c.RealAccountUsageSnapshot.mutate(ctx, m)
 	case *RedeemCodeMutation:
 		return c.RedeemCode.mutate(ctx, m)
 	case *SecuritySecretMutation:
@@ -476,6 +520,14 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.SubscriptionPlan.mutate(ctx, m)
 	case *TLSFingerprintProfileMutation:
 		return c.TLSFingerprintProfile.mutate(ctx, m)
+	case *UsageAlertBindingMutation:
+		return c.UsageAlertBinding.mutate(ctx, m)
+	case *UsageAlertRuleMutation:
+		return c.UsageAlertRule.mutate(ctx, m)
+	case *UsageAlertStateMutation:
+		return c.UsageAlertState.mutate(ctx, m)
+	case *UsageAlertWebhookMutation:
+		return c.UsageAlertWebhook.mutate(ctx, m)
 	case *UsageCleanupTaskMutation:
 		return c.UsageCleanupTask.mutate(ctx, m)
 	case *UsageLogMutation:
@@ -813,6 +865,22 @@ func (c *AccountClient) QueryProxy(_m *Account) *ProxyQuery {
 			sqlgraph.From(account.Table, account.FieldID, id),
 			sqlgraph.To(proxy.Table, proxy.FieldID),
 			sqlgraph.Edge(sqlgraph.M2O, false, account.ProxyTable, account.ProxyColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryRealAccount queries the real_account edge of a Account.
+func (c *AccountClient) QueryRealAccount(_m *Account) *RealAccountQuery {
+	query := (&RealAccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(account.Table, account.FieldID, id),
+			sqlgraph.To(realaccount.Table, realaccount.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, account.RealAccountTable, account.RealAccountColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -4022,6 +4090,354 @@ func (c *ProxyClient) mutate(ctx context.Context, m *ProxyMutation) (Value, erro
 	}
 }
 
+// RealAccountClient is a client for the RealAccount schema.
+type RealAccountClient struct {
+	config
+}
+
+// NewRealAccountClient returns a client for the RealAccount from the given config.
+func NewRealAccountClient(c config) *RealAccountClient {
+	return &RealAccountClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `realaccount.Hooks(f(g(h())))`.
+func (c *RealAccountClient) Use(hooks ...Hook) {
+	c.hooks.RealAccount = append(c.hooks.RealAccount, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `realaccount.Intercept(f(g(h())))`.
+func (c *RealAccountClient) Intercept(interceptors ...Interceptor) {
+	c.inters.RealAccount = append(c.inters.RealAccount, interceptors...)
+}
+
+// Create returns a builder for creating a RealAccount entity.
+func (c *RealAccountClient) Create() *RealAccountCreate {
+	mutation := newRealAccountMutation(c.config, OpCreate)
+	return &RealAccountCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of RealAccount entities.
+func (c *RealAccountClient) CreateBulk(builders ...*RealAccountCreate) *RealAccountCreateBulk {
+	return &RealAccountCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *RealAccountClient) MapCreateBulk(slice any, setFunc func(*RealAccountCreate, int)) *RealAccountCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &RealAccountCreateBulk{err: fmt.Errorf("calling to RealAccountClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*RealAccountCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &RealAccountCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for RealAccount.
+func (c *RealAccountClient) Update() *RealAccountUpdate {
+	mutation := newRealAccountMutation(c.config, OpUpdate)
+	return &RealAccountUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *RealAccountClient) UpdateOne(_m *RealAccount) *RealAccountUpdateOne {
+	mutation := newRealAccountMutation(c.config, OpUpdateOne, withRealAccount(_m))
+	return &RealAccountUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *RealAccountClient) UpdateOneID(id int64) *RealAccountUpdateOne {
+	mutation := newRealAccountMutation(c.config, OpUpdateOne, withRealAccountID(id))
+	return &RealAccountUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for RealAccount.
+func (c *RealAccountClient) Delete() *RealAccountDelete {
+	mutation := newRealAccountMutation(c.config, OpDelete)
+	return &RealAccountDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *RealAccountClient) DeleteOne(_m *RealAccount) *RealAccountDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *RealAccountClient) DeleteOneID(id int64) *RealAccountDeleteOne {
+	builder := c.Delete().Where(realaccount.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &RealAccountDeleteOne{builder}
+}
+
+// Query returns a query builder for RealAccount.
+func (c *RealAccountClient) Query() *RealAccountQuery {
+	return &RealAccountQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeRealAccount},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a RealAccount entity by its id.
+func (c *RealAccountClient) Get(ctx context.Context, id int64) (*RealAccount, error) {
+	return c.Query().Where(realaccount.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *RealAccountClient) GetX(ctx context.Context, id int64) *RealAccount {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryAccounts queries the accounts edge of a RealAccount.
+func (c *RealAccountClient) QueryAccounts(_m *RealAccount) *AccountQuery {
+	query := (&AccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(realaccount.Table, realaccount.FieldID, id),
+			sqlgraph.To(account.Table, account.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, realaccount.AccountsTable, realaccount.AccountsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryUsageSnapshot queries the usage_snapshot edge of a RealAccount.
+func (c *RealAccountClient) QueryUsageSnapshot(_m *RealAccount) *RealAccountUsageSnapshotQuery {
+	query := (&RealAccountUsageSnapshotClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(realaccount.Table, realaccount.FieldID, id),
+			sqlgraph.To(realaccountusagesnapshot.Table, realaccountusagesnapshot.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, realaccount.UsageSnapshotTable, realaccount.UsageSnapshotColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryWebhookBindings queries the webhook_bindings edge of a RealAccount.
+func (c *RealAccountClient) QueryWebhookBindings(_m *RealAccount) *UsageAlertBindingQuery {
+	query := (&UsageAlertBindingClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(realaccount.Table, realaccount.FieldID, id),
+			sqlgraph.To(usagealertbinding.Table, usagealertbinding.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, realaccount.WebhookBindingsTable, realaccount.WebhookBindingsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryAlertStates queries the alert_states edge of a RealAccount.
+func (c *RealAccountClient) QueryAlertStates(_m *RealAccount) *UsageAlertStateQuery {
+	query := (&UsageAlertStateClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(realaccount.Table, realaccount.FieldID, id),
+			sqlgraph.To(usagealertstate.Table, usagealertstate.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, realaccount.AlertStatesTable, realaccount.AlertStatesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *RealAccountClient) Hooks() []Hook {
+	hooks := c.hooks.RealAccount
+	return append(hooks[:len(hooks):len(hooks)], realaccount.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *RealAccountClient) Interceptors() []Interceptor {
+	inters := c.inters.RealAccount
+	return append(inters[:len(inters):len(inters)], realaccount.Interceptors[:]...)
+}
+
+func (c *RealAccountClient) mutate(ctx context.Context, m *RealAccountMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&RealAccountCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&RealAccountUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&RealAccountUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&RealAccountDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown RealAccount mutation op: %q", m.Op())
+	}
+}
+
+// RealAccountUsageSnapshotClient is a client for the RealAccountUsageSnapshot schema.
+type RealAccountUsageSnapshotClient struct {
+	config
+}
+
+// NewRealAccountUsageSnapshotClient returns a client for the RealAccountUsageSnapshot from the given config.
+func NewRealAccountUsageSnapshotClient(c config) *RealAccountUsageSnapshotClient {
+	return &RealAccountUsageSnapshotClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `realaccountusagesnapshot.Hooks(f(g(h())))`.
+func (c *RealAccountUsageSnapshotClient) Use(hooks ...Hook) {
+	c.hooks.RealAccountUsageSnapshot = append(c.hooks.RealAccountUsageSnapshot, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `realaccountusagesnapshot.Intercept(f(g(h())))`.
+func (c *RealAccountUsageSnapshotClient) Intercept(interceptors ...Interceptor) {
+	c.inters.RealAccountUsageSnapshot = append(c.inters.RealAccountUsageSnapshot, interceptors...)
+}
+
+// Create returns a builder for creating a RealAccountUsageSnapshot entity.
+func (c *RealAccountUsageSnapshotClient) Create() *RealAccountUsageSnapshotCreate {
+	mutation := newRealAccountUsageSnapshotMutation(c.config, OpCreate)
+	return &RealAccountUsageSnapshotCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of RealAccountUsageSnapshot entities.
+func (c *RealAccountUsageSnapshotClient) CreateBulk(builders ...*RealAccountUsageSnapshotCreate) *RealAccountUsageSnapshotCreateBulk {
+	return &RealAccountUsageSnapshotCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *RealAccountUsageSnapshotClient) MapCreateBulk(slice any, setFunc func(*RealAccountUsageSnapshotCreate, int)) *RealAccountUsageSnapshotCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &RealAccountUsageSnapshotCreateBulk{err: fmt.Errorf("calling to RealAccountUsageSnapshotClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*RealAccountUsageSnapshotCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &RealAccountUsageSnapshotCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for RealAccountUsageSnapshot.
+func (c *RealAccountUsageSnapshotClient) Update() *RealAccountUsageSnapshotUpdate {
+	mutation := newRealAccountUsageSnapshotMutation(c.config, OpUpdate)
+	return &RealAccountUsageSnapshotUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *RealAccountUsageSnapshotClient) UpdateOne(_m *RealAccountUsageSnapshot) *RealAccountUsageSnapshotUpdateOne {
+	mutation := newRealAccountUsageSnapshotMutation(c.config, OpUpdateOne, withRealAccountUsageSnapshot(_m))
+	return &RealAccountUsageSnapshotUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *RealAccountUsageSnapshotClient) UpdateOneID(id int64) *RealAccountUsageSnapshotUpdateOne {
+	mutation := newRealAccountUsageSnapshotMutation(c.config, OpUpdateOne, withRealAccountUsageSnapshotID(id))
+	return &RealAccountUsageSnapshotUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for RealAccountUsageSnapshot.
+func (c *RealAccountUsageSnapshotClient) Delete() *RealAccountUsageSnapshotDelete {
+	mutation := newRealAccountUsageSnapshotMutation(c.config, OpDelete)
+	return &RealAccountUsageSnapshotDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *RealAccountUsageSnapshotClient) DeleteOne(_m *RealAccountUsageSnapshot) *RealAccountUsageSnapshotDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *RealAccountUsageSnapshotClient) DeleteOneID(id int64) *RealAccountUsageSnapshotDeleteOne {
+	builder := c.Delete().Where(realaccountusagesnapshot.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &RealAccountUsageSnapshotDeleteOne{builder}
+}
+
+// Query returns a query builder for RealAccountUsageSnapshot.
+func (c *RealAccountUsageSnapshotClient) Query() *RealAccountUsageSnapshotQuery {
+	return &RealAccountUsageSnapshotQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeRealAccountUsageSnapshot},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a RealAccountUsageSnapshot entity by its id.
+func (c *RealAccountUsageSnapshotClient) Get(ctx context.Context, id int64) (*RealAccountUsageSnapshot, error) {
+	return c.Query().Where(realaccountusagesnapshot.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *RealAccountUsageSnapshotClient) GetX(ctx context.Context, id int64) *RealAccountUsageSnapshot {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryRealAccount queries the real_account edge of a RealAccountUsageSnapshot.
+func (c *RealAccountUsageSnapshotClient) QueryRealAccount(_m *RealAccountUsageSnapshot) *RealAccountQuery {
+	query := (&RealAccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(realaccountusagesnapshot.Table, realaccountusagesnapshot.FieldID, id),
+			sqlgraph.To(realaccount.Table, realaccount.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, realaccountusagesnapshot.RealAccountTable, realaccountusagesnapshot.RealAccountColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *RealAccountUsageSnapshotClient) Hooks() []Hook {
+	return c.hooks.RealAccountUsageSnapshot
+}
+
+// Interceptors returns the client interceptors.
+func (c *RealAccountUsageSnapshotClient) Interceptors() []Interceptor {
+	return c.inters.RealAccountUsageSnapshot
+}
+
+func (c *RealAccountUsageSnapshotClient) mutate(ctx context.Context, m *RealAccountUsageSnapshotMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&RealAccountUsageSnapshotCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&RealAccountUsageSnapshotUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&RealAccountUsageSnapshotUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&RealAccountUsageSnapshotDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown RealAccountUsageSnapshot mutation op: %q", m.Op())
+	}
+}
+
 // RedeemCodeClient is a client for the RedeemCode schema.
 type RedeemCodeClient struct {
 	config
@@ -4716,6 +5132,638 @@ func (c *TLSFingerprintProfileClient) mutate(ctx context.Context, m *TLSFingerpr
 		return (&TLSFingerprintProfileDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown TLSFingerprintProfile mutation op: %q", m.Op())
+	}
+}
+
+// UsageAlertBindingClient is a client for the UsageAlertBinding schema.
+type UsageAlertBindingClient struct {
+	config
+}
+
+// NewUsageAlertBindingClient returns a client for the UsageAlertBinding from the given config.
+func NewUsageAlertBindingClient(c config) *UsageAlertBindingClient {
+	return &UsageAlertBindingClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usagealertbinding.Hooks(f(g(h())))`.
+func (c *UsageAlertBindingClient) Use(hooks ...Hook) {
+	c.hooks.UsageAlertBinding = append(c.hooks.UsageAlertBinding, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usagealertbinding.Intercept(f(g(h())))`.
+func (c *UsageAlertBindingClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UsageAlertBinding = append(c.inters.UsageAlertBinding, interceptors...)
+}
+
+// Create returns a builder for creating a UsageAlertBinding entity.
+func (c *UsageAlertBindingClient) Create() *UsageAlertBindingCreate {
+	mutation := newUsageAlertBindingMutation(c.config, OpCreate)
+	return &UsageAlertBindingCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UsageAlertBinding entities.
+func (c *UsageAlertBindingClient) CreateBulk(builders ...*UsageAlertBindingCreate) *UsageAlertBindingCreateBulk {
+	return &UsageAlertBindingCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UsageAlertBindingClient) MapCreateBulk(slice any, setFunc func(*UsageAlertBindingCreate, int)) *UsageAlertBindingCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UsageAlertBindingCreateBulk{err: fmt.Errorf("calling to UsageAlertBindingClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UsageAlertBindingCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UsageAlertBindingCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UsageAlertBinding.
+func (c *UsageAlertBindingClient) Update() *UsageAlertBindingUpdate {
+	mutation := newUsageAlertBindingMutation(c.config, OpUpdate)
+	return &UsageAlertBindingUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UsageAlertBindingClient) UpdateOne(_m *UsageAlertBinding) *UsageAlertBindingUpdateOne {
+	mutation := newUsageAlertBindingMutation(c.config, OpUpdateOne, withUsageAlertBinding(_m))
+	return &UsageAlertBindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UsageAlertBindingClient) UpdateOneID(id int64) *UsageAlertBindingUpdateOne {
+	mutation := newUsageAlertBindingMutation(c.config, OpUpdateOne, withUsageAlertBindingID(id))
+	return &UsageAlertBindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UsageAlertBinding.
+func (c *UsageAlertBindingClient) Delete() *UsageAlertBindingDelete {
+	mutation := newUsageAlertBindingMutation(c.config, OpDelete)
+	return &UsageAlertBindingDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UsageAlertBindingClient) DeleteOne(_m *UsageAlertBinding) *UsageAlertBindingDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UsageAlertBindingClient) DeleteOneID(id int64) *UsageAlertBindingDeleteOne {
+	builder := c.Delete().Where(usagealertbinding.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UsageAlertBindingDeleteOne{builder}
+}
+
+// Query returns a query builder for UsageAlertBinding.
+func (c *UsageAlertBindingClient) Query() *UsageAlertBindingQuery {
+	return &UsageAlertBindingQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUsageAlertBinding},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UsageAlertBinding entity by its id.
+func (c *UsageAlertBindingClient) Get(ctx context.Context, id int64) (*UsageAlertBinding, error) {
+	return c.Query().Where(usagealertbinding.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UsageAlertBindingClient) GetX(ctx context.Context, id int64) *UsageAlertBinding {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryRealAccount queries the real_account edge of a UsageAlertBinding.
+func (c *UsageAlertBindingClient) QueryRealAccount(_m *UsageAlertBinding) *RealAccountQuery {
+	query := (&RealAccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagealertbinding.Table, usagealertbinding.FieldID, id),
+			sqlgraph.To(realaccount.Table, realaccount.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, usagealertbinding.RealAccountTable, usagealertbinding.RealAccountColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryWebhook queries the webhook edge of a UsageAlertBinding.
+func (c *UsageAlertBindingClient) QueryWebhook(_m *UsageAlertBinding) *UsageAlertWebhookQuery {
+	query := (&UsageAlertWebhookClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagealertbinding.Table, usagealertbinding.FieldID, id),
+			sqlgraph.To(usagealertwebhook.Table, usagealertwebhook.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, usagealertbinding.WebhookTable, usagealertbinding.WebhookColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UsageAlertBindingClient) Hooks() []Hook {
+	return c.hooks.UsageAlertBinding
+}
+
+// Interceptors returns the client interceptors.
+func (c *UsageAlertBindingClient) Interceptors() []Interceptor {
+	return c.inters.UsageAlertBinding
+}
+
+func (c *UsageAlertBindingClient) mutate(ctx context.Context, m *UsageAlertBindingMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UsageAlertBindingCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UsageAlertBindingUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UsageAlertBindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UsageAlertBindingDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UsageAlertBinding mutation op: %q", m.Op())
+	}
+}
+
+// UsageAlertRuleClient is a client for the UsageAlertRule schema.
+type UsageAlertRuleClient struct {
+	config
+}
+
+// NewUsageAlertRuleClient returns a client for the UsageAlertRule from the given config.
+func NewUsageAlertRuleClient(c config) *UsageAlertRuleClient {
+	return &UsageAlertRuleClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usagealertrule.Hooks(f(g(h())))`.
+func (c *UsageAlertRuleClient) Use(hooks ...Hook) {
+	c.hooks.UsageAlertRule = append(c.hooks.UsageAlertRule, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usagealertrule.Intercept(f(g(h())))`.
+func (c *UsageAlertRuleClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UsageAlertRule = append(c.inters.UsageAlertRule, interceptors...)
+}
+
+// Create returns a builder for creating a UsageAlertRule entity.
+func (c *UsageAlertRuleClient) Create() *UsageAlertRuleCreate {
+	mutation := newUsageAlertRuleMutation(c.config, OpCreate)
+	return &UsageAlertRuleCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UsageAlertRule entities.
+func (c *UsageAlertRuleClient) CreateBulk(builders ...*UsageAlertRuleCreate) *UsageAlertRuleCreateBulk {
+	return &UsageAlertRuleCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UsageAlertRuleClient) MapCreateBulk(slice any, setFunc func(*UsageAlertRuleCreate, int)) *UsageAlertRuleCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UsageAlertRuleCreateBulk{err: fmt.Errorf("calling to UsageAlertRuleClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UsageAlertRuleCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UsageAlertRuleCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UsageAlertRule.
+func (c *UsageAlertRuleClient) Update() *UsageAlertRuleUpdate {
+	mutation := newUsageAlertRuleMutation(c.config, OpUpdate)
+	return &UsageAlertRuleUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UsageAlertRuleClient) UpdateOne(_m *UsageAlertRule) *UsageAlertRuleUpdateOne {
+	mutation := newUsageAlertRuleMutation(c.config, OpUpdateOne, withUsageAlertRule(_m))
+	return &UsageAlertRuleUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UsageAlertRuleClient) UpdateOneID(id int64) *UsageAlertRuleUpdateOne {
+	mutation := newUsageAlertRuleMutation(c.config, OpUpdateOne, withUsageAlertRuleID(id))
+	return &UsageAlertRuleUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UsageAlertRule.
+func (c *UsageAlertRuleClient) Delete() *UsageAlertRuleDelete {
+	mutation := newUsageAlertRuleMutation(c.config, OpDelete)
+	return &UsageAlertRuleDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UsageAlertRuleClient) DeleteOne(_m *UsageAlertRule) *UsageAlertRuleDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UsageAlertRuleClient) DeleteOneID(id int64) *UsageAlertRuleDeleteOne {
+	builder := c.Delete().Where(usagealertrule.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UsageAlertRuleDeleteOne{builder}
+}
+
+// Query returns a query builder for UsageAlertRule.
+func (c *UsageAlertRuleClient) Query() *UsageAlertRuleQuery {
+	return &UsageAlertRuleQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUsageAlertRule},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UsageAlertRule entity by its id.
+func (c *UsageAlertRuleClient) Get(ctx context.Context, id int64) (*UsageAlertRule, error) {
+	return c.Query().Where(usagealertrule.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UsageAlertRuleClient) GetX(ctx context.Context, id int64) *UsageAlertRule {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryStates queries the states edge of a UsageAlertRule.
+func (c *UsageAlertRuleClient) QueryStates(_m *UsageAlertRule) *UsageAlertStateQuery {
+	query := (&UsageAlertStateClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagealertrule.Table, usagealertrule.FieldID, id),
+			sqlgraph.To(usagealertstate.Table, usagealertstate.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, usagealertrule.StatesTable, usagealertrule.StatesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UsageAlertRuleClient) Hooks() []Hook {
+	hooks := c.hooks.UsageAlertRule
+	return append(hooks[:len(hooks):len(hooks)], usagealertrule.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *UsageAlertRuleClient) Interceptors() []Interceptor {
+	inters := c.inters.UsageAlertRule
+	return append(inters[:len(inters):len(inters)], usagealertrule.Interceptors[:]...)
+}
+
+func (c *UsageAlertRuleClient) mutate(ctx context.Context, m *UsageAlertRuleMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UsageAlertRuleCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UsageAlertRuleUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UsageAlertRuleUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UsageAlertRuleDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UsageAlertRule mutation op: %q", m.Op())
+	}
+}
+
+// UsageAlertStateClient is a client for the UsageAlertState schema.
+type UsageAlertStateClient struct {
+	config
+}
+
+// NewUsageAlertStateClient returns a client for the UsageAlertState from the given config.
+func NewUsageAlertStateClient(c config) *UsageAlertStateClient {
+	return &UsageAlertStateClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usagealertstate.Hooks(f(g(h())))`.
+func (c *UsageAlertStateClient) Use(hooks ...Hook) {
+	c.hooks.UsageAlertState = append(c.hooks.UsageAlertState, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usagealertstate.Intercept(f(g(h())))`.
+func (c *UsageAlertStateClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UsageAlertState = append(c.inters.UsageAlertState, interceptors...)
+}
+
+// Create returns a builder for creating a UsageAlertState entity.
+func (c *UsageAlertStateClient) Create() *UsageAlertStateCreate {
+	mutation := newUsageAlertStateMutation(c.config, OpCreate)
+	return &UsageAlertStateCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UsageAlertState entities.
+func (c *UsageAlertStateClient) CreateBulk(builders ...*UsageAlertStateCreate) *UsageAlertStateCreateBulk {
+	return &UsageAlertStateCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UsageAlertStateClient) MapCreateBulk(slice any, setFunc func(*UsageAlertStateCreate, int)) *UsageAlertStateCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UsageAlertStateCreateBulk{err: fmt.Errorf("calling to UsageAlertStateClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UsageAlertStateCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UsageAlertStateCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UsageAlertState.
+func (c *UsageAlertStateClient) Update() *UsageAlertStateUpdate {
+	mutation := newUsageAlertStateMutation(c.config, OpUpdate)
+	return &UsageAlertStateUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UsageAlertStateClient) UpdateOne(_m *UsageAlertState) *UsageAlertStateUpdateOne {
+	mutation := newUsageAlertStateMutation(c.config, OpUpdateOne, withUsageAlertState(_m))
+	return &UsageAlertStateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UsageAlertStateClient) UpdateOneID(id int64) *UsageAlertStateUpdateOne {
+	mutation := newUsageAlertStateMutation(c.config, OpUpdateOne, withUsageAlertStateID(id))
+	return &UsageAlertStateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UsageAlertState.
+func (c *UsageAlertStateClient) Delete() *UsageAlertStateDelete {
+	mutation := newUsageAlertStateMutation(c.config, OpDelete)
+	return &UsageAlertStateDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UsageAlertStateClient) DeleteOne(_m *UsageAlertState) *UsageAlertStateDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UsageAlertStateClient) DeleteOneID(id int64) *UsageAlertStateDeleteOne {
+	builder := c.Delete().Where(usagealertstate.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UsageAlertStateDeleteOne{builder}
+}
+
+// Query returns a query builder for UsageAlertState.
+func (c *UsageAlertStateClient) Query() *UsageAlertStateQuery {
+	return &UsageAlertStateQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUsageAlertState},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UsageAlertState entity by its id.
+func (c *UsageAlertStateClient) Get(ctx context.Context, id int64) (*UsageAlertState, error) {
+	return c.Query().Where(usagealertstate.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UsageAlertStateClient) GetX(ctx context.Context, id int64) *UsageAlertState {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryRealAccount queries the real_account edge of a UsageAlertState.
+func (c *UsageAlertStateClient) QueryRealAccount(_m *UsageAlertState) *RealAccountQuery {
+	query := (&RealAccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagealertstate.Table, usagealertstate.FieldID, id),
+			sqlgraph.To(realaccount.Table, realaccount.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, usagealertstate.RealAccountTable, usagealertstate.RealAccountColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryRule queries the rule edge of a UsageAlertState.
+func (c *UsageAlertStateClient) QueryRule(_m *UsageAlertState) *UsageAlertRuleQuery {
+	query := (&UsageAlertRuleClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagealertstate.Table, usagealertstate.FieldID, id),
+			sqlgraph.To(usagealertrule.Table, usagealertrule.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, usagealertstate.RuleTable, usagealertstate.RuleColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UsageAlertStateClient) Hooks() []Hook {
+	return c.hooks.UsageAlertState
+}
+
+// Interceptors returns the client interceptors.
+func (c *UsageAlertStateClient) Interceptors() []Interceptor {
+	return c.inters.UsageAlertState
+}
+
+func (c *UsageAlertStateClient) mutate(ctx context.Context, m *UsageAlertStateMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UsageAlertStateCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UsageAlertStateUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UsageAlertStateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UsageAlertStateDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UsageAlertState mutation op: %q", m.Op())
+	}
+}
+
+// UsageAlertWebhookClient is a client for the UsageAlertWebhook schema.
+type UsageAlertWebhookClient struct {
+	config
+}
+
+// NewUsageAlertWebhookClient returns a client for the UsageAlertWebhook from the given config.
+func NewUsageAlertWebhookClient(c config) *UsageAlertWebhookClient {
+	return &UsageAlertWebhookClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usagealertwebhook.Hooks(f(g(h())))`.
+func (c *UsageAlertWebhookClient) Use(hooks ...Hook) {
+	c.hooks.UsageAlertWebhook = append(c.hooks.UsageAlertWebhook, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usagealertwebhook.Intercept(f(g(h())))`.
+func (c *UsageAlertWebhookClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UsageAlertWebhook = append(c.inters.UsageAlertWebhook, interceptors...)
+}
+
+// Create returns a builder for creating a UsageAlertWebhook entity.
+func (c *UsageAlertWebhookClient) Create() *UsageAlertWebhookCreate {
+	mutation := newUsageAlertWebhookMutation(c.config, OpCreate)
+	return &UsageAlertWebhookCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UsageAlertWebhook entities.
+func (c *UsageAlertWebhookClient) CreateBulk(builders ...*UsageAlertWebhookCreate) *UsageAlertWebhookCreateBulk {
+	return &UsageAlertWebhookCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UsageAlertWebhookClient) MapCreateBulk(slice any, setFunc func(*UsageAlertWebhookCreate, int)) *UsageAlertWebhookCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UsageAlertWebhookCreateBulk{err: fmt.Errorf("calling to UsageAlertWebhookClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UsageAlertWebhookCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UsageAlertWebhookCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UsageAlertWebhook.
+func (c *UsageAlertWebhookClient) Update() *UsageAlertWebhookUpdate {
+	mutation := newUsageAlertWebhookMutation(c.config, OpUpdate)
+	return &UsageAlertWebhookUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UsageAlertWebhookClient) UpdateOne(_m *UsageAlertWebhook) *UsageAlertWebhookUpdateOne {
+	mutation := newUsageAlertWebhookMutation(c.config, OpUpdateOne, withUsageAlertWebhook(_m))
+	return &UsageAlertWebhookUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UsageAlertWebhookClient) UpdateOneID(id int64) *UsageAlertWebhookUpdateOne {
+	mutation := newUsageAlertWebhookMutation(c.config, OpUpdateOne, withUsageAlertWebhookID(id))
+	return &UsageAlertWebhookUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UsageAlertWebhook.
+func (c *UsageAlertWebhookClient) Delete() *UsageAlertWebhookDelete {
+	mutation := newUsageAlertWebhookMutation(c.config, OpDelete)
+	return &UsageAlertWebhookDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UsageAlertWebhookClient) DeleteOne(_m *UsageAlertWebhook) *UsageAlertWebhookDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UsageAlertWebhookClient) DeleteOneID(id int64) *UsageAlertWebhookDeleteOne {
+	builder := c.Delete().Where(usagealertwebhook.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UsageAlertWebhookDeleteOne{builder}
+}
+
+// Query returns a query builder for UsageAlertWebhook.
+func (c *UsageAlertWebhookClient) Query() *UsageAlertWebhookQuery {
+	return &UsageAlertWebhookQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUsageAlertWebhook},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UsageAlertWebhook entity by its id.
+func (c *UsageAlertWebhookClient) Get(ctx context.Context, id int64) (*UsageAlertWebhook, error) {
+	return c.Query().Where(usagealertwebhook.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UsageAlertWebhookClient) GetX(ctx context.Context, id int64) *UsageAlertWebhook {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryBindings queries the bindings edge of a UsageAlertWebhook.
+func (c *UsageAlertWebhookClient) QueryBindings(_m *UsageAlertWebhook) *UsageAlertBindingQuery {
+	query := (&UsageAlertBindingClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagealertwebhook.Table, usagealertwebhook.FieldID, id),
+			sqlgraph.To(usagealertbinding.Table, usagealertbinding.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, usagealertwebhook.BindingsTable, usagealertwebhook.BindingsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UsageAlertWebhookClient) Hooks() []Hook {
+	hooks := c.hooks.UsageAlertWebhook
+	return append(hooks[:len(hooks):len(hooks)], usagealertwebhook.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *UsageAlertWebhookClient) Interceptors() []Interceptor {
+	inters := c.inters.UsageAlertWebhook
+	return append(inters[:len(inters):len(inters)], usagealertwebhook.Interceptors[:]...)
+}
+
+func (c *UsageAlertWebhookClient) mutate(ctx context.Context, m *UsageAlertWebhookMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UsageAlertWebhookCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UsageAlertWebhookUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UsageAlertWebhookUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UsageAlertWebhookDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UsageAlertWebhook mutation op: %q", m.Op())
 	}
 }
 
@@ -6214,10 +7262,11 @@ type (
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		PromoCodeUsage, Proxy, RealAccount, RealAccountUsageSnapshot, RedeemCode,
+		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageAlertBinding, UsageAlertRule, UsageAlertState, UsageAlertWebhook,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -6225,10 +7274,11 @@ type (
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		PromoCodeUsage, Proxy, RealAccount, RealAccountUsageSnapshot, RedeemCode,
+		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageAlertBinding, UsageAlertRule, UsageAlertState, UsageAlertWebhook,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

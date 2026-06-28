@@ -125,6 +125,7 @@ var (
 		{Name: "session_window_end", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "session_window_status", Type: field.TypeString, Nullable: true, Size: 20},
 		{Name: "proxy_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "real_account_id", Type: field.TypeInt64, Nullable: true},
 	}
 	// AccountsTable holds the schema information for the "accounts" table.
 	AccountsTable = &schema.Table{
@@ -136,6 +137,12 @@ var (
 				Symbol:     "accounts_proxies_proxy",
 				Columns:    []*schema.Column{AccountsColumns[29]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+			{
+				Symbol:     "accounts_real_accounts_real_account",
+				Columns:    []*schema.Column{AccountsColumns[30]},
+				RefColumns: []*schema.Column{RealAccountsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 		},
@@ -159,6 +166,11 @@ var (
 				Name:    "account_proxy_id",
 				Unique:  false,
 				Columns: []*schema.Column{AccountsColumns[29]},
+			},
+			{
+				Name:    "account_real_account_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[30]},
 			},
 			{
 				Name:    "account_priority",
@@ -1147,6 +1159,77 @@ var (
 			},
 		},
 	}
+	// RealAccountsColumns holds the columns for the "real_accounts" table.
+	RealAccountsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "platform", Type: field.TypeString, Size: 50},
+		{Name: "identifier", Type: field.TypeString, Nullable: true, Size: 255},
+		{Name: "notes", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+	}
+	// RealAccountsTable holds the schema information for the "real_accounts" table.
+	RealAccountsTable = &schema.Table{
+		Name:       "real_accounts",
+		Columns:    RealAccountsColumns,
+		PrimaryKey: []*schema.Column{RealAccountsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "realaccount_platform",
+				Unique:  false,
+				Columns: []*schema.Column{RealAccountsColumns[5]},
+			},
+			{
+				Name:    "realaccount_name",
+				Unique:  false,
+				Columns: []*schema.Column{RealAccountsColumns[4]},
+			},
+		},
+	}
+	// RealAccountUsageSnapshotsColumns holds the columns for the "real_account_usage_snapshots" table.
+	RealAccountUsageSnapshotsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "platform", Type: field.TypeString, Size: 50},
+		{Name: "source", Type: field.TypeString, Size: 64},
+		{Name: "snapshot_json", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "sampled_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "real_account_id", Type: field.TypeInt64},
+	}
+	// RealAccountUsageSnapshotsTable holds the schema information for the "real_account_usage_snapshots" table.
+	RealAccountUsageSnapshotsTable = &schema.Table{
+		Name:       "real_account_usage_snapshots",
+		Columns:    RealAccountUsageSnapshotsColumns,
+		PrimaryKey: []*schema.Column{RealAccountUsageSnapshotsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "real_account_usage_snapshots_real_accounts_real_account",
+				Columns:    []*schema.Column{RealAccountUsageSnapshotsColumns[7]},
+				RefColumns: []*schema.Column{RealAccountsColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "realaccountusagesnapshot_real_account_id",
+				Unique:  true,
+				Columns: []*schema.Column{RealAccountUsageSnapshotsColumns[7]},
+			},
+			{
+				Name:    "realaccountusagesnapshot_platform",
+				Unique:  false,
+				Columns: []*schema.Column{RealAccountUsageSnapshotsColumns[3]},
+			},
+			{
+				Name:    "realaccountusagesnapshot_sampled_at",
+				Unique:  false,
+				Columns: []*schema.Column{RealAccountUsageSnapshotsColumns[6]},
+			},
+		},
+	}
 	// RedeemCodesColumns holds the columns for the "redeem_codes" table.
 	RedeemCodesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1289,6 +1372,155 @@ var (
 		Name:       "tls_fingerprint_profiles",
 		Columns:    TLSFingerprintProfilesColumns,
 		PrimaryKey: []*schema.Column{TLSFingerprintProfilesColumns[0]},
+	}
+	// UsageAlertBindingsColumns holds the columns for the "usage_alert_bindings" table.
+	UsageAlertBindingsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "real_account_id", Type: field.TypeInt64},
+		{Name: "webhook_id", Type: field.TypeInt64},
+	}
+	// UsageAlertBindingsTable holds the schema information for the "usage_alert_bindings" table.
+	UsageAlertBindingsTable = &schema.Table{
+		Name:       "usage_alert_bindings",
+		Columns:    UsageAlertBindingsColumns,
+		PrimaryKey: []*schema.Column{UsageAlertBindingsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "usage_alert_bindings_real_accounts_real_account",
+				Columns:    []*schema.Column{UsageAlertBindingsColumns[4]},
+				RefColumns: []*schema.Column{RealAccountsColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+			{
+				Symbol:     "usage_alert_bindings_usage_alert_webhooks_webhook",
+				Columns:    []*schema.Column{UsageAlertBindingsColumns[5]},
+				RefColumns: []*schema.Column{UsageAlertWebhooksColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "usagealertbinding_real_account_id_webhook_id",
+				Unique:  true,
+				Columns: []*schema.Column{UsageAlertBindingsColumns[4], UsageAlertBindingsColumns[5]},
+			},
+			{
+				Name:    "usagealertbinding_webhook_id",
+				Unique:  false,
+				Columns: []*schema.Column{UsageAlertBindingsColumns[5]},
+			},
+		},
+	}
+	// UsageAlertRulesColumns holds the columns for the "usage_alert_rules" table.
+	UsageAlertRulesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "platform", Type: field.TypeString, Size: 50, Default: "all"},
+		{Name: "window", Type: field.TypeString, Size: 32},
+		{Name: "metric", Type: field.TypeString, Size: 32},
+		{Name: "operator", Type: field.TypeString, Size: 4},
+		{Name: "threshold", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
+		{Name: "min_reset_after_hours", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
+		{Name: "cooldown_minutes", Type: field.TypeInt, Default: 240},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+	}
+	// UsageAlertRulesTable holds the schema information for the "usage_alert_rules" table.
+	UsageAlertRulesTable = &schema.Table{
+		Name:       "usage_alert_rules",
+		Columns:    UsageAlertRulesColumns,
+		PrimaryKey: []*schema.Column{UsageAlertRulesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "usagealertrule_enabled_platform",
+				Unique:  false,
+				Columns: []*schema.Column{UsageAlertRulesColumns[12], UsageAlertRulesColumns[5]},
+			},
+			{
+				Name:    "usagealertrule_window",
+				Unique:  false,
+				Columns: []*schema.Column{UsageAlertRulesColumns[6]},
+			},
+		},
+	}
+	// UsageAlertStatesColumns holds the columns for the "usage_alert_states" table.
+	UsageAlertStatesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "window", Type: field.TypeString, Size: 32},
+		{Name: "last_status", Type: field.TypeString, Size: 20, Default: "normal"},
+		{Name: "last_triggered_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "last_value", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
+		{Name: "last_reset_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "real_account_id", Type: field.TypeInt64},
+		{Name: "rule_id", Type: field.TypeInt64},
+	}
+	// UsageAlertStatesTable holds the schema information for the "usage_alert_states" table.
+	UsageAlertStatesTable = &schema.Table{
+		Name:       "usage_alert_states",
+		Columns:    UsageAlertStatesColumns,
+		PrimaryKey: []*schema.Column{UsageAlertStatesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "usage_alert_states_real_accounts_real_account",
+				Columns:    []*schema.Column{UsageAlertStatesColumns[8]},
+				RefColumns: []*schema.Column{RealAccountsColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+			{
+				Symbol:     "usage_alert_states_usage_alert_rules_rule",
+				Columns:    []*schema.Column{UsageAlertStatesColumns[9]},
+				RefColumns: []*schema.Column{UsageAlertRulesColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "usagealertstate_real_account_id_rule_id_window",
+				Unique:  true,
+				Columns: []*schema.Column{UsageAlertStatesColumns[8], UsageAlertStatesColumns[9], UsageAlertStatesColumns[3]},
+			},
+			{
+				Name:    "usagealertstate_rule_id",
+				Unique:  false,
+				Columns: []*schema.Column{UsageAlertStatesColumns[9]},
+			},
+		},
+	}
+	// UsageAlertWebhooksColumns holds the columns for the "usage_alert_webhooks" table.
+	UsageAlertWebhooksColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "url", Type: field.TypeString, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "retry_count", Type: field.TypeInt, Default: 2},
+	}
+	// UsageAlertWebhooksTable holds the schema information for the "usage_alert_webhooks" table.
+	UsageAlertWebhooksTable = &schema.Table{
+		Name:       "usage_alert_webhooks",
+		Columns:    UsageAlertWebhooksColumns,
+		PrimaryKey: []*schema.Column{UsageAlertWebhooksColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "usagealertwebhook_enabled",
+				Unique:  false,
+				Columns: []*schema.Column{UsageAlertWebhooksColumns[6]},
+			},
+			{
+				Name:    "usagealertwebhook_name",
+				Unique:  false,
+				Columns: []*schema.Column{UsageAlertWebhooksColumns[4]},
+			},
+		},
 	}
 	// UsageCleanupTasksColumns holds the columns for the "usage_cleanup_tasks" table.
 	UsageCleanupTasksColumns = []*schema.Column{
@@ -1797,11 +2029,17 @@ var (
 		PromoCodesTable,
 		PromoCodeUsagesTable,
 		ProxiesTable,
+		RealAccountsTable,
+		RealAccountUsageSnapshotsTable,
 		RedeemCodesTable,
 		SecuritySecretsTable,
 		SettingsTable,
 		SubscriptionPlansTable,
 		TLSFingerprintProfilesTable,
+		UsageAlertBindingsTable,
+		UsageAlertRulesTable,
+		UsageAlertStatesTable,
+		UsageAlertWebhooksTable,
 		UsageCleanupTasksTable,
 		UsageLogsTable,
 		UsersTable,
@@ -1820,6 +2058,7 @@ func init() {
 		Table: "api_keys",
 	}
 	AccountsTable.ForeignKeys[0].RefTable = ProxiesTable
+	AccountsTable.ForeignKeys[1].RefTable = RealAccountsTable
 	AccountsTable.Annotation = &entsql.Annotation{
 		Table: "accounts",
 	}
@@ -1899,6 +2138,13 @@ func init() {
 	ProxiesTable.Annotation = &entsql.Annotation{
 		Table: "proxies",
 	}
+	RealAccountsTable.Annotation = &entsql.Annotation{
+		Table: "real_accounts",
+	}
+	RealAccountUsageSnapshotsTable.ForeignKeys[0].RefTable = RealAccountsTable
+	RealAccountUsageSnapshotsTable.Annotation = &entsql.Annotation{
+		Table: "real_account_usage_snapshots",
+	}
 	RedeemCodesTable.ForeignKeys[0].RefTable = GroupsTable
 	RedeemCodesTable.ForeignKeys[1].RefTable = UsersTable
 	RedeemCodesTable.Annotation = &entsql.Annotation{
@@ -1915,6 +2161,22 @@ func init() {
 	}
 	TLSFingerprintProfilesTable.Annotation = &entsql.Annotation{
 		Table: "tls_fingerprint_profiles",
+	}
+	UsageAlertBindingsTable.ForeignKeys[0].RefTable = RealAccountsTable
+	UsageAlertBindingsTable.ForeignKeys[1].RefTable = UsageAlertWebhooksTable
+	UsageAlertBindingsTable.Annotation = &entsql.Annotation{
+		Table: "usage_alert_bindings",
+	}
+	UsageAlertRulesTable.Annotation = &entsql.Annotation{
+		Table: "usage_alert_rules",
+	}
+	UsageAlertStatesTable.ForeignKeys[0].RefTable = RealAccountsTable
+	UsageAlertStatesTable.ForeignKeys[1].RefTable = UsageAlertRulesTable
+	UsageAlertStatesTable.Annotation = &entsql.Annotation{
+		Table: "usage_alert_states",
+	}
+	UsageAlertWebhooksTable.Annotation = &entsql.Annotation{
+		Table: "usage_alert_webhooks",
 	}
 	UsageCleanupTasksTable.Annotation = &entsql.Annotation{
 		Table: "usage_cleanup_tasks",

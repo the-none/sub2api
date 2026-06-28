@@ -100,6 +100,11 @@ func ProxyFallbackOriginID(v int64) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldProxyFallbackOriginID, v))
 }
 
+// RealAccountID applies equality check predicate on the "real_account_id" field. It's identical to RealAccountIDEQ.
+func RealAccountID(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldRealAccountID, v))
+}
+
 // Concurrency applies equality check predicate on the "concurrency" field. It's identical to ConcurrencyEQ.
 func Concurrency(v int) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldConcurrency, v))
@@ -668,6 +673,36 @@ func ProxyFallbackOriginIDIsNil() predicate.Account {
 // ProxyFallbackOriginIDNotNil applies the NotNil predicate on the "proxy_fallback_origin_id" field.
 func ProxyFallbackOriginIDNotNil() predicate.Account {
 	return predicate.Account(sql.FieldNotNull(FieldProxyFallbackOriginID))
+}
+
+// RealAccountIDEQ applies the EQ predicate on the "real_account_id" field.
+func RealAccountIDEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldRealAccountID, v))
+}
+
+// RealAccountIDNEQ applies the NEQ predicate on the "real_account_id" field.
+func RealAccountIDNEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldRealAccountID, v))
+}
+
+// RealAccountIDIn applies the In predicate on the "real_account_id" field.
+func RealAccountIDIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldRealAccountID, vs...))
+}
+
+// RealAccountIDNotIn applies the NotIn predicate on the "real_account_id" field.
+func RealAccountIDNotIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldRealAccountID, vs...))
+}
+
+// RealAccountIDIsNil applies the IsNil predicate on the "real_account_id" field.
+func RealAccountIDIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldRealAccountID))
+}
+
+// RealAccountIDNotNil applies the NotNil predicate on the "real_account_id" field.
+func RealAccountIDNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldRealAccountID))
 }
 
 // ConcurrencyEQ applies the EQ predicate on the "concurrency" field.
@@ -1588,6 +1623,29 @@ func HasProxy() predicate.Account {
 func HasProxyWith(preds ...predicate.Proxy) predicate.Account {
 	return predicate.Account(func(s *sql.Selector) {
 		step := newProxyStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasRealAccount applies the HasEdge predicate on the "real_account" edge.
+func HasRealAccount() predicate.Account {
+	return predicate.Account(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, RealAccountTable, RealAccountColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasRealAccountWith applies the HasEdge predicate on the "real_account" edge with a given conditions (other predicates).
+func HasRealAccountWith(preds ...predicate.RealAccount) predicate.Account {
+	return predicate.Account(func(s *sql.Selector) {
+		step := newRealAccountStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

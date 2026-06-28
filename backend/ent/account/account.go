@@ -37,6 +37,8 @@ const (
 	FieldProxyID = "proxy_id"
 	// FieldProxyFallbackOriginID holds the string denoting the proxy_fallback_origin_id field in the database.
 	FieldProxyFallbackOriginID = "proxy_fallback_origin_id"
+	// FieldRealAccountID holds the string denoting the real_account_id field in the database.
+	FieldRealAccountID = "real_account_id"
 	// FieldConcurrency holds the string denoting the concurrency field in the database.
 	FieldConcurrency = "concurrency"
 	// FieldLoadFactor holds the string denoting the load_factor field in the database.
@@ -77,6 +79,8 @@ const (
 	EdgeGroups = "groups"
 	// EdgeProxy holds the string denoting the proxy edge name in mutations.
 	EdgeProxy = "proxy"
+	// EdgeRealAccount holds the string denoting the real_account edge name in mutations.
+	EdgeRealAccount = "real_account"
 	// EdgeUsageLogs holds the string denoting the usage_logs edge name in mutations.
 	EdgeUsageLogs = "usage_logs"
 	// EdgeAccountGroups holds the string denoting the account_groups edge name in mutations.
@@ -95,6 +99,13 @@ const (
 	ProxyInverseTable = "proxies"
 	// ProxyColumn is the table column denoting the proxy relation/edge.
 	ProxyColumn = "proxy_id"
+	// RealAccountTable is the table that holds the real_account relation/edge.
+	RealAccountTable = "accounts"
+	// RealAccountInverseTable is the table name for the RealAccount entity.
+	// It exists in this package in order to avoid circular dependency with the "realaccount" package.
+	RealAccountInverseTable = "real_accounts"
+	// RealAccountColumn is the table column denoting the real_account relation/edge.
+	RealAccountColumn = "real_account_id"
 	// UsageLogsTable is the table that holds the usage_logs relation/edge.
 	UsageLogsTable = "usage_logs"
 	// UsageLogsInverseTable is the table name for the UsageLog entity.
@@ -125,6 +136,7 @@ var Columns = []string{
 	FieldExtra,
 	FieldProxyID,
 	FieldProxyFallbackOriginID,
+	FieldRealAccountID,
 	FieldConcurrency,
 	FieldLoadFactor,
 	FieldPriority,
@@ -256,6 +268,11 @@ func ByProxyFallbackOriginID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldProxyFallbackOriginID, opts...).ToFunc()
 }
 
+// ByRealAccountID orders the results by the real_account_id field.
+func ByRealAccountID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRealAccountID, opts...).ToFunc()
+}
+
 // ByConcurrency orders the results by the concurrency field.
 func ByConcurrency(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldConcurrency, opts...).ToFunc()
@@ -367,6 +384,13 @@ func ByProxyField(field string, opts ...sql.OrderTermOption) OrderOption {
 	}
 }
 
+// ByRealAccountField orders the results by real_account field.
+func ByRealAccountField(field string, opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newRealAccountStep(), sql.OrderByField(field, opts...))
+	}
+}
+
 // ByUsageLogsCount orders the results by usage_logs count.
 func ByUsageLogsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -406,6 +430,13 @@ func newProxyStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(ProxyInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.M2O, false, ProxyTable, ProxyColumn),
+	)
+}
+func newRealAccountStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(RealAccountInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2O, false, RealAccountTable, RealAccountColumn),
 	)
 }
 func newUsageLogsStep() *sqlgraph.Step {

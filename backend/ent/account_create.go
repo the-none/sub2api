@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
 
@@ -135,6 +136,20 @@ func (_c *AccountCreate) SetProxyFallbackOriginID(v int64) *AccountCreate {
 func (_c *AccountCreate) SetNillableProxyFallbackOriginID(v *int64) *AccountCreate {
 	if v != nil {
 		_c.SetProxyFallbackOriginID(*v)
+	}
+	return _c
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (_c *AccountCreate) SetRealAccountID(v int64) *AccountCreate {
+	_c.mutation.SetRealAccountID(v)
+	return _c
+}
+
+// SetNillableRealAccountID sets the "real_account_id" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableRealAccountID(v *int64) *AccountCreate {
+	if v != nil {
+		_c.SetRealAccountID(*v)
 	}
 	return _c
 }
@@ -409,6 +424,11 @@ func (_c *AccountCreate) AddGroups(v ...*Group) *AccountCreate {
 // SetProxy sets the "proxy" edge to the Proxy entity.
 func (_c *AccountCreate) SetProxy(v *Proxy) *AccountCreate {
 	return _c.SetProxyID(v.ID)
+}
+
+// SetRealAccount sets the "real_account" edge to the RealAccount entity.
+func (_c *AccountCreate) SetRealAccount(v *RealAccount) *AccountCreate {
+	return _c.SetRealAccountID(v.ID)
 }
 
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
@@ -760,6 +780,23 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 		_node.ProxyID = &nodes[0]
 		_spec.Edges = append(_spec.Edges, edge)
 	}
+	if nodes := _c.mutation.RealAccountIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   account.RealAccountTable,
+			Columns: []string{account.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.RealAccountID = &nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
 	if nodes := _c.mutation.UsageLogsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -975,6 +1012,24 @@ func (u *AccountUpsert) AddProxyFallbackOriginID(v int64) *AccountUpsert {
 // ClearProxyFallbackOriginID clears the value of the "proxy_fallback_origin_id" field.
 func (u *AccountUpsert) ClearProxyFallbackOriginID() *AccountUpsert {
 	u.SetNull(account.FieldProxyFallbackOriginID)
+	return u
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (u *AccountUpsert) SetRealAccountID(v int64) *AccountUpsert {
+	u.Set(account.FieldRealAccountID, v)
+	return u
+}
+
+// UpdateRealAccountID sets the "real_account_id" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateRealAccountID() *AccountUpsert {
+	u.SetExcluded(account.FieldRealAccountID)
+	return u
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (u *AccountUpsert) ClearRealAccountID() *AccountUpsert {
+	u.SetNull(account.FieldRealAccountID)
 	return u
 }
 
@@ -1507,6 +1562,27 @@ func (u *AccountUpsertOne) UpdateProxyFallbackOriginID() *AccountUpsertOne {
 func (u *AccountUpsertOne) ClearProxyFallbackOriginID() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearProxyFallbackOriginID()
+	})
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (u *AccountUpsertOne) SetRealAccountID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetRealAccountID(v)
+	})
+}
+
+// UpdateRealAccountID sets the "real_account_id" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateRealAccountID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateRealAccountID()
+	})
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (u *AccountUpsertOne) ClearRealAccountID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearRealAccountID()
 	})
 }
 
@@ -2257,6 +2333,27 @@ func (u *AccountUpsertBulk) UpdateProxyFallbackOriginID() *AccountUpsertBulk {
 func (u *AccountUpsertBulk) ClearProxyFallbackOriginID() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearProxyFallbackOriginID()
+	})
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (u *AccountUpsertBulk) SetRealAccountID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetRealAccountID(v)
+	})
+}
+
+// UpdateRealAccountID sets the "real_account_id" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateRealAccountID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateRealAccountID()
+	})
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (u *AccountUpsertBulk) ClearRealAccountID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearRealAccountID()
 	})
 }
 

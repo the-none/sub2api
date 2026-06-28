@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
 
@@ -175,6 +176,26 @@ func (_u *AccountUpdate) AddProxyFallbackOriginID(v int64) *AccountUpdate {
 // ClearProxyFallbackOriginID clears the value of the "proxy_fallback_origin_id" field.
 func (_u *AccountUpdate) ClearProxyFallbackOriginID() *AccountUpdate {
 	_u.mutation.ClearProxyFallbackOriginID()
+	return _u
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (_u *AccountUpdate) SetRealAccountID(v int64) *AccountUpdate {
+	_u.mutation.SetRealAccountID(v)
+	return _u
+}
+
+// SetNillableRealAccountID sets the "real_account_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableRealAccountID(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetRealAccountID(*v)
+	}
+	return _u
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (_u *AccountUpdate) ClearRealAccountID() *AccountUpdate {
+	_u.mutation.ClearRealAccountID()
 	return _u
 }
 
@@ -550,6 +571,11 @@ func (_u *AccountUpdate) SetProxy(v *Proxy) *AccountUpdate {
 	return _u.SetProxyID(v.ID)
 }
 
+// SetRealAccount sets the "real_account" edge to the RealAccount entity.
+func (_u *AccountUpdate) SetRealAccount(v *RealAccount) *AccountUpdate {
+	return _u.SetRealAccountID(v.ID)
+}
+
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
 func (_u *AccountUpdate) AddUsageLogIDs(ids ...int64) *AccountUpdate {
 	_u.mutation.AddUsageLogIDs(ids...)
@@ -594,6 +620,12 @@ func (_u *AccountUpdate) RemoveGroups(v ...*Group) *AccountUpdate {
 // ClearProxy clears the "proxy" edge to the Proxy entity.
 func (_u *AccountUpdate) ClearProxy() *AccountUpdate {
 	_u.mutation.ClearProxy()
+	return _u
+}
+
+// ClearRealAccount clears the "real_account" edge to the RealAccount entity.
+func (_u *AccountUpdate) ClearRealAccount() *AccountUpdate {
+	_u.mutation.ClearRealAccount()
 	return _u
 }
 
@@ -929,6 +961,35 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.RealAccountCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   account.RealAccountTable,
+			Columns: []string{account.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RealAccountIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   account.RealAccountTable,
+			Columns: []string{account.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.UsageLogsCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -1138,6 +1199,26 @@ func (_u *AccountUpdateOne) AddProxyFallbackOriginID(v int64) *AccountUpdateOne 
 // ClearProxyFallbackOriginID clears the value of the "proxy_fallback_origin_id" field.
 func (_u *AccountUpdateOne) ClearProxyFallbackOriginID() *AccountUpdateOne {
 	_u.mutation.ClearProxyFallbackOriginID()
+	return _u
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (_u *AccountUpdateOne) SetRealAccountID(v int64) *AccountUpdateOne {
+	_u.mutation.SetRealAccountID(v)
+	return _u
+}
+
+// SetNillableRealAccountID sets the "real_account_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableRealAccountID(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetRealAccountID(*v)
+	}
+	return _u
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (_u *AccountUpdateOne) ClearRealAccountID() *AccountUpdateOne {
+	_u.mutation.ClearRealAccountID()
 	return _u
 }
 
@@ -1513,6 +1594,11 @@ func (_u *AccountUpdateOne) SetProxy(v *Proxy) *AccountUpdateOne {
 	return _u.SetProxyID(v.ID)
 }
 
+// SetRealAccount sets the "real_account" edge to the RealAccount entity.
+func (_u *AccountUpdateOne) SetRealAccount(v *RealAccount) *AccountUpdateOne {
+	return _u.SetRealAccountID(v.ID)
+}
+
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
 func (_u *AccountUpdateOne) AddUsageLogIDs(ids ...int64) *AccountUpdateOne {
 	_u.mutation.AddUsageLogIDs(ids...)
@@ -1557,6 +1643,12 @@ func (_u *AccountUpdateOne) RemoveGroups(v ...*Group) *AccountUpdateOne {
 // ClearProxy clears the "proxy" edge to the Proxy entity.
 func (_u *AccountUpdateOne) ClearProxy() *AccountUpdateOne {
 	_u.mutation.ClearProxy()
+	return _u
+}
+
+// ClearRealAccount clears the "real_account" edge to the RealAccount entity.
+func (_u *AccountUpdateOne) ClearRealAccount() *AccountUpdateOne {
+	_u.mutation.ClearRealAccount()
 	return _u
 }
 
@@ -1915,6 +2007,35 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.RealAccountCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   account.RealAccountTable,
+			Columns: []string{account.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RealAccountIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   account.RealAccountTable,
+			Columns: []string{account.RealAccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(realaccount.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

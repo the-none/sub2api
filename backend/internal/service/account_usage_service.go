@@ -279,6 +279,7 @@ type AccountUsageService struct {
 	cache                   *UsageCache
 	identityCache           IdentityCache
 	tlsFPProfileService     *TLSFingerprintProfileService
+	usageAlertService       *UsageAlertService
 }
 
 // NewAccountUsageService 创建AccountUsageService实例
@@ -304,6 +305,10 @@ func NewAccountUsageService(
 		identityCache:           identityCache,
 		tlsFPProfileService:     tlsFPProfileService,
 	}
+}
+
+func (s *AccountUsageService) SetUsageAlertService(alertService *UsageAlertService) {
+	s.usageAlertService = alertService
 }
 
 // GetUsage 获取账号使用量
@@ -435,6 +440,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		usage := s.estimateSetupTokenUsage(account)
 		// 添加窗口统计
 		s.addWindowStats(ctx, account, usage)
+		s.observeUsageAlert(ctx, account.ID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeHeaders, usage)
 		return usage, nil
 	}
 
@@ -490,6 +496,7 @@ func (s *AccountUsageService) GetPassiveUsage(ctx context.Context, accountID int
 
 	// 添加窗口统计
 	s.addWindowStats(ctx, account, info)
+	s.observeUsageAlert(ctx, account.ID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeHeaders, info)
 
 	return info, nil
 }
@@ -523,6 +530,7 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 			slog.Warn("sync_active_to_passive_session_window_end_failed", "account_id", accountID, "error", err)
 		}
 	}
+	s.observeUsageAlert(ctx, accountID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeUsageAPI, usage)
 }
 
 func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, error) {
@@ -573,6 +581,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
 	}
 
+	s.observeUsageAlert(ctx, account.ID, UsageAlertPlatformOpenAI, UsageAlertSourceOpenAICodexProbe, usage)
 	return usage, nil
 }
 
@@ -686,9 +695,19 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	}
 	if len(updates) > 0 {
 		s.persistOpenAICodexProbeSnapshot(account.ID, updates)
+		if s.usageAlertService != nil {
+			s.usageAlertService.Observe(ctx, usageAlertSnapshotFromCodexExtra(account.ID, UsageAlertSourceOpenAICodexProbe, updates, time.Now()))
+		}
 		return updates, nil
 	}
 	return nil, nil
+}
+
+func (s *AccountUsageService) observeUsageAlert(ctx context.Context, accountID int64, platform, source string, usage *UsageInfo) {
+	if s == nil || s.usageAlertService == nil {
+		return
+	}
+	s.usageAlertService.Observe(ctx, usageAlertSnapshotFromUsageInfo(accountID, platform, source, usage, time.Now()))
 }
 
 func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, updates map[string]any) {

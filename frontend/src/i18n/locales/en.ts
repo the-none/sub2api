@@ -391,6 +391,7 @@ export default {
     availableChannels: 'Available Channels',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
+    usageAlerts: 'Usage Alerts',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
@@ -1429,6 +1430,10 @@ export default {
 
   // Admin
   admin: {
+    usageAlerts: {
+      title: 'Usage Alerts',
+      description: 'Real accounts, rules, and webhook bindings for OAuth account usage'
+    },
     // Dashboard
     dashboard: {
       title: 'Admin Dashboard',

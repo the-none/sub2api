@@ -35,11 +35,17 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
+	"github.com/Wei-Shaw/sub2api/ent/realaccountusagesnapshot"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertbinding"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertwebhook"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -82,11 +88,17 @@ const (
 	TypePromoCode                     = "PromoCode"
 	TypePromoCodeUsage                = "PromoCodeUsage"
 	TypeProxy                         = "Proxy"
+	TypeRealAccount                   = "RealAccount"
+	TypeRealAccountUsageSnapshot      = "RealAccountUsageSnapshot"
 	TypeRedeemCode                    = "RedeemCode"
 	TypeSecuritySecret                = "SecuritySecret"
 	TypeSetting                       = "Setting"
 	TypeSubscriptionPlan              = "SubscriptionPlan"
 	TypeTLSFingerprintProfile         = "TLSFingerprintProfile"
+	TypeUsageAlertBinding             = "UsageAlertBinding"
+	TypeUsageAlertRule                = "UsageAlertRule"
+	TypeUsageAlertState               = "UsageAlertState"
+	TypeUsageAlertWebhook             = "UsageAlertWebhook"
 	TypeUsageCleanupTask              = "UsageCleanupTask"
 	TypeUsageLog                      = "UsageLog"
 	TypeUser                          = "User"
@@ -2316,6 +2328,8 @@ type AccountMutation struct {
 	clearedgroups               bool
 	proxy                       *int64
 	clearedproxy                bool
+	real_account                *int64
+	clearedreal_account         bool
 	usage_logs                  map[int64]struct{}
 	removedusage_logs           map[int64]struct{}
 	clearedusage_logs           bool
@@ -2889,6 +2903,55 @@ func (m *AccountMutation) ResetProxyFallbackOriginID() {
 	m.proxy_fallback_origin_id = nil
 	m.addproxy_fallback_origin_id = nil
 	delete(m.clearedFields, account.FieldProxyFallbackOriginID)
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (m *AccountMutation) SetRealAccountID(i int64) {
+	m.real_account = &i
+}
+
+// RealAccountID returns the value of the "real_account_id" field in the mutation.
+func (m *AccountMutation) RealAccountID() (r int64, exists bool) {
+	v := m.real_account
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRealAccountID returns the old "real_account_id" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldRealAccountID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRealAccountID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRealAccountID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRealAccountID: %w", err)
+	}
+	return oldValue.RealAccountID, nil
+}
+
+// ClearRealAccountID clears the value of the "real_account_id" field.
+func (m *AccountMutation) ClearRealAccountID() {
+	m.real_account = nil
+	m.clearedFields[account.FieldRealAccountID] = struct{}{}
+}
+
+// RealAccountIDCleared returns if the "real_account_id" field was cleared in this mutation.
+func (m *AccountMutation) RealAccountIDCleared() bool {
+	_, ok := m.clearedFields[account.FieldRealAccountID]
+	return ok
+}
+
+// ResetRealAccountID resets all changes to the "real_account_id" field.
+func (m *AccountMutation) ResetRealAccountID() {
+	m.real_account = nil
+	delete(m.clearedFields, account.FieldRealAccountID)
 }
 
 // SetConcurrency sets the "concurrency" field.
@@ -3857,6 +3920,33 @@ func (m *AccountMutation) ResetProxy() {
 	m.clearedproxy = false
 }
 
+// ClearRealAccount clears the "real_account" edge to the RealAccount entity.
+func (m *AccountMutation) ClearRealAccount() {
+	m.clearedreal_account = true
+	m.clearedFields[account.FieldRealAccountID] = struct{}{}
+}
+
+// RealAccountCleared reports if the "real_account" edge to the RealAccount entity was cleared.
+func (m *AccountMutation) RealAccountCleared() bool {
+	return m.RealAccountIDCleared() || m.clearedreal_account
+}
+
+// RealAccountIDs returns the "real_account" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// RealAccountID instead. It exists only for internal usage by the builders.
+func (m *AccountMutation) RealAccountIDs() (ids []int64) {
+	if id := m.real_account; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetRealAccount resets all changes to the "real_account" edge.
+func (m *AccountMutation) ResetRealAccount() {
+	m.real_account = nil
+	m.clearedreal_account = false
+}
+
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by ids.
 func (m *AccountMutation) AddUsageLogIDs(ids ...int64) {
 	if m.usage_logs == nil {
@@ -3945,7 +4035,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 29)
+	fields := make([]string, 0, 30)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -3978,6 +4068,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.proxy_fallback_origin_id != nil {
 		fields = append(fields, account.FieldProxyFallbackOriginID)
+	}
+	if m.real_account != nil {
+		fields = append(fields, account.FieldRealAccountID)
 	}
 	if m.concurrency != nil {
 		fields = append(fields, account.FieldConcurrency)
@@ -4063,6 +4156,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.ProxyID()
 	case account.FieldProxyFallbackOriginID:
 		return m.ProxyFallbackOriginID()
+	case account.FieldRealAccountID:
+		return m.RealAccountID()
 	case account.FieldConcurrency:
 		return m.Concurrency()
 	case account.FieldLoadFactor:
@@ -4130,6 +4225,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldProxyID(ctx)
 	case account.FieldProxyFallbackOriginID:
 		return m.OldProxyFallbackOriginID(ctx)
+	case account.FieldRealAccountID:
+		return m.OldRealAccountID(ctx)
 	case account.FieldConcurrency:
 		return m.OldConcurrency(ctx)
 	case account.FieldLoadFactor:
@@ -4251,6 +4348,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetProxyFallbackOriginID(v)
+		return nil
+	case account.FieldRealAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRealAccountID(v)
 		return nil
 	case account.FieldConcurrency:
 		v, ok := value.(int)
@@ -4483,6 +4587,9 @@ func (m *AccountMutation) ClearedFields() []string {
 	if m.FieldCleared(account.FieldProxyFallbackOriginID) {
 		fields = append(fields, account.FieldProxyFallbackOriginID)
 	}
+	if m.FieldCleared(account.FieldRealAccountID) {
+		fields = append(fields, account.FieldRealAccountID)
+	}
 	if m.FieldCleared(account.FieldLoadFactor) {
 		fields = append(fields, account.FieldLoadFactor)
 	}
@@ -4544,6 +4651,9 @@ func (m *AccountMutation) ClearField(name string) error {
 		return nil
 	case account.FieldProxyFallbackOriginID:
 		m.ClearProxyFallbackOriginID()
+		return nil
+	case account.FieldRealAccountID:
+		m.ClearRealAccountID()
 		return nil
 	case account.FieldLoadFactor:
 		m.ClearLoadFactor()
@@ -4622,6 +4732,9 @@ func (m *AccountMutation) ResetField(name string) error {
 	case account.FieldProxyFallbackOriginID:
 		m.ResetProxyFallbackOriginID()
 		return nil
+	case account.FieldRealAccountID:
+		m.ResetRealAccountID()
+		return nil
 	case account.FieldConcurrency:
 		m.ResetConcurrency()
 		return nil
@@ -4682,12 +4795,15 @@ func (m *AccountMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *AccountMutation) AddedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
 	if m.groups != nil {
 		edges = append(edges, account.EdgeGroups)
 	}
 	if m.proxy != nil {
 		edges = append(edges, account.EdgeProxy)
+	}
+	if m.real_account != nil {
+		edges = append(edges, account.EdgeRealAccount)
 	}
 	if m.usage_logs != nil {
 		edges = append(edges, account.EdgeUsageLogs)
@@ -4709,6 +4825,10 @@ func (m *AccountMutation) AddedIDs(name string) []ent.Value {
 		if id := m.proxy; id != nil {
 			return []ent.Value{*id}
 		}
+	case account.EdgeRealAccount:
+		if id := m.real_account; id != nil {
+			return []ent.Value{*id}
+		}
 	case account.EdgeUsageLogs:
 		ids := make([]ent.Value, 0, len(m.usage_logs))
 		for id := range m.usage_logs {
@@ -4721,7 +4841,7 @@ func (m *AccountMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *AccountMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
 	if m.removedgroups != nil {
 		edges = append(edges, account.EdgeGroups)
 	}
@@ -4753,12 +4873,15 @@ func (m *AccountMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *AccountMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
 	if m.clearedgroups {
 		edges = append(edges, account.EdgeGroups)
 	}
 	if m.clearedproxy {
 		edges = append(edges, account.EdgeProxy)
+	}
+	if m.clearedreal_account {
+		edges = append(edges, account.EdgeRealAccount)
 	}
 	if m.clearedusage_logs {
 		edges = append(edges, account.EdgeUsageLogs)
@@ -4774,6 +4897,8 @@ func (m *AccountMutation) EdgeCleared(name string) bool {
 		return m.clearedgroups
 	case account.EdgeProxy:
 		return m.clearedproxy
+	case account.EdgeRealAccount:
+		return m.clearedreal_account
 	case account.EdgeUsageLogs:
 		return m.clearedusage_logs
 	}
@@ -4786,6 +4911,9 @@ func (m *AccountMutation) ClearEdge(name string) error {
 	switch name {
 	case account.EdgeProxy:
 		m.ClearProxy()
+		return nil
+	case account.EdgeRealAccount:
+		m.ClearRealAccount()
 		return nil
 	}
 	return fmt.Errorf("unknown Account unique edge %s", name)
@@ -4800,6 +4928,9 @@ func (m *AccountMutation) ResetEdge(name string) error {
 		return nil
 	case account.EdgeProxy:
 		m.ResetProxy()
+		return nil
+	case account.EdgeRealAccount:
+		m.ResetRealAccount()
 		return nil
 	case account.EdgeUsageLogs:
 		m.ResetUsageLogs()
@@ -29279,6 +29410,1765 @@ func (m *ProxyMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown Proxy edge %s", name)
 }
 
+// RealAccountMutation represents an operation that mutates the RealAccount nodes in the graph.
+type RealAccountMutation struct {
+	config
+	op                      Op
+	typ                     string
+	id                      *int64
+	created_at              *time.Time
+	updated_at              *time.Time
+	deleted_at              *time.Time
+	name                    *string
+	platform                *string
+	identifier              *string
+	notes                   *string
+	clearedFields           map[string]struct{}
+	accounts                map[int64]struct{}
+	removedaccounts         map[int64]struct{}
+	clearedaccounts         bool
+	usage_snapshot          map[int64]struct{}
+	removedusage_snapshot   map[int64]struct{}
+	clearedusage_snapshot   bool
+	webhook_bindings        map[int64]struct{}
+	removedwebhook_bindings map[int64]struct{}
+	clearedwebhook_bindings bool
+	alert_states            map[int64]struct{}
+	removedalert_states     map[int64]struct{}
+	clearedalert_states     bool
+	done                    bool
+	oldValue                func(context.Context) (*RealAccount, error)
+	predicates              []predicate.RealAccount
+}
+
+var _ ent.Mutation = (*RealAccountMutation)(nil)
+
+// realaccountOption allows management of the mutation configuration using functional options.
+type realaccountOption func(*RealAccountMutation)
+
+// newRealAccountMutation creates new mutation for the RealAccount entity.
+func newRealAccountMutation(c config, op Op, opts ...realaccountOption) *RealAccountMutation {
+	m := &RealAccountMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeRealAccount,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withRealAccountID sets the ID field of the mutation.
+func withRealAccountID(id int64) realaccountOption {
+	return func(m *RealAccountMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *RealAccount
+		)
+		m.oldValue = func(ctx context.Context) (*RealAccount, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().RealAccount.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withRealAccount sets the old RealAccount of the mutation.
+func withRealAccount(node *RealAccount) realaccountOption {
+	return func(m *RealAccountMutation) {
+		m.oldValue = func(context.Context) (*RealAccount, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m RealAccountMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m RealAccountMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *RealAccountMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *RealAccountMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().RealAccount.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *RealAccountMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *RealAccountMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the RealAccount entity.
+// If the RealAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *RealAccountMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *RealAccountMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *RealAccountMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the RealAccount entity.
+// If the RealAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *RealAccountMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (m *RealAccountMutation) SetDeletedAt(t time.Time) {
+	m.deleted_at = &t
+}
+
+// DeletedAt returns the value of the "deleted_at" field in the mutation.
+func (m *RealAccountMutation) DeletedAt() (r time.Time, exists bool) {
+	v := m.deleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedAt returns the old "deleted_at" field's value of the RealAccount entity.
+// If the RealAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedAt: %w", err)
+	}
+	return oldValue.DeletedAt, nil
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (m *RealAccountMutation) ClearDeletedAt() {
+	m.deleted_at = nil
+	m.clearedFields[realaccount.FieldDeletedAt] = struct{}{}
+}
+
+// DeletedAtCleared returns if the "deleted_at" field was cleared in this mutation.
+func (m *RealAccountMutation) DeletedAtCleared() bool {
+	_, ok := m.clearedFields[realaccount.FieldDeletedAt]
+	return ok
+}
+
+// ResetDeletedAt resets all changes to the "deleted_at" field.
+func (m *RealAccountMutation) ResetDeletedAt() {
+	m.deleted_at = nil
+	delete(m.clearedFields, realaccount.FieldDeletedAt)
+}
+
+// SetName sets the "name" field.
+func (m *RealAccountMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *RealAccountMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the RealAccount entity.
+// If the RealAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountMutation) OldName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *RealAccountMutation) ResetName() {
+	m.name = nil
+}
+
+// SetPlatform sets the "platform" field.
+func (m *RealAccountMutation) SetPlatform(s string) {
+	m.platform = &s
+}
+
+// Platform returns the value of the "platform" field in the mutation.
+func (m *RealAccountMutation) Platform() (r string, exists bool) {
+	v := m.platform
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlatform returns the old "platform" field's value of the RealAccount entity.
+// If the RealAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountMutation) OldPlatform(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlatform is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlatform requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlatform: %w", err)
+	}
+	return oldValue.Platform, nil
+}
+
+// ResetPlatform resets all changes to the "platform" field.
+func (m *RealAccountMutation) ResetPlatform() {
+	m.platform = nil
+}
+
+// SetIdentifier sets the "identifier" field.
+func (m *RealAccountMutation) SetIdentifier(s string) {
+	m.identifier = &s
+}
+
+// Identifier returns the value of the "identifier" field in the mutation.
+func (m *RealAccountMutation) Identifier() (r string, exists bool) {
+	v := m.identifier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldIdentifier returns the old "identifier" field's value of the RealAccount entity.
+// If the RealAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountMutation) OldIdentifier(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldIdentifier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldIdentifier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldIdentifier: %w", err)
+	}
+	return oldValue.Identifier, nil
+}
+
+// ClearIdentifier clears the value of the "identifier" field.
+func (m *RealAccountMutation) ClearIdentifier() {
+	m.identifier = nil
+	m.clearedFields[realaccount.FieldIdentifier] = struct{}{}
+}
+
+// IdentifierCleared returns if the "identifier" field was cleared in this mutation.
+func (m *RealAccountMutation) IdentifierCleared() bool {
+	_, ok := m.clearedFields[realaccount.FieldIdentifier]
+	return ok
+}
+
+// ResetIdentifier resets all changes to the "identifier" field.
+func (m *RealAccountMutation) ResetIdentifier() {
+	m.identifier = nil
+	delete(m.clearedFields, realaccount.FieldIdentifier)
+}
+
+// SetNotes sets the "notes" field.
+func (m *RealAccountMutation) SetNotes(s string) {
+	m.notes = &s
+}
+
+// Notes returns the value of the "notes" field in the mutation.
+func (m *RealAccountMutation) Notes() (r string, exists bool) {
+	v := m.notes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldNotes returns the old "notes" field's value of the RealAccount entity.
+// If the RealAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountMutation) OldNotes(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldNotes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldNotes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldNotes: %w", err)
+	}
+	return oldValue.Notes, nil
+}
+
+// ClearNotes clears the value of the "notes" field.
+func (m *RealAccountMutation) ClearNotes() {
+	m.notes = nil
+	m.clearedFields[realaccount.FieldNotes] = struct{}{}
+}
+
+// NotesCleared returns if the "notes" field was cleared in this mutation.
+func (m *RealAccountMutation) NotesCleared() bool {
+	_, ok := m.clearedFields[realaccount.FieldNotes]
+	return ok
+}
+
+// ResetNotes resets all changes to the "notes" field.
+func (m *RealAccountMutation) ResetNotes() {
+	m.notes = nil
+	delete(m.clearedFields, realaccount.FieldNotes)
+}
+
+// AddAccountIDs adds the "accounts" edge to the Account entity by ids.
+func (m *RealAccountMutation) AddAccountIDs(ids ...int64) {
+	if m.accounts == nil {
+		m.accounts = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.accounts[ids[i]] = struct{}{}
+	}
+}
+
+// ClearAccounts clears the "accounts" edge to the Account entity.
+func (m *RealAccountMutation) ClearAccounts() {
+	m.clearedaccounts = true
+}
+
+// AccountsCleared reports if the "accounts" edge to the Account entity was cleared.
+func (m *RealAccountMutation) AccountsCleared() bool {
+	return m.clearedaccounts
+}
+
+// RemoveAccountIDs removes the "accounts" edge to the Account entity by IDs.
+func (m *RealAccountMutation) RemoveAccountIDs(ids ...int64) {
+	if m.removedaccounts == nil {
+		m.removedaccounts = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.accounts, ids[i])
+		m.removedaccounts[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedAccounts returns the removed IDs of the "accounts" edge to the Account entity.
+func (m *RealAccountMutation) RemovedAccountsIDs() (ids []int64) {
+	for id := range m.removedaccounts {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// AccountsIDs returns the "accounts" edge IDs in the mutation.
+func (m *RealAccountMutation) AccountsIDs() (ids []int64) {
+	for id := range m.accounts {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetAccounts resets all changes to the "accounts" edge.
+func (m *RealAccountMutation) ResetAccounts() {
+	m.accounts = nil
+	m.clearedaccounts = false
+	m.removedaccounts = nil
+}
+
+// AddUsageSnapshotIDs adds the "usage_snapshot" edge to the RealAccountUsageSnapshot entity by ids.
+func (m *RealAccountMutation) AddUsageSnapshotIDs(ids ...int64) {
+	if m.usage_snapshot == nil {
+		m.usage_snapshot = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.usage_snapshot[ids[i]] = struct{}{}
+	}
+}
+
+// ClearUsageSnapshot clears the "usage_snapshot" edge to the RealAccountUsageSnapshot entity.
+func (m *RealAccountMutation) ClearUsageSnapshot() {
+	m.clearedusage_snapshot = true
+}
+
+// UsageSnapshotCleared reports if the "usage_snapshot" edge to the RealAccountUsageSnapshot entity was cleared.
+func (m *RealAccountMutation) UsageSnapshotCleared() bool {
+	return m.clearedusage_snapshot
+}
+
+// RemoveUsageSnapshotIDs removes the "usage_snapshot" edge to the RealAccountUsageSnapshot entity by IDs.
+func (m *RealAccountMutation) RemoveUsageSnapshotIDs(ids ...int64) {
+	if m.removedusage_snapshot == nil {
+		m.removedusage_snapshot = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.usage_snapshot, ids[i])
+		m.removedusage_snapshot[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedUsageSnapshot returns the removed IDs of the "usage_snapshot" edge to the RealAccountUsageSnapshot entity.
+func (m *RealAccountMutation) RemovedUsageSnapshotIDs() (ids []int64) {
+	for id := range m.removedusage_snapshot {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// UsageSnapshotIDs returns the "usage_snapshot" edge IDs in the mutation.
+func (m *RealAccountMutation) UsageSnapshotIDs() (ids []int64) {
+	for id := range m.usage_snapshot {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetUsageSnapshot resets all changes to the "usage_snapshot" edge.
+func (m *RealAccountMutation) ResetUsageSnapshot() {
+	m.usage_snapshot = nil
+	m.clearedusage_snapshot = false
+	m.removedusage_snapshot = nil
+}
+
+// AddWebhookBindingIDs adds the "webhook_bindings" edge to the UsageAlertBinding entity by ids.
+func (m *RealAccountMutation) AddWebhookBindingIDs(ids ...int64) {
+	if m.webhook_bindings == nil {
+		m.webhook_bindings = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.webhook_bindings[ids[i]] = struct{}{}
+	}
+}
+
+// ClearWebhookBindings clears the "webhook_bindings" edge to the UsageAlertBinding entity.
+func (m *RealAccountMutation) ClearWebhookBindings() {
+	m.clearedwebhook_bindings = true
+}
+
+// WebhookBindingsCleared reports if the "webhook_bindings" edge to the UsageAlertBinding entity was cleared.
+func (m *RealAccountMutation) WebhookBindingsCleared() bool {
+	return m.clearedwebhook_bindings
+}
+
+// RemoveWebhookBindingIDs removes the "webhook_bindings" edge to the UsageAlertBinding entity by IDs.
+func (m *RealAccountMutation) RemoveWebhookBindingIDs(ids ...int64) {
+	if m.removedwebhook_bindings == nil {
+		m.removedwebhook_bindings = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.webhook_bindings, ids[i])
+		m.removedwebhook_bindings[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedWebhookBindings returns the removed IDs of the "webhook_bindings" edge to the UsageAlertBinding entity.
+func (m *RealAccountMutation) RemovedWebhookBindingsIDs() (ids []int64) {
+	for id := range m.removedwebhook_bindings {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// WebhookBindingsIDs returns the "webhook_bindings" edge IDs in the mutation.
+func (m *RealAccountMutation) WebhookBindingsIDs() (ids []int64) {
+	for id := range m.webhook_bindings {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetWebhookBindings resets all changes to the "webhook_bindings" edge.
+func (m *RealAccountMutation) ResetWebhookBindings() {
+	m.webhook_bindings = nil
+	m.clearedwebhook_bindings = false
+	m.removedwebhook_bindings = nil
+}
+
+// AddAlertStateIDs adds the "alert_states" edge to the UsageAlertState entity by ids.
+func (m *RealAccountMutation) AddAlertStateIDs(ids ...int64) {
+	if m.alert_states == nil {
+		m.alert_states = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.alert_states[ids[i]] = struct{}{}
+	}
+}
+
+// ClearAlertStates clears the "alert_states" edge to the UsageAlertState entity.
+func (m *RealAccountMutation) ClearAlertStates() {
+	m.clearedalert_states = true
+}
+
+// AlertStatesCleared reports if the "alert_states" edge to the UsageAlertState entity was cleared.
+func (m *RealAccountMutation) AlertStatesCleared() bool {
+	return m.clearedalert_states
+}
+
+// RemoveAlertStateIDs removes the "alert_states" edge to the UsageAlertState entity by IDs.
+func (m *RealAccountMutation) RemoveAlertStateIDs(ids ...int64) {
+	if m.removedalert_states == nil {
+		m.removedalert_states = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.alert_states, ids[i])
+		m.removedalert_states[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedAlertStates returns the removed IDs of the "alert_states" edge to the UsageAlertState entity.
+func (m *RealAccountMutation) RemovedAlertStatesIDs() (ids []int64) {
+	for id := range m.removedalert_states {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// AlertStatesIDs returns the "alert_states" edge IDs in the mutation.
+func (m *RealAccountMutation) AlertStatesIDs() (ids []int64) {
+	for id := range m.alert_states {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetAlertStates resets all changes to the "alert_states" edge.
+func (m *RealAccountMutation) ResetAlertStates() {
+	m.alert_states = nil
+	m.clearedalert_states = false
+	m.removedalert_states = nil
+}
+
+// Where appends a list predicates to the RealAccountMutation builder.
+func (m *RealAccountMutation) Where(ps ...predicate.RealAccount) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the RealAccountMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *RealAccountMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.RealAccount, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *RealAccountMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *RealAccountMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (RealAccount).
+func (m *RealAccountMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *RealAccountMutation) Fields() []string {
+	fields := make([]string, 0, 7)
+	if m.created_at != nil {
+		fields = append(fields, realaccount.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, realaccount.FieldUpdatedAt)
+	}
+	if m.deleted_at != nil {
+		fields = append(fields, realaccount.FieldDeletedAt)
+	}
+	if m.name != nil {
+		fields = append(fields, realaccount.FieldName)
+	}
+	if m.platform != nil {
+		fields = append(fields, realaccount.FieldPlatform)
+	}
+	if m.identifier != nil {
+		fields = append(fields, realaccount.FieldIdentifier)
+	}
+	if m.notes != nil {
+		fields = append(fields, realaccount.FieldNotes)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *RealAccountMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case realaccount.FieldCreatedAt:
+		return m.CreatedAt()
+	case realaccount.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case realaccount.FieldDeletedAt:
+		return m.DeletedAt()
+	case realaccount.FieldName:
+		return m.Name()
+	case realaccount.FieldPlatform:
+		return m.Platform()
+	case realaccount.FieldIdentifier:
+		return m.Identifier()
+	case realaccount.FieldNotes:
+		return m.Notes()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *RealAccountMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case realaccount.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case realaccount.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case realaccount.FieldDeletedAt:
+		return m.OldDeletedAt(ctx)
+	case realaccount.FieldName:
+		return m.OldName(ctx)
+	case realaccount.FieldPlatform:
+		return m.OldPlatform(ctx)
+	case realaccount.FieldIdentifier:
+		return m.OldIdentifier(ctx)
+	case realaccount.FieldNotes:
+		return m.OldNotes(ctx)
+	}
+	return nil, fmt.Errorf("unknown RealAccount field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *RealAccountMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case realaccount.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case realaccount.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case realaccount.FieldDeletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedAt(v)
+		return nil
+	case realaccount.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case realaccount.FieldPlatform:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlatform(v)
+		return nil
+	case realaccount.FieldIdentifier:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetIdentifier(v)
+		return nil
+	case realaccount.FieldNotes:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetNotes(v)
+		return nil
+	}
+	return fmt.Errorf("unknown RealAccount field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *RealAccountMutation) AddedFields() []string {
+	return nil
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *RealAccountMutation) AddedField(name string) (ent.Value, bool) {
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *RealAccountMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown RealAccount numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *RealAccountMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(realaccount.FieldDeletedAt) {
+		fields = append(fields, realaccount.FieldDeletedAt)
+	}
+	if m.FieldCleared(realaccount.FieldIdentifier) {
+		fields = append(fields, realaccount.FieldIdentifier)
+	}
+	if m.FieldCleared(realaccount.FieldNotes) {
+		fields = append(fields, realaccount.FieldNotes)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *RealAccountMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *RealAccountMutation) ClearField(name string) error {
+	switch name {
+	case realaccount.FieldDeletedAt:
+		m.ClearDeletedAt()
+		return nil
+	case realaccount.FieldIdentifier:
+		m.ClearIdentifier()
+		return nil
+	case realaccount.FieldNotes:
+		m.ClearNotes()
+		return nil
+	}
+	return fmt.Errorf("unknown RealAccount nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *RealAccountMutation) ResetField(name string) error {
+	switch name {
+	case realaccount.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case realaccount.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case realaccount.FieldDeletedAt:
+		m.ResetDeletedAt()
+		return nil
+	case realaccount.FieldName:
+		m.ResetName()
+		return nil
+	case realaccount.FieldPlatform:
+		m.ResetPlatform()
+		return nil
+	case realaccount.FieldIdentifier:
+		m.ResetIdentifier()
+		return nil
+	case realaccount.FieldNotes:
+		m.ResetNotes()
+		return nil
+	}
+	return fmt.Errorf("unknown RealAccount field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *RealAccountMutation) AddedEdges() []string {
+	edges := make([]string, 0, 4)
+	if m.accounts != nil {
+		edges = append(edges, realaccount.EdgeAccounts)
+	}
+	if m.usage_snapshot != nil {
+		edges = append(edges, realaccount.EdgeUsageSnapshot)
+	}
+	if m.webhook_bindings != nil {
+		edges = append(edges, realaccount.EdgeWebhookBindings)
+	}
+	if m.alert_states != nil {
+		edges = append(edges, realaccount.EdgeAlertStates)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *RealAccountMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case realaccount.EdgeAccounts:
+		ids := make([]ent.Value, 0, len(m.accounts))
+		for id := range m.accounts {
+			ids = append(ids, id)
+		}
+		return ids
+	case realaccount.EdgeUsageSnapshot:
+		ids := make([]ent.Value, 0, len(m.usage_snapshot))
+		for id := range m.usage_snapshot {
+			ids = append(ids, id)
+		}
+		return ids
+	case realaccount.EdgeWebhookBindings:
+		ids := make([]ent.Value, 0, len(m.webhook_bindings))
+		for id := range m.webhook_bindings {
+			ids = append(ids, id)
+		}
+		return ids
+	case realaccount.EdgeAlertStates:
+		ids := make([]ent.Value, 0, len(m.alert_states))
+		for id := range m.alert_states {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *RealAccountMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 4)
+	if m.removedaccounts != nil {
+		edges = append(edges, realaccount.EdgeAccounts)
+	}
+	if m.removedusage_snapshot != nil {
+		edges = append(edges, realaccount.EdgeUsageSnapshot)
+	}
+	if m.removedwebhook_bindings != nil {
+		edges = append(edges, realaccount.EdgeWebhookBindings)
+	}
+	if m.removedalert_states != nil {
+		edges = append(edges, realaccount.EdgeAlertStates)
+	}
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *RealAccountMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	case realaccount.EdgeAccounts:
+		ids := make([]ent.Value, 0, len(m.removedaccounts))
+		for id := range m.removedaccounts {
+			ids = append(ids, id)
+		}
+		return ids
+	case realaccount.EdgeUsageSnapshot:
+		ids := make([]ent.Value, 0, len(m.removedusage_snapshot))
+		for id := range m.removedusage_snapshot {
+			ids = append(ids, id)
+		}
+		return ids
+	case realaccount.EdgeWebhookBindings:
+		ids := make([]ent.Value, 0, len(m.removedwebhook_bindings))
+		for id := range m.removedwebhook_bindings {
+			ids = append(ids, id)
+		}
+		return ids
+	case realaccount.EdgeAlertStates:
+		ids := make([]ent.Value, 0, len(m.removedalert_states))
+		for id := range m.removedalert_states {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *RealAccountMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 4)
+	if m.clearedaccounts {
+		edges = append(edges, realaccount.EdgeAccounts)
+	}
+	if m.clearedusage_snapshot {
+		edges = append(edges, realaccount.EdgeUsageSnapshot)
+	}
+	if m.clearedwebhook_bindings {
+		edges = append(edges, realaccount.EdgeWebhookBindings)
+	}
+	if m.clearedalert_states {
+		edges = append(edges, realaccount.EdgeAlertStates)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *RealAccountMutation) EdgeCleared(name string) bool {
+	switch name {
+	case realaccount.EdgeAccounts:
+		return m.clearedaccounts
+	case realaccount.EdgeUsageSnapshot:
+		return m.clearedusage_snapshot
+	case realaccount.EdgeWebhookBindings:
+		return m.clearedwebhook_bindings
+	case realaccount.EdgeAlertStates:
+		return m.clearedalert_states
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *RealAccountMutation) ClearEdge(name string) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown RealAccount unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *RealAccountMutation) ResetEdge(name string) error {
+	switch name {
+	case realaccount.EdgeAccounts:
+		m.ResetAccounts()
+		return nil
+	case realaccount.EdgeUsageSnapshot:
+		m.ResetUsageSnapshot()
+		return nil
+	case realaccount.EdgeWebhookBindings:
+		m.ResetWebhookBindings()
+		return nil
+	case realaccount.EdgeAlertStates:
+		m.ResetAlertStates()
+		return nil
+	}
+	return fmt.Errorf("unknown RealAccount edge %s", name)
+}
+
+// RealAccountUsageSnapshotMutation represents an operation that mutates the RealAccountUsageSnapshot nodes in the graph.
+type RealAccountUsageSnapshotMutation struct {
+	config
+	op                  Op
+	typ                 string
+	id                  *int64
+	created_at          *time.Time
+	updated_at          *time.Time
+	platform            *string
+	source              *string
+	snapshot_json       *map[string]interface{}
+	sampled_at          *time.Time
+	clearedFields       map[string]struct{}
+	real_account        *int64
+	clearedreal_account bool
+	done                bool
+	oldValue            func(context.Context) (*RealAccountUsageSnapshot, error)
+	predicates          []predicate.RealAccountUsageSnapshot
+}
+
+var _ ent.Mutation = (*RealAccountUsageSnapshotMutation)(nil)
+
+// realaccountusagesnapshotOption allows management of the mutation configuration using functional options.
+type realaccountusagesnapshotOption func(*RealAccountUsageSnapshotMutation)
+
+// newRealAccountUsageSnapshotMutation creates new mutation for the RealAccountUsageSnapshot entity.
+func newRealAccountUsageSnapshotMutation(c config, op Op, opts ...realaccountusagesnapshotOption) *RealAccountUsageSnapshotMutation {
+	m := &RealAccountUsageSnapshotMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeRealAccountUsageSnapshot,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withRealAccountUsageSnapshotID sets the ID field of the mutation.
+func withRealAccountUsageSnapshotID(id int64) realaccountusagesnapshotOption {
+	return func(m *RealAccountUsageSnapshotMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *RealAccountUsageSnapshot
+		)
+		m.oldValue = func(ctx context.Context) (*RealAccountUsageSnapshot, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().RealAccountUsageSnapshot.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withRealAccountUsageSnapshot sets the old RealAccountUsageSnapshot of the mutation.
+func withRealAccountUsageSnapshot(node *RealAccountUsageSnapshot) realaccountusagesnapshotOption {
+	return func(m *RealAccountUsageSnapshotMutation) {
+		m.oldValue = func(context.Context) (*RealAccountUsageSnapshot, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m RealAccountUsageSnapshotMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m RealAccountUsageSnapshotMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *RealAccountUsageSnapshotMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *RealAccountUsageSnapshotMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().RealAccountUsageSnapshot.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *RealAccountUsageSnapshotMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *RealAccountUsageSnapshotMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the RealAccountUsageSnapshot entity.
+// If the RealAccountUsageSnapshot object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountUsageSnapshotMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *RealAccountUsageSnapshotMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *RealAccountUsageSnapshotMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *RealAccountUsageSnapshotMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the RealAccountUsageSnapshot entity.
+// If the RealAccountUsageSnapshot object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountUsageSnapshotMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *RealAccountUsageSnapshotMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (m *RealAccountUsageSnapshotMutation) SetRealAccountID(i int64) {
+	m.real_account = &i
+}
+
+// RealAccountID returns the value of the "real_account_id" field in the mutation.
+func (m *RealAccountUsageSnapshotMutation) RealAccountID() (r int64, exists bool) {
+	v := m.real_account
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRealAccountID returns the old "real_account_id" field's value of the RealAccountUsageSnapshot entity.
+// If the RealAccountUsageSnapshot object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountUsageSnapshotMutation) OldRealAccountID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRealAccountID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRealAccountID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRealAccountID: %w", err)
+	}
+	return oldValue.RealAccountID, nil
+}
+
+// ResetRealAccountID resets all changes to the "real_account_id" field.
+func (m *RealAccountUsageSnapshotMutation) ResetRealAccountID() {
+	m.real_account = nil
+}
+
+// SetPlatform sets the "platform" field.
+func (m *RealAccountUsageSnapshotMutation) SetPlatform(s string) {
+	m.platform = &s
+}
+
+// Platform returns the value of the "platform" field in the mutation.
+func (m *RealAccountUsageSnapshotMutation) Platform() (r string, exists bool) {
+	v := m.platform
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlatform returns the old "platform" field's value of the RealAccountUsageSnapshot entity.
+// If the RealAccountUsageSnapshot object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountUsageSnapshotMutation) OldPlatform(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlatform is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlatform requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlatform: %w", err)
+	}
+	return oldValue.Platform, nil
+}
+
+// ResetPlatform resets all changes to the "platform" field.
+func (m *RealAccountUsageSnapshotMutation) ResetPlatform() {
+	m.platform = nil
+}
+
+// SetSource sets the "source" field.
+func (m *RealAccountUsageSnapshotMutation) SetSource(s string) {
+	m.source = &s
+}
+
+// Source returns the value of the "source" field in the mutation.
+func (m *RealAccountUsageSnapshotMutation) Source() (r string, exists bool) {
+	v := m.source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSource returns the old "source" field's value of the RealAccountUsageSnapshot entity.
+// If the RealAccountUsageSnapshot object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountUsageSnapshotMutation) OldSource(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSource: %w", err)
+	}
+	return oldValue.Source, nil
+}
+
+// ResetSource resets all changes to the "source" field.
+func (m *RealAccountUsageSnapshotMutation) ResetSource() {
+	m.source = nil
+}
+
+// SetSnapshotJSON sets the "snapshot_json" field.
+func (m *RealAccountUsageSnapshotMutation) SetSnapshotJSON(value map[string]interface{}) {
+	m.snapshot_json = &value
+}
+
+// SnapshotJSON returns the value of the "snapshot_json" field in the mutation.
+func (m *RealAccountUsageSnapshotMutation) SnapshotJSON() (r map[string]interface{}, exists bool) {
+	v := m.snapshot_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSnapshotJSON returns the old "snapshot_json" field's value of the RealAccountUsageSnapshot entity.
+// If the RealAccountUsageSnapshot object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountUsageSnapshotMutation) OldSnapshotJSON(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSnapshotJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSnapshotJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSnapshotJSON: %w", err)
+	}
+	return oldValue.SnapshotJSON, nil
+}
+
+// ResetSnapshotJSON resets all changes to the "snapshot_json" field.
+func (m *RealAccountUsageSnapshotMutation) ResetSnapshotJSON() {
+	m.snapshot_json = nil
+}
+
+// SetSampledAt sets the "sampled_at" field.
+func (m *RealAccountUsageSnapshotMutation) SetSampledAt(t time.Time) {
+	m.sampled_at = &t
+}
+
+// SampledAt returns the value of the "sampled_at" field in the mutation.
+func (m *RealAccountUsageSnapshotMutation) SampledAt() (r time.Time, exists bool) {
+	v := m.sampled_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSampledAt returns the old "sampled_at" field's value of the RealAccountUsageSnapshot entity.
+// If the RealAccountUsageSnapshot object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RealAccountUsageSnapshotMutation) OldSampledAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSampledAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSampledAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSampledAt: %w", err)
+	}
+	return oldValue.SampledAt, nil
+}
+
+// ResetSampledAt resets all changes to the "sampled_at" field.
+func (m *RealAccountUsageSnapshotMutation) ResetSampledAt() {
+	m.sampled_at = nil
+}
+
+// ClearRealAccount clears the "real_account" edge to the RealAccount entity.
+func (m *RealAccountUsageSnapshotMutation) ClearRealAccount() {
+	m.clearedreal_account = true
+	m.clearedFields[realaccountusagesnapshot.FieldRealAccountID] = struct{}{}
+}
+
+// RealAccountCleared reports if the "real_account" edge to the RealAccount entity was cleared.
+func (m *RealAccountUsageSnapshotMutation) RealAccountCleared() bool {
+	return m.clearedreal_account
+}
+
+// RealAccountIDs returns the "real_account" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// RealAccountID instead. It exists only for internal usage by the builders.
+func (m *RealAccountUsageSnapshotMutation) RealAccountIDs() (ids []int64) {
+	if id := m.real_account; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetRealAccount resets all changes to the "real_account" edge.
+func (m *RealAccountUsageSnapshotMutation) ResetRealAccount() {
+	m.real_account = nil
+	m.clearedreal_account = false
+}
+
+// Where appends a list predicates to the RealAccountUsageSnapshotMutation builder.
+func (m *RealAccountUsageSnapshotMutation) Where(ps ...predicate.RealAccountUsageSnapshot) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the RealAccountUsageSnapshotMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *RealAccountUsageSnapshotMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.RealAccountUsageSnapshot, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *RealAccountUsageSnapshotMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *RealAccountUsageSnapshotMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (RealAccountUsageSnapshot).
+func (m *RealAccountUsageSnapshotMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *RealAccountUsageSnapshotMutation) Fields() []string {
+	fields := make([]string, 0, 7)
+	if m.created_at != nil {
+		fields = append(fields, realaccountusagesnapshot.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, realaccountusagesnapshot.FieldUpdatedAt)
+	}
+	if m.real_account != nil {
+		fields = append(fields, realaccountusagesnapshot.FieldRealAccountID)
+	}
+	if m.platform != nil {
+		fields = append(fields, realaccountusagesnapshot.FieldPlatform)
+	}
+	if m.source != nil {
+		fields = append(fields, realaccountusagesnapshot.FieldSource)
+	}
+	if m.snapshot_json != nil {
+		fields = append(fields, realaccountusagesnapshot.FieldSnapshotJSON)
+	}
+	if m.sampled_at != nil {
+		fields = append(fields, realaccountusagesnapshot.FieldSampledAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *RealAccountUsageSnapshotMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case realaccountusagesnapshot.FieldCreatedAt:
+		return m.CreatedAt()
+	case realaccountusagesnapshot.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case realaccountusagesnapshot.FieldRealAccountID:
+		return m.RealAccountID()
+	case realaccountusagesnapshot.FieldPlatform:
+		return m.Platform()
+	case realaccountusagesnapshot.FieldSource:
+		return m.Source()
+	case realaccountusagesnapshot.FieldSnapshotJSON:
+		return m.SnapshotJSON()
+	case realaccountusagesnapshot.FieldSampledAt:
+		return m.SampledAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *RealAccountUsageSnapshotMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case realaccountusagesnapshot.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case realaccountusagesnapshot.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case realaccountusagesnapshot.FieldRealAccountID:
+		return m.OldRealAccountID(ctx)
+	case realaccountusagesnapshot.FieldPlatform:
+		return m.OldPlatform(ctx)
+	case realaccountusagesnapshot.FieldSource:
+		return m.OldSource(ctx)
+	case realaccountusagesnapshot.FieldSnapshotJSON:
+		return m.OldSnapshotJSON(ctx)
+	case realaccountusagesnapshot.FieldSampledAt:
+		return m.OldSampledAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown RealAccountUsageSnapshot field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *RealAccountUsageSnapshotMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case realaccountusagesnapshot.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case realaccountusagesnapshot.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case realaccountusagesnapshot.FieldRealAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRealAccountID(v)
+		return nil
+	case realaccountusagesnapshot.FieldPlatform:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlatform(v)
+		return nil
+	case realaccountusagesnapshot.FieldSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSource(v)
+		return nil
+	case realaccountusagesnapshot.FieldSnapshotJSON:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSnapshotJSON(v)
+		return nil
+	case realaccountusagesnapshot.FieldSampledAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSampledAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown RealAccountUsageSnapshot field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *RealAccountUsageSnapshotMutation) AddedFields() []string {
+	var fields []string
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *RealAccountUsageSnapshotMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *RealAccountUsageSnapshotMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown RealAccountUsageSnapshot numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *RealAccountUsageSnapshotMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *RealAccountUsageSnapshotMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *RealAccountUsageSnapshotMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown RealAccountUsageSnapshot nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *RealAccountUsageSnapshotMutation) ResetField(name string) error {
+	switch name {
+	case realaccountusagesnapshot.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case realaccountusagesnapshot.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case realaccountusagesnapshot.FieldRealAccountID:
+		m.ResetRealAccountID()
+		return nil
+	case realaccountusagesnapshot.FieldPlatform:
+		m.ResetPlatform()
+		return nil
+	case realaccountusagesnapshot.FieldSource:
+		m.ResetSource()
+		return nil
+	case realaccountusagesnapshot.FieldSnapshotJSON:
+		m.ResetSnapshotJSON()
+		return nil
+	case realaccountusagesnapshot.FieldSampledAt:
+		m.ResetSampledAt()
+		return nil
+	}
+	return fmt.Errorf("unknown RealAccountUsageSnapshot field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *RealAccountUsageSnapshotMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.real_account != nil {
+		edges = append(edges, realaccountusagesnapshot.EdgeRealAccount)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *RealAccountUsageSnapshotMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case realaccountusagesnapshot.EdgeRealAccount:
+		if id := m.real_account; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *RealAccountUsageSnapshotMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *RealAccountUsageSnapshotMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *RealAccountUsageSnapshotMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedreal_account {
+		edges = append(edges, realaccountusagesnapshot.EdgeRealAccount)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *RealAccountUsageSnapshotMutation) EdgeCleared(name string) bool {
+	switch name {
+	case realaccountusagesnapshot.EdgeRealAccount:
+		return m.clearedreal_account
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *RealAccountUsageSnapshotMutation) ClearEdge(name string) error {
+	switch name {
+	case realaccountusagesnapshot.EdgeRealAccount:
+		m.ClearRealAccount()
+		return nil
+	}
+	return fmt.Errorf("unknown RealAccountUsageSnapshot unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *RealAccountUsageSnapshotMutation) ResetEdge(name string) error {
+	switch name {
+	case realaccountusagesnapshot.EdgeRealAccount:
+		m.ResetRealAccount()
+		return nil
+	}
+	return fmt.Errorf("unknown RealAccountUsageSnapshot edge %s", name)
+}
+
 // RedeemCodeMutation represents an operation that mutates the RedeemCode nodes in the graph.
 type RedeemCodeMutation struct {
 	config
@@ -33884,6 +35774,3564 @@ func (m *TLSFingerprintProfileMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *TLSFingerprintProfileMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown TLSFingerprintProfile edge %s", name)
+}
+
+// UsageAlertBindingMutation represents an operation that mutates the UsageAlertBinding nodes in the graph.
+type UsageAlertBindingMutation struct {
+	config
+	op                  Op
+	typ                 string
+	id                  *int64
+	created_at          *time.Time
+	updated_at          *time.Time
+	enabled             *bool
+	clearedFields       map[string]struct{}
+	real_account        *int64
+	clearedreal_account bool
+	webhook             *int64
+	clearedwebhook      bool
+	done                bool
+	oldValue            func(context.Context) (*UsageAlertBinding, error)
+	predicates          []predicate.UsageAlertBinding
+}
+
+var _ ent.Mutation = (*UsageAlertBindingMutation)(nil)
+
+// usagealertbindingOption allows management of the mutation configuration using functional options.
+type usagealertbindingOption func(*UsageAlertBindingMutation)
+
+// newUsageAlertBindingMutation creates new mutation for the UsageAlertBinding entity.
+func newUsageAlertBindingMutation(c config, op Op, opts ...usagealertbindingOption) *UsageAlertBindingMutation {
+	m := &UsageAlertBindingMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUsageAlertBinding,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUsageAlertBindingID sets the ID field of the mutation.
+func withUsageAlertBindingID(id int64) usagealertbindingOption {
+	return func(m *UsageAlertBindingMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *UsageAlertBinding
+		)
+		m.oldValue = func(ctx context.Context) (*UsageAlertBinding, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().UsageAlertBinding.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUsageAlertBinding sets the old UsageAlertBinding of the mutation.
+func withUsageAlertBinding(node *UsageAlertBinding) usagealertbindingOption {
+	return func(m *UsageAlertBindingMutation) {
+		m.oldValue = func(context.Context) (*UsageAlertBinding, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m UsageAlertBindingMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m UsageAlertBindingMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *UsageAlertBindingMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *UsageAlertBindingMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().UsageAlertBinding.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *UsageAlertBindingMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *UsageAlertBindingMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the UsageAlertBinding entity.
+// If the UsageAlertBinding object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertBindingMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *UsageAlertBindingMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *UsageAlertBindingMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *UsageAlertBindingMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the UsageAlertBinding entity.
+// If the UsageAlertBinding object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertBindingMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *UsageAlertBindingMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (m *UsageAlertBindingMutation) SetRealAccountID(i int64) {
+	m.real_account = &i
+}
+
+// RealAccountID returns the value of the "real_account_id" field in the mutation.
+func (m *UsageAlertBindingMutation) RealAccountID() (r int64, exists bool) {
+	v := m.real_account
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRealAccountID returns the old "real_account_id" field's value of the UsageAlertBinding entity.
+// If the UsageAlertBinding object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertBindingMutation) OldRealAccountID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRealAccountID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRealAccountID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRealAccountID: %w", err)
+	}
+	return oldValue.RealAccountID, nil
+}
+
+// ResetRealAccountID resets all changes to the "real_account_id" field.
+func (m *UsageAlertBindingMutation) ResetRealAccountID() {
+	m.real_account = nil
+}
+
+// SetWebhookID sets the "webhook_id" field.
+func (m *UsageAlertBindingMutation) SetWebhookID(i int64) {
+	m.webhook = &i
+}
+
+// WebhookID returns the value of the "webhook_id" field in the mutation.
+func (m *UsageAlertBindingMutation) WebhookID() (r int64, exists bool) {
+	v := m.webhook
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldWebhookID returns the old "webhook_id" field's value of the UsageAlertBinding entity.
+// If the UsageAlertBinding object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertBindingMutation) OldWebhookID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldWebhookID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldWebhookID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldWebhookID: %w", err)
+	}
+	return oldValue.WebhookID, nil
+}
+
+// ResetWebhookID resets all changes to the "webhook_id" field.
+func (m *UsageAlertBindingMutation) ResetWebhookID() {
+	m.webhook = nil
+}
+
+// SetEnabled sets the "enabled" field.
+func (m *UsageAlertBindingMutation) SetEnabled(b bool) {
+	m.enabled = &b
+}
+
+// Enabled returns the value of the "enabled" field in the mutation.
+func (m *UsageAlertBindingMutation) Enabled() (r bool, exists bool) {
+	v := m.enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEnabled returns the old "enabled" field's value of the UsageAlertBinding entity.
+// If the UsageAlertBinding object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertBindingMutation) OldEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEnabled: %w", err)
+	}
+	return oldValue.Enabled, nil
+}
+
+// ResetEnabled resets all changes to the "enabled" field.
+func (m *UsageAlertBindingMutation) ResetEnabled() {
+	m.enabled = nil
+}
+
+// ClearRealAccount clears the "real_account" edge to the RealAccount entity.
+func (m *UsageAlertBindingMutation) ClearRealAccount() {
+	m.clearedreal_account = true
+	m.clearedFields[usagealertbinding.FieldRealAccountID] = struct{}{}
+}
+
+// RealAccountCleared reports if the "real_account" edge to the RealAccount entity was cleared.
+func (m *UsageAlertBindingMutation) RealAccountCleared() bool {
+	return m.clearedreal_account
+}
+
+// RealAccountIDs returns the "real_account" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// RealAccountID instead. It exists only for internal usage by the builders.
+func (m *UsageAlertBindingMutation) RealAccountIDs() (ids []int64) {
+	if id := m.real_account; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetRealAccount resets all changes to the "real_account" edge.
+func (m *UsageAlertBindingMutation) ResetRealAccount() {
+	m.real_account = nil
+	m.clearedreal_account = false
+}
+
+// ClearWebhook clears the "webhook" edge to the UsageAlertWebhook entity.
+func (m *UsageAlertBindingMutation) ClearWebhook() {
+	m.clearedwebhook = true
+	m.clearedFields[usagealertbinding.FieldWebhookID] = struct{}{}
+}
+
+// WebhookCleared reports if the "webhook" edge to the UsageAlertWebhook entity was cleared.
+func (m *UsageAlertBindingMutation) WebhookCleared() bool {
+	return m.clearedwebhook
+}
+
+// WebhookIDs returns the "webhook" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// WebhookID instead. It exists only for internal usage by the builders.
+func (m *UsageAlertBindingMutation) WebhookIDs() (ids []int64) {
+	if id := m.webhook; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetWebhook resets all changes to the "webhook" edge.
+func (m *UsageAlertBindingMutation) ResetWebhook() {
+	m.webhook = nil
+	m.clearedwebhook = false
+}
+
+// Where appends a list predicates to the UsageAlertBindingMutation builder.
+func (m *UsageAlertBindingMutation) Where(ps ...predicate.UsageAlertBinding) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the UsageAlertBindingMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *UsageAlertBindingMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.UsageAlertBinding, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *UsageAlertBindingMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *UsageAlertBindingMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (UsageAlertBinding).
+func (m *UsageAlertBindingMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *UsageAlertBindingMutation) Fields() []string {
+	fields := make([]string, 0, 5)
+	if m.created_at != nil {
+		fields = append(fields, usagealertbinding.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, usagealertbinding.FieldUpdatedAt)
+	}
+	if m.real_account != nil {
+		fields = append(fields, usagealertbinding.FieldRealAccountID)
+	}
+	if m.webhook != nil {
+		fields = append(fields, usagealertbinding.FieldWebhookID)
+	}
+	if m.enabled != nil {
+		fields = append(fields, usagealertbinding.FieldEnabled)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *UsageAlertBindingMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case usagealertbinding.FieldCreatedAt:
+		return m.CreatedAt()
+	case usagealertbinding.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case usagealertbinding.FieldRealAccountID:
+		return m.RealAccountID()
+	case usagealertbinding.FieldWebhookID:
+		return m.WebhookID()
+	case usagealertbinding.FieldEnabled:
+		return m.Enabled()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *UsageAlertBindingMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case usagealertbinding.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case usagealertbinding.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case usagealertbinding.FieldRealAccountID:
+		return m.OldRealAccountID(ctx)
+	case usagealertbinding.FieldWebhookID:
+		return m.OldWebhookID(ctx)
+	case usagealertbinding.FieldEnabled:
+		return m.OldEnabled(ctx)
+	}
+	return nil, fmt.Errorf("unknown UsageAlertBinding field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UsageAlertBindingMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case usagealertbinding.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case usagealertbinding.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case usagealertbinding.FieldRealAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRealAccountID(v)
+		return nil
+	case usagealertbinding.FieldWebhookID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetWebhookID(v)
+		return nil
+	case usagealertbinding.FieldEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEnabled(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertBinding field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *UsageAlertBindingMutation) AddedFields() []string {
+	var fields []string
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *UsageAlertBindingMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UsageAlertBindingMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown UsageAlertBinding numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *UsageAlertBindingMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *UsageAlertBindingMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *UsageAlertBindingMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown UsageAlertBinding nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *UsageAlertBindingMutation) ResetField(name string) error {
+	switch name {
+	case usagealertbinding.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case usagealertbinding.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case usagealertbinding.FieldRealAccountID:
+		m.ResetRealAccountID()
+		return nil
+	case usagealertbinding.FieldWebhookID:
+		m.ResetWebhookID()
+		return nil
+	case usagealertbinding.FieldEnabled:
+		m.ResetEnabled()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertBinding field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *UsageAlertBindingMutation) AddedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.real_account != nil {
+		edges = append(edges, usagealertbinding.EdgeRealAccount)
+	}
+	if m.webhook != nil {
+		edges = append(edges, usagealertbinding.EdgeWebhook)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *UsageAlertBindingMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case usagealertbinding.EdgeRealAccount:
+		if id := m.real_account; id != nil {
+			return []ent.Value{*id}
+		}
+	case usagealertbinding.EdgeWebhook:
+		if id := m.webhook; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *UsageAlertBindingMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 2)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *UsageAlertBindingMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *UsageAlertBindingMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.clearedreal_account {
+		edges = append(edges, usagealertbinding.EdgeRealAccount)
+	}
+	if m.clearedwebhook {
+		edges = append(edges, usagealertbinding.EdgeWebhook)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *UsageAlertBindingMutation) EdgeCleared(name string) bool {
+	switch name {
+	case usagealertbinding.EdgeRealAccount:
+		return m.clearedreal_account
+	case usagealertbinding.EdgeWebhook:
+		return m.clearedwebhook
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *UsageAlertBindingMutation) ClearEdge(name string) error {
+	switch name {
+	case usagealertbinding.EdgeRealAccount:
+		m.ClearRealAccount()
+		return nil
+	case usagealertbinding.EdgeWebhook:
+		m.ClearWebhook()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertBinding unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *UsageAlertBindingMutation) ResetEdge(name string) error {
+	switch name {
+	case usagealertbinding.EdgeRealAccount:
+		m.ResetRealAccount()
+		return nil
+	case usagealertbinding.EdgeWebhook:
+		m.ResetWebhook()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertBinding edge %s", name)
+}
+
+// UsageAlertRuleMutation represents an operation that mutates the UsageAlertRule nodes in the graph.
+type UsageAlertRuleMutation struct {
+	config
+	op                       Op
+	typ                      string
+	id                       *int64
+	created_at               *time.Time
+	updated_at               *time.Time
+	deleted_at               *time.Time
+	name                     *string
+	platform                 *string
+	window                   *string
+	metric                   *string
+	operator                 *string
+	threshold                *float64
+	addthreshold             *float64
+	min_reset_after_hours    *float64
+	addmin_reset_after_hours *float64
+	cooldown_minutes         *int
+	addcooldown_minutes      *int
+	enabled                  *bool
+	clearedFields            map[string]struct{}
+	states                   map[int64]struct{}
+	removedstates            map[int64]struct{}
+	clearedstates            bool
+	done                     bool
+	oldValue                 func(context.Context) (*UsageAlertRule, error)
+	predicates               []predicate.UsageAlertRule
+}
+
+var _ ent.Mutation = (*UsageAlertRuleMutation)(nil)
+
+// usagealertruleOption allows management of the mutation configuration using functional options.
+type usagealertruleOption func(*UsageAlertRuleMutation)
+
+// newUsageAlertRuleMutation creates new mutation for the UsageAlertRule entity.
+func newUsageAlertRuleMutation(c config, op Op, opts ...usagealertruleOption) *UsageAlertRuleMutation {
+	m := &UsageAlertRuleMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUsageAlertRule,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUsageAlertRuleID sets the ID field of the mutation.
+func withUsageAlertRuleID(id int64) usagealertruleOption {
+	return func(m *UsageAlertRuleMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *UsageAlertRule
+		)
+		m.oldValue = func(ctx context.Context) (*UsageAlertRule, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().UsageAlertRule.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUsageAlertRule sets the old UsageAlertRule of the mutation.
+func withUsageAlertRule(node *UsageAlertRule) usagealertruleOption {
+	return func(m *UsageAlertRuleMutation) {
+		m.oldValue = func(context.Context) (*UsageAlertRule, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m UsageAlertRuleMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m UsageAlertRuleMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *UsageAlertRuleMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *UsageAlertRuleMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().UsageAlertRule.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *UsageAlertRuleMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *UsageAlertRuleMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *UsageAlertRuleMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *UsageAlertRuleMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *UsageAlertRuleMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *UsageAlertRuleMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (m *UsageAlertRuleMutation) SetDeletedAt(t time.Time) {
+	m.deleted_at = &t
+}
+
+// DeletedAt returns the value of the "deleted_at" field in the mutation.
+func (m *UsageAlertRuleMutation) DeletedAt() (r time.Time, exists bool) {
+	v := m.deleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedAt returns the old "deleted_at" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedAt: %w", err)
+	}
+	return oldValue.DeletedAt, nil
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (m *UsageAlertRuleMutation) ClearDeletedAt() {
+	m.deleted_at = nil
+	m.clearedFields[usagealertrule.FieldDeletedAt] = struct{}{}
+}
+
+// DeletedAtCleared returns if the "deleted_at" field was cleared in this mutation.
+func (m *UsageAlertRuleMutation) DeletedAtCleared() bool {
+	_, ok := m.clearedFields[usagealertrule.FieldDeletedAt]
+	return ok
+}
+
+// ResetDeletedAt resets all changes to the "deleted_at" field.
+func (m *UsageAlertRuleMutation) ResetDeletedAt() {
+	m.deleted_at = nil
+	delete(m.clearedFields, usagealertrule.FieldDeletedAt)
+}
+
+// SetName sets the "name" field.
+func (m *UsageAlertRuleMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *UsageAlertRuleMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *UsageAlertRuleMutation) ResetName() {
+	m.name = nil
+}
+
+// SetPlatform sets the "platform" field.
+func (m *UsageAlertRuleMutation) SetPlatform(s string) {
+	m.platform = &s
+}
+
+// Platform returns the value of the "platform" field in the mutation.
+func (m *UsageAlertRuleMutation) Platform() (r string, exists bool) {
+	v := m.platform
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlatform returns the old "platform" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldPlatform(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlatform is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlatform requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlatform: %w", err)
+	}
+	return oldValue.Platform, nil
+}
+
+// ResetPlatform resets all changes to the "platform" field.
+func (m *UsageAlertRuleMutation) ResetPlatform() {
+	m.platform = nil
+}
+
+// SetWindow sets the "window" field.
+func (m *UsageAlertRuleMutation) SetWindow(s string) {
+	m.window = &s
+}
+
+// Window returns the value of the "window" field in the mutation.
+func (m *UsageAlertRuleMutation) Window() (r string, exists bool) {
+	v := m.window
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldWindow returns the old "window" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldWindow(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldWindow is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldWindow requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldWindow: %w", err)
+	}
+	return oldValue.Window, nil
+}
+
+// ResetWindow resets all changes to the "window" field.
+func (m *UsageAlertRuleMutation) ResetWindow() {
+	m.window = nil
+}
+
+// SetMetric sets the "metric" field.
+func (m *UsageAlertRuleMutation) SetMetric(s string) {
+	m.metric = &s
+}
+
+// Metric returns the value of the "metric" field in the mutation.
+func (m *UsageAlertRuleMutation) Metric() (r string, exists bool) {
+	v := m.metric
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMetric returns the old "metric" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldMetric(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMetric is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMetric requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMetric: %w", err)
+	}
+	return oldValue.Metric, nil
+}
+
+// ResetMetric resets all changes to the "metric" field.
+func (m *UsageAlertRuleMutation) ResetMetric() {
+	m.metric = nil
+}
+
+// SetOperator sets the "operator" field.
+func (m *UsageAlertRuleMutation) SetOperator(s string) {
+	m.operator = &s
+}
+
+// Operator returns the value of the "operator" field in the mutation.
+func (m *UsageAlertRuleMutation) Operator() (r string, exists bool) {
+	v := m.operator
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOperator returns the old "operator" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldOperator(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOperator is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOperator requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOperator: %w", err)
+	}
+	return oldValue.Operator, nil
+}
+
+// ResetOperator resets all changes to the "operator" field.
+func (m *UsageAlertRuleMutation) ResetOperator() {
+	m.operator = nil
+}
+
+// SetThreshold sets the "threshold" field.
+func (m *UsageAlertRuleMutation) SetThreshold(f float64) {
+	m.threshold = &f
+	m.addthreshold = nil
+}
+
+// Threshold returns the value of the "threshold" field in the mutation.
+func (m *UsageAlertRuleMutation) Threshold() (r float64, exists bool) {
+	v := m.threshold
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldThreshold returns the old "threshold" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldThreshold(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldThreshold is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldThreshold requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldThreshold: %w", err)
+	}
+	return oldValue.Threshold, nil
+}
+
+// AddThreshold adds f to the "threshold" field.
+func (m *UsageAlertRuleMutation) AddThreshold(f float64) {
+	if m.addthreshold != nil {
+		*m.addthreshold += f
+	} else {
+		m.addthreshold = &f
+	}
+}
+
+// AddedThreshold returns the value that was added to the "threshold" field in this mutation.
+func (m *UsageAlertRuleMutation) AddedThreshold() (r float64, exists bool) {
+	v := m.addthreshold
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetThreshold resets all changes to the "threshold" field.
+func (m *UsageAlertRuleMutation) ResetThreshold() {
+	m.threshold = nil
+	m.addthreshold = nil
+}
+
+// SetMinResetAfterHours sets the "min_reset_after_hours" field.
+func (m *UsageAlertRuleMutation) SetMinResetAfterHours(f float64) {
+	m.min_reset_after_hours = &f
+	m.addmin_reset_after_hours = nil
+}
+
+// MinResetAfterHours returns the value of the "min_reset_after_hours" field in the mutation.
+func (m *UsageAlertRuleMutation) MinResetAfterHours() (r float64, exists bool) {
+	v := m.min_reset_after_hours
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMinResetAfterHours returns the old "min_reset_after_hours" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldMinResetAfterHours(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMinResetAfterHours is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMinResetAfterHours requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMinResetAfterHours: %w", err)
+	}
+	return oldValue.MinResetAfterHours, nil
+}
+
+// AddMinResetAfterHours adds f to the "min_reset_after_hours" field.
+func (m *UsageAlertRuleMutation) AddMinResetAfterHours(f float64) {
+	if m.addmin_reset_after_hours != nil {
+		*m.addmin_reset_after_hours += f
+	} else {
+		m.addmin_reset_after_hours = &f
+	}
+}
+
+// AddedMinResetAfterHours returns the value that was added to the "min_reset_after_hours" field in this mutation.
+func (m *UsageAlertRuleMutation) AddedMinResetAfterHours() (r float64, exists bool) {
+	v := m.addmin_reset_after_hours
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearMinResetAfterHours clears the value of the "min_reset_after_hours" field.
+func (m *UsageAlertRuleMutation) ClearMinResetAfterHours() {
+	m.min_reset_after_hours = nil
+	m.addmin_reset_after_hours = nil
+	m.clearedFields[usagealertrule.FieldMinResetAfterHours] = struct{}{}
+}
+
+// MinResetAfterHoursCleared returns if the "min_reset_after_hours" field was cleared in this mutation.
+func (m *UsageAlertRuleMutation) MinResetAfterHoursCleared() bool {
+	_, ok := m.clearedFields[usagealertrule.FieldMinResetAfterHours]
+	return ok
+}
+
+// ResetMinResetAfterHours resets all changes to the "min_reset_after_hours" field.
+func (m *UsageAlertRuleMutation) ResetMinResetAfterHours() {
+	m.min_reset_after_hours = nil
+	m.addmin_reset_after_hours = nil
+	delete(m.clearedFields, usagealertrule.FieldMinResetAfterHours)
+}
+
+// SetCooldownMinutes sets the "cooldown_minutes" field.
+func (m *UsageAlertRuleMutation) SetCooldownMinutes(i int) {
+	m.cooldown_minutes = &i
+	m.addcooldown_minutes = nil
+}
+
+// CooldownMinutes returns the value of the "cooldown_minutes" field in the mutation.
+func (m *UsageAlertRuleMutation) CooldownMinutes() (r int, exists bool) {
+	v := m.cooldown_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCooldownMinutes returns the old "cooldown_minutes" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldCooldownMinutes(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCooldownMinutes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCooldownMinutes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCooldownMinutes: %w", err)
+	}
+	return oldValue.CooldownMinutes, nil
+}
+
+// AddCooldownMinutes adds i to the "cooldown_minutes" field.
+func (m *UsageAlertRuleMutation) AddCooldownMinutes(i int) {
+	if m.addcooldown_minutes != nil {
+		*m.addcooldown_minutes += i
+	} else {
+		m.addcooldown_minutes = &i
+	}
+}
+
+// AddedCooldownMinutes returns the value that was added to the "cooldown_minutes" field in this mutation.
+func (m *UsageAlertRuleMutation) AddedCooldownMinutes() (r int, exists bool) {
+	v := m.addcooldown_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetCooldownMinutes resets all changes to the "cooldown_minutes" field.
+func (m *UsageAlertRuleMutation) ResetCooldownMinutes() {
+	m.cooldown_minutes = nil
+	m.addcooldown_minutes = nil
+}
+
+// SetEnabled sets the "enabled" field.
+func (m *UsageAlertRuleMutation) SetEnabled(b bool) {
+	m.enabled = &b
+}
+
+// Enabled returns the value of the "enabled" field in the mutation.
+func (m *UsageAlertRuleMutation) Enabled() (r bool, exists bool) {
+	v := m.enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEnabled returns the old "enabled" field's value of the UsageAlertRule entity.
+// If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertRuleMutation) OldEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEnabled: %w", err)
+	}
+	return oldValue.Enabled, nil
+}
+
+// ResetEnabled resets all changes to the "enabled" field.
+func (m *UsageAlertRuleMutation) ResetEnabled() {
+	m.enabled = nil
+}
+
+// AddStateIDs adds the "states" edge to the UsageAlertState entity by ids.
+func (m *UsageAlertRuleMutation) AddStateIDs(ids ...int64) {
+	if m.states == nil {
+		m.states = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.states[ids[i]] = struct{}{}
+	}
+}
+
+// ClearStates clears the "states" edge to the UsageAlertState entity.
+func (m *UsageAlertRuleMutation) ClearStates() {
+	m.clearedstates = true
+}
+
+// StatesCleared reports if the "states" edge to the UsageAlertState entity was cleared.
+func (m *UsageAlertRuleMutation) StatesCleared() bool {
+	return m.clearedstates
+}
+
+// RemoveStateIDs removes the "states" edge to the UsageAlertState entity by IDs.
+func (m *UsageAlertRuleMutation) RemoveStateIDs(ids ...int64) {
+	if m.removedstates == nil {
+		m.removedstates = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.states, ids[i])
+		m.removedstates[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedStates returns the removed IDs of the "states" edge to the UsageAlertState entity.
+func (m *UsageAlertRuleMutation) RemovedStatesIDs() (ids []int64) {
+	for id := range m.removedstates {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// StatesIDs returns the "states" edge IDs in the mutation.
+func (m *UsageAlertRuleMutation) StatesIDs() (ids []int64) {
+	for id := range m.states {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetStates resets all changes to the "states" edge.
+func (m *UsageAlertRuleMutation) ResetStates() {
+	m.states = nil
+	m.clearedstates = false
+	m.removedstates = nil
+}
+
+// Where appends a list predicates to the UsageAlertRuleMutation builder.
+func (m *UsageAlertRuleMutation) Where(ps ...predicate.UsageAlertRule) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the UsageAlertRuleMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *UsageAlertRuleMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.UsageAlertRule, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *UsageAlertRuleMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *UsageAlertRuleMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (UsageAlertRule).
+func (m *UsageAlertRuleMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *UsageAlertRuleMutation) Fields() []string {
+	fields := make([]string, 0, 12)
+	if m.created_at != nil {
+		fields = append(fields, usagealertrule.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, usagealertrule.FieldUpdatedAt)
+	}
+	if m.deleted_at != nil {
+		fields = append(fields, usagealertrule.FieldDeletedAt)
+	}
+	if m.name != nil {
+		fields = append(fields, usagealertrule.FieldName)
+	}
+	if m.platform != nil {
+		fields = append(fields, usagealertrule.FieldPlatform)
+	}
+	if m.window != nil {
+		fields = append(fields, usagealertrule.FieldWindow)
+	}
+	if m.metric != nil {
+		fields = append(fields, usagealertrule.FieldMetric)
+	}
+	if m.operator != nil {
+		fields = append(fields, usagealertrule.FieldOperator)
+	}
+	if m.threshold != nil {
+		fields = append(fields, usagealertrule.FieldThreshold)
+	}
+	if m.min_reset_after_hours != nil {
+		fields = append(fields, usagealertrule.FieldMinResetAfterHours)
+	}
+	if m.cooldown_minutes != nil {
+		fields = append(fields, usagealertrule.FieldCooldownMinutes)
+	}
+	if m.enabled != nil {
+		fields = append(fields, usagealertrule.FieldEnabled)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *UsageAlertRuleMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case usagealertrule.FieldCreatedAt:
+		return m.CreatedAt()
+	case usagealertrule.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case usagealertrule.FieldDeletedAt:
+		return m.DeletedAt()
+	case usagealertrule.FieldName:
+		return m.Name()
+	case usagealertrule.FieldPlatform:
+		return m.Platform()
+	case usagealertrule.FieldWindow:
+		return m.Window()
+	case usagealertrule.FieldMetric:
+		return m.Metric()
+	case usagealertrule.FieldOperator:
+		return m.Operator()
+	case usagealertrule.FieldThreshold:
+		return m.Threshold()
+	case usagealertrule.FieldMinResetAfterHours:
+		return m.MinResetAfterHours()
+	case usagealertrule.FieldCooldownMinutes:
+		return m.CooldownMinutes()
+	case usagealertrule.FieldEnabled:
+		return m.Enabled()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *UsageAlertRuleMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case usagealertrule.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case usagealertrule.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case usagealertrule.FieldDeletedAt:
+		return m.OldDeletedAt(ctx)
+	case usagealertrule.FieldName:
+		return m.OldName(ctx)
+	case usagealertrule.FieldPlatform:
+		return m.OldPlatform(ctx)
+	case usagealertrule.FieldWindow:
+		return m.OldWindow(ctx)
+	case usagealertrule.FieldMetric:
+		return m.OldMetric(ctx)
+	case usagealertrule.FieldOperator:
+		return m.OldOperator(ctx)
+	case usagealertrule.FieldThreshold:
+		return m.OldThreshold(ctx)
+	case usagealertrule.FieldMinResetAfterHours:
+		return m.OldMinResetAfterHours(ctx)
+	case usagealertrule.FieldCooldownMinutes:
+		return m.OldCooldownMinutes(ctx)
+	case usagealertrule.FieldEnabled:
+		return m.OldEnabled(ctx)
+	}
+	return nil, fmt.Errorf("unknown UsageAlertRule field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UsageAlertRuleMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case usagealertrule.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case usagealertrule.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case usagealertrule.FieldDeletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedAt(v)
+		return nil
+	case usagealertrule.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case usagealertrule.FieldPlatform:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlatform(v)
+		return nil
+	case usagealertrule.FieldWindow:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetWindow(v)
+		return nil
+	case usagealertrule.FieldMetric:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMetric(v)
+		return nil
+	case usagealertrule.FieldOperator:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOperator(v)
+		return nil
+	case usagealertrule.FieldThreshold:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetThreshold(v)
+		return nil
+	case usagealertrule.FieldMinResetAfterHours:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMinResetAfterHours(v)
+		return nil
+	case usagealertrule.FieldCooldownMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCooldownMinutes(v)
+		return nil
+	case usagealertrule.FieldEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEnabled(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertRule field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *UsageAlertRuleMutation) AddedFields() []string {
+	var fields []string
+	if m.addthreshold != nil {
+		fields = append(fields, usagealertrule.FieldThreshold)
+	}
+	if m.addmin_reset_after_hours != nil {
+		fields = append(fields, usagealertrule.FieldMinResetAfterHours)
+	}
+	if m.addcooldown_minutes != nil {
+		fields = append(fields, usagealertrule.FieldCooldownMinutes)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *UsageAlertRuleMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case usagealertrule.FieldThreshold:
+		return m.AddedThreshold()
+	case usagealertrule.FieldMinResetAfterHours:
+		return m.AddedMinResetAfterHours()
+	case usagealertrule.FieldCooldownMinutes:
+		return m.AddedCooldownMinutes()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UsageAlertRuleMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case usagealertrule.FieldThreshold:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddThreshold(v)
+		return nil
+	case usagealertrule.FieldMinResetAfterHours:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMinResetAfterHours(v)
+		return nil
+	case usagealertrule.FieldCooldownMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCooldownMinutes(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertRule numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *UsageAlertRuleMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(usagealertrule.FieldDeletedAt) {
+		fields = append(fields, usagealertrule.FieldDeletedAt)
+	}
+	if m.FieldCleared(usagealertrule.FieldMinResetAfterHours) {
+		fields = append(fields, usagealertrule.FieldMinResetAfterHours)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *UsageAlertRuleMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *UsageAlertRuleMutation) ClearField(name string) error {
+	switch name {
+	case usagealertrule.FieldDeletedAt:
+		m.ClearDeletedAt()
+		return nil
+	case usagealertrule.FieldMinResetAfterHours:
+		m.ClearMinResetAfterHours()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertRule nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *UsageAlertRuleMutation) ResetField(name string) error {
+	switch name {
+	case usagealertrule.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case usagealertrule.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case usagealertrule.FieldDeletedAt:
+		m.ResetDeletedAt()
+		return nil
+	case usagealertrule.FieldName:
+		m.ResetName()
+		return nil
+	case usagealertrule.FieldPlatform:
+		m.ResetPlatform()
+		return nil
+	case usagealertrule.FieldWindow:
+		m.ResetWindow()
+		return nil
+	case usagealertrule.FieldMetric:
+		m.ResetMetric()
+		return nil
+	case usagealertrule.FieldOperator:
+		m.ResetOperator()
+		return nil
+	case usagealertrule.FieldThreshold:
+		m.ResetThreshold()
+		return nil
+	case usagealertrule.FieldMinResetAfterHours:
+		m.ResetMinResetAfterHours()
+		return nil
+	case usagealertrule.FieldCooldownMinutes:
+		m.ResetCooldownMinutes()
+		return nil
+	case usagealertrule.FieldEnabled:
+		m.ResetEnabled()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertRule field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *UsageAlertRuleMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.states != nil {
+		edges = append(edges, usagealertrule.EdgeStates)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *UsageAlertRuleMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case usagealertrule.EdgeStates:
+		ids := make([]ent.Value, 0, len(m.states))
+		for id := range m.states {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *UsageAlertRuleMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.removedstates != nil {
+		edges = append(edges, usagealertrule.EdgeStates)
+	}
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *UsageAlertRuleMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	case usagealertrule.EdgeStates:
+		ids := make([]ent.Value, 0, len(m.removedstates))
+		for id := range m.removedstates {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *UsageAlertRuleMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedstates {
+		edges = append(edges, usagealertrule.EdgeStates)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *UsageAlertRuleMutation) EdgeCleared(name string) bool {
+	switch name {
+	case usagealertrule.EdgeStates:
+		return m.clearedstates
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *UsageAlertRuleMutation) ClearEdge(name string) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown UsageAlertRule unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *UsageAlertRuleMutation) ResetEdge(name string) error {
+	switch name {
+	case usagealertrule.EdgeStates:
+		m.ResetStates()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertRule edge %s", name)
+}
+
+// UsageAlertStateMutation represents an operation that mutates the UsageAlertState nodes in the graph.
+type UsageAlertStateMutation struct {
+	config
+	op                  Op
+	typ                 string
+	id                  *int64
+	created_at          *time.Time
+	updated_at          *time.Time
+	window              *string
+	last_status         *string
+	last_triggered_at   *time.Time
+	last_value          *float64
+	addlast_value       *float64
+	last_reset_at       *time.Time
+	clearedFields       map[string]struct{}
+	real_account        *int64
+	clearedreal_account bool
+	rule                *int64
+	clearedrule         bool
+	done                bool
+	oldValue            func(context.Context) (*UsageAlertState, error)
+	predicates          []predicate.UsageAlertState
+}
+
+var _ ent.Mutation = (*UsageAlertStateMutation)(nil)
+
+// usagealertstateOption allows management of the mutation configuration using functional options.
+type usagealertstateOption func(*UsageAlertStateMutation)
+
+// newUsageAlertStateMutation creates new mutation for the UsageAlertState entity.
+func newUsageAlertStateMutation(c config, op Op, opts ...usagealertstateOption) *UsageAlertStateMutation {
+	m := &UsageAlertStateMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUsageAlertState,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUsageAlertStateID sets the ID field of the mutation.
+func withUsageAlertStateID(id int64) usagealertstateOption {
+	return func(m *UsageAlertStateMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *UsageAlertState
+		)
+		m.oldValue = func(ctx context.Context) (*UsageAlertState, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().UsageAlertState.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUsageAlertState sets the old UsageAlertState of the mutation.
+func withUsageAlertState(node *UsageAlertState) usagealertstateOption {
+	return func(m *UsageAlertStateMutation) {
+		m.oldValue = func(context.Context) (*UsageAlertState, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m UsageAlertStateMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m UsageAlertStateMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *UsageAlertStateMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *UsageAlertStateMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().UsageAlertState.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *UsageAlertStateMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *UsageAlertStateMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *UsageAlertStateMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *UsageAlertStateMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *UsageAlertStateMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *UsageAlertStateMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetRealAccountID sets the "real_account_id" field.
+func (m *UsageAlertStateMutation) SetRealAccountID(i int64) {
+	m.real_account = &i
+}
+
+// RealAccountID returns the value of the "real_account_id" field in the mutation.
+func (m *UsageAlertStateMutation) RealAccountID() (r int64, exists bool) {
+	v := m.real_account
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRealAccountID returns the old "real_account_id" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldRealAccountID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRealAccountID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRealAccountID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRealAccountID: %w", err)
+	}
+	return oldValue.RealAccountID, nil
+}
+
+// ResetRealAccountID resets all changes to the "real_account_id" field.
+func (m *UsageAlertStateMutation) ResetRealAccountID() {
+	m.real_account = nil
+}
+
+// SetRuleID sets the "rule_id" field.
+func (m *UsageAlertStateMutation) SetRuleID(i int64) {
+	m.rule = &i
+}
+
+// RuleID returns the value of the "rule_id" field in the mutation.
+func (m *UsageAlertStateMutation) RuleID() (r int64, exists bool) {
+	v := m.rule
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRuleID returns the old "rule_id" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldRuleID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRuleID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRuleID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRuleID: %w", err)
+	}
+	return oldValue.RuleID, nil
+}
+
+// ResetRuleID resets all changes to the "rule_id" field.
+func (m *UsageAlertStateMutation) ResetRuleID() {
+	m.rule = nil
+}
+
+// SetWindow sets the "window" field.
+func (m *UsageAlertStateMutation) SetWindow(s string) {
+	m.window = &s
+}
+
+// Window returns the value of the "window" field in the mutation.
+func (m *UsageAlertStateMutation) Window() (r string, exists bool) {
+	v := m.window
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldWindow returns the old "window" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldWindow(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldWindow is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldWindow requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldWindow: %w", err)
+	}
+	return oldValue.Window, nil
+}
+
+// ResetWindow resets all changes to the "window" field.
+func (m *UsageAlertStateMutation) ResetWindow() {
+	m.window = nil
+}
+
+// SetLastStatus sets the "last_status" field.
+func (m *UsageAlertStateMutation) SetLastStatus(s string) {
+	m.last_status = &s
+}
+
+// LastStatus returns the value of the "last_status" field in the mutation.
+func (m *UsageAlertStateMutation) LastStatus() (r string, exists bool) {
+	v := m.last_status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastStatus returns the old "last_status" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldLastStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastStatus: %w", err)
+	}
+	return oldValue.LastStatus, nil
+}
+
+// ResetLastStatus resets all changes to the "last_status" field.
+func (m *UsageAlertStateMutation) ResetLastStatus() {
+	m.last_status = nil
+}
+
+// SetLastTriggeredAt sets the "last_triggered_at" field.
+func (m *UsageAlertStateMutation) SetLastTriggeredAt(t time.Time) {
+	m.last_triggered_at = &t
+}
+
+// LastTriggeredAt returns the value of the "last_triggered_at" field in the mutation.
+func (m *UsageAlertStateMutation) LastTriggeredAt() (r time.Time, exists bool) {
+	v := m.last_triggered_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastTriggeredAt returns the old "last_triggered_at" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldLastTriggeredAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastTriggeredAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastTriggeredAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastTriggeredAt: %w", err)
+	}
+	return oldValue.LastTriggeredAt, nil
+}
+
+// ClearLastTriggeredAt clears the value of the "last_triggered_at" field.
+func (m *UsageAlertStateMutation) ClearLastTriggeredAt() {
+	m.last_triggered_at = nil
+	m.clearedFields[usagealertstate.FieldLastTriggeredAt] = struct{}{}
+}
+
+// LastTriggeredAtCleared returns if the "last_triggered_at" field was cleared in this mutation.
+func (m *UsageAlertStateMutation) LastTriggeredAtCleared() bool {
+	_, ok := m.clearedFields[usagealertstate.FieldLastTriggeredAt]
+	return ok
+}
+
+// ResetLastTriggeredAt resets all changes to the "last_triggered_at" field.
+func (m *UsageAlertStateMutation) ResetLastTriggeredAt() {
+	m.last_triggered_at = nil
+	delete(m.clearedFields, usagealertstate.FieldLastTriggeredAt)
+}
+
+// SetLastValue sets the "last_value" field.
+func (m *UsageAlertStateMutation) SetLastValue(f float64) {
+	m.last_value = &f
+	m.addlast_value = nil
+}
+
+// LastValue returns the value of the "last_value" field in the mutation.
+func (m *UsageAlertStateMutation) LastValue() (r float64, exists bool) {
+	v := m.last_value
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastValue returns the old "last_value" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldLastValue(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastValue is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastValue requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastValue: %w", err)
+	}
+	return oldValue.LastValue, nil
+}
+
+// AddLastValue adds f to the "last_value" field.
+func (m *UsageAlertStateMutation) AddLastValue(f float64) {
+	if m.addlast_value != nil {
+		*m.addlast_value += f
+	} else {
+		m.addlast_value = &f
+	}
+}
+
+// AddedLastValue returns the value that was added to the "last_value" field in this mutation.
+func (m *UsageAlertStateMutation) AddedLastValue() (r float64, exists bool) {
+	v := m.addlast_value
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearLastValue clears the value of the "last_value" field.
+func (m *UsageAlertStateMutation) ClearLastValue() {
+	m.last_value = nil
+	m.addlast_value = nil
+	m.clearedFields[usagealertstate.FieldLastValue] = struct{}{}
+}
+
+// LastValueCleared returns if the "last_value" field was cleared in this mutation.
+func (m *UsageAlertStateMutation) LastValueCleared() bool {
+	_, ok := m.clearedFields[usagealertstate.FieldLastValue]
+	return ok
+}
+
+// ResetLastValue resets all changes to the "last_value" field.
+func (m *UsageAlertStateMutation) ResetLastValue() {
+	m.last_value = nil
+	m.addlast_value = nil
+	delete(m.clearedFields, usagealertstate.FieldLastValue)
+}
+
+// SetLastResetAt sets the "last_reset_at" field.
+func (m *UsageAlertStateMutation) SetLastResetAt(t time.Time) {
+	m.last_reset_at = &t
+}
+
+// LastResetAt returns the value of the "last_reset_at" field in the mutation.
+func (m *UsageAlertStateMutation) LastResetAt() (r time.Time, exists bool) {
+	v := m.last_reset_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastResetAt returns the old "last_reset_at" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldLastResetAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastResetAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastResetAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastResetAt: %w", err)
+	}
+	return oldValue.LastResetAt, nil
+}
+
+// ClearLastResetAt clears the value of the "last_reset_at" field.
+func (m *UsageAlertStateMutation) ClearLastResetAt() {
+	m.last_reset_at = nil
+	m.clearedFields[usagealertstate.FieldLastResetAt] = struct{}{}
+}
+
+// LastResetAtCleared returns if the "last_reset_at" field was cleared in this mutation.
+func (m *UsageAlertStateMutation) LastResetAtCleared() bool {
+	_, ok := m.clearedFields[usagealertstate.FieldLastResetAt]
+	return ok
+}
+
+// ResetLastResetAt resets all changes to the "last_reset_at" field.
+func (m *UsageAlertStateMutation) ResetLastResetAt() {
+	m.last_reset_at = nil
+	delete(m.clearedFields, usagealertstate.FieldLastResetAt)
+}
+
+// ClearRealAccount clears the "real_account" edge to the RealAccount entity.
+func (m *UsageAlertStateMutation) ClearRealAccount() {
+	m.clearedreal_account = true
+	m.clearedFields[usagealertstate.FieldRealAccountID] = struct{}{}
+}
+
+// RealAccountCleared reports if the "real_account" edge to the RealAccount entity was cleared.
+func (m *UsageAlertStateMutation) RealAccountCleared() bool {
+	return m.clearedreal_account
+}
+
+// RealAccountIDs returns the "real_account" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// RealAccountID instead. It exists only for internal usage by the builders.
+func (m *UsageAlertStateMutation) RealAccountIDs() (ids []int64) {
+	if id := m.real_account; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetRealAccount resets all changes to the "real_account" edge.
+func (m *UsageAlertStateMutation) ResetRealAccount() {
+	m.real_account = nil
+	m.clearedreal_account = false
+}
+
+// ClearRule clears the "rule" edge to the UsageAlertRule entity.
+func (m *UsageAlertStateMutation) ClearRule() {
+	m.clearedrule = true
+	m.clearedFields[usagealertstate.FieldRuleID] = struct{}{}
+}
+
+// RuleCleared reports if the "rule" edge to the UsageAlertRule entity was cleared.
+func (m *UsageAlertStateMutation) RuleCleared() bool {
+	return m.clearedrule
+}
+
+// RuleIDs returns the "rule" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// RuleID instead. It exists only for internal usage by the builders.
+func (m *UsageAlertStateMutation) RuleIDs() (ids []int64) {
+	if id := m.rule; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetRule resets all changes to the "rule" edge.
+func (m *UsageAlertStateMutation) ResetRule() {
+	m.rule = nil
+	m.clearedrule = false
+}
+
+// Where appends a list predicates to the UsageAlertStateMutation builder.
+func (m *UsageAlertStateMutation) Where(ps ...predicate.UsageAlertState) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the UsageAlertStateMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *UsageAlertStateMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.UsageAlertState, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *UsageAlertStateMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *UsageAlertStateMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (UsageAlertState).
+func (m *UsageAlertStateMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *UsageAlertStateMutation) Fields() []string {
+	fields := make([]string, 0, 9)
+	if m.created_at != nil {
+		fields = append(fields, usagealertstate.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, usagealertstate.FieldUpdatedAt)
+	}
+	if m.real_account != nil {
+		fields = append(fields, usagealertstate.FieldRealAccountID)
+	}
+	if m.rule != nil {
+		fields = append(fields, usagealertstate.FieldRuleID)
+	}
+	if m.window != nil {
+		fields = append(fields, usagealertstate.FieldWindow)
+	}
+	if m.last_status != nil {
+		fields = append(fields, usagealertstate.FieldLastStatus)
+	}
+	if m.last_triggered_at != nil {
+		fields = append(fields, usagealertstate.FieldLastTriggeredAt)
+	}
+	if m.last_value != nil {
+		fields = append(fields, usagealertstate.FieldLastValue)
+	}
+	if m.last_reset_at != nil {
+		fields = append(fields, usagealertstate.FieldLastResetAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *UsageAlertStateMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case usagealertstate.FieldCreatedAt:
+		return m.CreatedAt()
+	case usagealertstate.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case usagealertstate.FieldRealAccountID:
+		return m.RealAccountID()
+	case usagealertstate.FieldRuleID:
+		return m.RuleID()
+	case usagealertstate.FieldWindow:
+		return m.Window()
+	case usagealertstate.FieldLastStatus:
+		return m.LastStatus()
+	case usagealertstate.FieldLastTriggeredAt:
+		return m.LastTriggeredAt()
+	case usagealertstate.FieldLastValue:
+		return m.LastValue()
+	case usagealertstate.FieldLastResetAt:
+		return m.LastResetAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *UsageAlertStateMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case usagealertstate.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case usagealertstate.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case usagealertstate.FieldRealAccountID:
+		return m.OldRealAccountID(ctx)
+	case usagealertstate.FieldRuleID:
+		return m.OldRuleID(ctx)
+	case usagealertstate.FieldWindow:
+		return m.OldWindow(ctx)
+	case usagealertstate.FieldLastStatus:
+		return m.OldLastStatus(ctx)
+	case usagealertstate.FieldLastTriggeredAt:
+		return m.OldLastTriggeredAt(ctx)
+	case usagealertstate.FieldLastValue:
+		return m.OldLastValue(ctx)
+	case usagealertstate.FieldLastResetAt:
+		return m.OldLastResetAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown UsageAlertState field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UsageAlertStateMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case usagealertstate.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case usagealertstate.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case usagealertstate.FieldRealAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRealAccountID(v)
+		return nil
+	case usagealertstate.FieldRuleID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRuleID(v)
+		return nil
+	case usagealertstate.FieldWindow:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetWindow(v)
+		return nil
+	case usagealertstate.FieldLastStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastStatus(v)
+		return nil
+	case usagealertstate.FieldLastTriggeredAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastTriggeredAt(v)
+		return nil
+	case usagealertstate.FieldLastValue:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastValue(v)
+		return nil
+	case usagealertstate.FieldLastResetAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastResetAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertState field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *UsageAlertStateMutation) AddedFields() []string {
+	var fields []string
+	if m.addlast_value != nil {
+		fields = append(fields, usagealertstate.FieldLastValue)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *UsageAlertStateMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case usagealertstate.FieldLastValue:
+		return m.AddedLastValue()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UsageAlertStateMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case usagealertstate.FieldLastValue:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddLastValue(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertState numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *UsageAlertStateMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(usagealertstate.FieldLastTriggeredAt) {
+		fields = append(fields, usagealertstate.FieldLastTriggeredAt)
+	}
+	if m.FieldCleared(usagealertstate.FieldLastValue) {
+		fields = append(fields, usagealertstate.FieldLastValue)
+	}
+	if m.FieldCleared(usagealertstate.FieldLastResetAt) {
+		fields = append(fields, usagealertstate.FieldLastResetAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *UsageAlertStateMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *UsageAlertStateMutation) ClearField(name string) error {
+	switch name {
+	case usagealertstate.FieldLastTriggeredAt:
+		m.ClearLastTriggeredAt()
+		return nil
+	case usagealertstate.FieldLastValue:
+		m.ClearLastValue()
+		return nil
+	case usagealertstate.FieldLastResetAt:
+		m.ClearLastResetAt()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertState nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *UsageAlertStateMutation) ResetField(name string) error {
+	switch name {
+	case usagealertstate.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case usagealertstate.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case usagealertstate.FieldRealAccountID:
+		m.ResetRealAccountID()
+		return nil
+	case usagealertstate.FieldRuleID:
+		m.ResetRuleID()
+		return nil
+	case usagealertstate.FieldWindow:
+		m.ResetWindow()
+		return nil
+	case usagealertstate.FieldLastStatus:
+		m.ResetLastStatus()
+		return nil
+	case usagealertstate.FieldLastTriggeredAt:
+		m.ResetLastTriggeredAt()
+		return nil
+	case usagealertstate.FieldLastValue:
+		m.ResetLastValue()
+		return nil
+	case usagealertstate.FieldLastResetAt:
+		m.ResetLastResetAt()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertState field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *UsageAlertStateMutation) AddedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.real_account != nil {
+		edges = append(edges, usagealertstate.EdgeRealAccount)
+	}
+	if m.rule != nil {
+		edges = append(edges, usagealertstate.EdgeRule)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *UsageAlertStateMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case usagealertstate.EdgeRealAccount:
+		if id := m.real_account; id != nil {
+			return []ent.Value{*id}
+		}
+	case usagealertstate.EdgeRule:
+		if id := m.rule; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *UsageAlertStateMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 2)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *UsageAlertStateMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *UsageAlertStateMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.clearedreal_account {
+		edges = append(edges, usagealertstate.EdgeRealAccount)
+	}
+	if m.clearedrule {
+		edges = append(edges, usagealertstate.EdgeRule)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *UsageAlertStateMutation) EdgeCleared(name string) bool {
+	switch name {
+	case usagealertstate.EdgeRealAccount:
+		return m.clearedreal_account
+	case usagealertstate.EdgeRule:
+		return m.clearedrule
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *UsageAlertStateMutation) ClearEdge(name string) error {
+	switch name {
+	case usagealertstate.EdgeRealAccount:
+		m.ClearRealAccount()
+		return nil
+	case usagealertstate.EdgeRule:
+		m.ClearRule()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertState unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *UsageAlertStateMutation) ResetEdge(name string) error {
+	switch name {
+	case usagealertstate.EdgeRealAccount:
+		m.ResetRealAccount()
+		return nil
+	case usagealertstate.EdgeRule:
+		m.ResetRule()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertState edge %s", name)
+}
+
+// UsageAlertWebhookMutation represents an operation that mutates the UsageAlertWebhook nodes in the graph.
+type UsageAlertWebhookMutation struct {
+	config
+	op              Op
+	typ             string
+	id              *int64
+	created_at      *time.Time
+	updated_at      *time.Time
+	deleted_at      *time.Time
+	name            *string
+	url             *string
+	enabled         *bool
+	retry_count     *int
+	addretry_count  *int
+	clearedFields   map[string]struct{}
+	bindings        map[int64]struct{}
+	removedbindings map[int64]struct{}
+	clearedbindings bool
+	done            bool
+	oldValue        func(context.Context) (*UsageAlertWebhook, error)
+	predicates      []predicate.UsageAlertWebhook
+}
+
+var _ ent.Mutation = (*UsageAlertWebhookMutation)(nil)
+
+// usagealertwebhookOption allows management of the mutation configuration using functional options.
+type usagealertwebhookOption func(*UsageAlertWebhookMutation)
+
+// newUsageAlertWebhookMutation creates new mutation for the UsageAlertWebhook entity.
+func newUsageAlertWebhookMutation(c config, op Op, opts ...usagealertwebhookOption) *UsageAlertWebhookMutation {
+	m := &UsageAlertWebhookMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUsageAlertWebhook,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUsageAlertWebhookID sets the ID field of the mutation.
+func withUsageAlertWebhookID(id int64) usagealertwebhookOption {
+	return func(m *UsageAlertWebhookMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *UsageAlertWebhook
+		)
+		m.oldValue = func(ctx context.Context) (*UsageAlertWebhook, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().UsageAlertWebhook.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUsageAlertWebhook sets the old UsageAlertWebhook of the mutation.
+func withUsageAlertWebhook(node *UsageAlertWebhook) usagealertwebhookOption {
+	return func(m *UsageAlertWebhookMutation) {
+		m.oldValue = func(context.Context) (*UsageAlertWebhook, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m UsageAlertWebhookMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m UsageAlertWebhookMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *UsageAlertWebhookMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *UsageAlertWebhookMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().UsageAlertWebhook.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *UsageAlertWebhookMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *UsageAlertWebhookMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the UsageAlertWebhook entity.
+// If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertWebhookMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *UsageAlertWebhookMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *UsageAlertWebhookMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *UsageAlertWebhookMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the UsageAlertWebhook entity.
+// If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertWebhookMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *UsageAlertWebhookMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (m *UsageAlertWebhookMutation) SetDeletedAt(t time.Time) {
+	m.deleted_at = &t
+}
+
+// DeletedAt returns the value of the "deleted_at" field in the mutation.
+func (m *UsageAlertWebhookMutation) DeletedAt() (r time.Time, exists bool) {
+	v := m.deleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedAt returns the old "deleted_at" field's value of the UsageAlertWebhook entity.
+// If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertWebhookMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedAt: %w", err)
+	}
+	return oldValue.DeletedAt, nil
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (m *UsageAlertWebhookMutation) ClearDeletedAt() {
+	m.deleted_at = nil
+	m.clearedFields[usagealertwebhook.FieldDeletedAt] = struct{}{}
+}
+
+// DeletedAtCleared returns if the "deleted_at" field was cleared in this mutation.
+func (m *UsageAlertWebhookMutation) DeletedAtCleared() bool {
+	_, ok := m.clearedFields[usagealertwebhook.FieldDeletedAt]
+	return ok
+}
+
+// ResetDeletedAt resets all changes to the "deleted_at" field.
+func (m *UsageAlertWebhookMutation) ResetDeletedAt() {
+	m.deleted_at = nil
+	delete(m.clearedFields, usagealertwebhook.FieldDeletedAt)
+}
+
+// SetName sets the "name" field.
+func (m *UsageAlertWebhookMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *UsageAlertWebhookMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the UsageAlertWebhook entity.
+// If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertWebhookMutation) OldName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *UsageAlertWebhookMutation) ResetName() {
+	m.name = nil
+}
+
+// SetURL sets the "url" field.
+func (m *UsageAlertWebhookMutation) SetURL(s string) {
+	m.url = &s
+}
+
+// URL returns the value of the "url" field in the mutation.
+func (m *UsageAlertWebhookMutation) URL() (r string, exists bool) {
+	v := m.url
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldURL returns the old "url" field's value of the UsageAlertWebhook entity.
+// If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertWebhookMutation) OldURL(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldURL is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldURL requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldURL: %w", err)
+	}
+	return oldValue.URL, nil
+}
+
+// ResetURL resets all changes to the "url" field.
+func (m *UsageAlertWebhookMutation) ResetURL() {
+	m.url = nil
+}
+
+// SetEnabled sets the "enabled" field.
+func (m *UsageAlertWebhookMutation) SetEnabled(b bool) {
+	m.enabled = &b
+}
+
+// Enabled returns the value of the "enabled" field in the mutation.
+func (m *UsageAlertWebhookMutation) Enabled() (r bool, exists bool) {
+	v := m.enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEnabled returns the old "enabled" field's value of the UsageAlertWebhook entity.
+// If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertWebhookMutation) OldEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEnabled: %w", err)
+	}
+	return oldValue.Enabled, nil
+}
+
+// ResetEnabled resets all changes to the "enabled" field.
+func (m *UsageAlertWebhookMutation) ResetEnabled() {
+	m.enabled = nil
+}
+
+// SetRetryCount sets the "retry_count" field.
+func (m *UsageAlertWebhookMutation) SetRetryCount(i int) {
+	m.retry_count = &i
+	m.addretry_count = nil
+}
+
+// RetryCount returns the value of the "retry_count" field in the mutation.
+func (m *UsageAlertWebhookMutation) RetryCount() (r int, exists bool) {
+	v := m.retry_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRetryCount returns the old "retry_count" field's value of the UsageAlertWebhook entity.
+// If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertWebhookMutation) OldRetryCount(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRetryCount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRetryCount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRetryCount: %w", err)
+	}
+	return oldValue.RetryCount, nil
+}
+
+// AddRetryCount adds i to the "retry_count" field.
+func (m *UsageAlertWebhookMutation) AddRetryCount(i int) {
+	if m.addretry_count != nil {
+		*m.addretry_count += i
+	} else {
+		m.addretry_count = &i
+	}
+}
+
+// AddedRetryCount returns the value that was added to the "retry_count" field in this mutation.
+func (m *UsageAlertWebhookMutation) AddedRetryCount() (r int, exists bool) {
+	v := m.addretry_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRetryCount resets all changes to the "retry_count" field.
+func (m *UsageAlertWebhookMutation) ResetRetryCount() {
+	m.retry_count = nil
+	m.addretry_count = nil
+}
+
+// AddBindingIDs adds the "bindings" edge to the UsageAlertBinding entity by ids.
+func (m *UsageAlertWebhookMutation) AddBindingIDs(ids ...int64) {
+	if m.bindings == nil {
+		m.bindings = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.bindings[ids[i]] = struct{}{}
+	}
+}
+
+// ClearBindings clears the "bindings" edge to the UsageAlertBinding entity.
+func (m *UsageAlertWebhookMutation) ClearBindings() {
+	m.clearedbindings = true
+}
+
+// BindingsCleared reports if the "bindings" edge to the UsageAlertBinding entity was cleared.
+func (m *UsageAlertWebhookMutation) BindingsCleared() bool {
+	return m.clearedbindings
+}
+
+// RemoveBindingIDs removes the "bindings" edge to the UsageAlertBinding entity by IDs.
+func (m *UsageAlertWebhookMutation) RemoveBindingIDs(ids ...int64) {
+	if m.removedbindings == nil {
+		m.removedbindings = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.bindings, ids[i])
+		m.removedbindings[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedBindings returns the removed IDs of the "bindings" edge to the UsageAlertBinding entity.
+func (m *UsageAlertWebhookMutation) RemovedBindingsIDs() (ids []int64) {
+	for id := range m.removedbindings {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// BindingsIDs returns the "bindings" edge IDs in the mutation.
+func (m *UsageAlertWebhookMutation) BindingsIDs() (ids []int64) {
+	for id := range m.bindings {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetBindings resets all changes to the "bindings" edge.
+func (m *UsageAlertWebhookMutation) ResetBindings() {
+	m.bindings = nil
+	m.clearedbindings = false
+	m.removedbindings = nil
+}
+
+// Where appends a list predicates to the UsageAlertWebhookMutation builder.
+func (m *UsageAlertWebhookMutation) Where(ps ...predicate.UsageAlertWebhook) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the UsageAlertWebhookMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *UsageAlertWebhookMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.UsageAlertWebhook, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *UsageAlertWebhookMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *UsageAlertWebhookMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (UsageAlertWebhook).
+func (m *UsageAlertWebhookMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *UsageAlertWebhookMutation) Fields() []string {
+	fields := make([]string, 0, 7)
+	if m.created_at != nil {
+		fields = append(fields, usagealertwebhook.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, usagealertwebhook.FieldUpdatedAt)
+	}
+	if m.deleted_at != nil {
+		fields = append(fields, usagealertwebhook.FieldDeletedAt)
+	}
+	if m.name != nil {
+		fields = append(fields, usagealertwebhook.FieldName)
+	}
+	if m.url != nil {
+		fields = append(fields, usagealertwebhook.FieldURL)
+	}
+	if m.enabled != nil {
+		fields = append(fields, usagealertwebhook.FieldEnabled)
+	}
+	if m.retry_count != nil {
+		fields = append(fields, usagealertwebhook.FieldRetryCount)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *UsageAlertWebhookMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case usagealertwebhook.FieldCreatedAt:
+		return m.CreatedAt()
+	case usagealertwebhook.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case usagealertwebhook.FieldDeletedAt:
+		return m.DeletedAt()
+	case usagealertwebhook.FieldName:
+		return m.Name()
+	case usagealertwebhook.FieldURL:
+		return m.URL()
+	case usagealertwebhook.FieldEnabled:
+		return m.Enabled()
+	case usagealertwebhook.FieldRetryCount:
+		return m.RetryCount()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *UsageAlertWebhookMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case usagealertwebhook.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case usagealertwebhook.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case usagealertwebhook.FieldDeletedAt:
+		return m.OldDeletedAt(ctx)
+	case usagealertwebhook.FieldName:
+		return m.OldName(ctx)
+	case usagealertwebhook.FieldURL:
+		return m.OldURL(ctx)
+	case usagealertwebhook.FieldEnabled:
+		return m.OldEnabled(ctx)
+	case usagealertwebhook.FieldRetryCount:
+		return m.OldRetryCount(ctx)
+	}
+	return nil, fmt.Errorf("unknown UsageAlertWebhook field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UsageAlertWebhookMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case usagealertwebhook.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case usagealertwebhook.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case usagealertwebhook.FieldDeletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedAt(v)
+		return nil
+	case usagealertwebhook.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case usagealertwebhook.FieldURL:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetURL(v)
+		return nil
+	case usagealertwebhook.FieldEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEnabled(v)
+		return nil
+	case usagealertwebhook.FieldRetryCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRetryCount(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertWebhook field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *UsageAlertWebhookMutation) AddedFields() []string {
+	var fields []string
+	if m.addretry_count != nil {
+		fields = append(fields, usagealertwebhook.FieldRetryCount)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *UsageAlertWebhookMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case usagealertwebhook.FieldRetryCount:
+		return m.AddedRetryCount()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UsageAlertWebhookMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case usagealertwebhook.FieldRetryCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRetryCount(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertWebhook numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *UsageAlertWebhookMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(usagealertwebhook.FieldDeletedAt) {
+		fields = append(fields, usagealertwebhook.FieldDeletedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *UsageAlertWebhookMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *UsageAlertWebhookMutation) ClearField(name string) error {
+	switch name {
+	case usagealertwebhook.FieldDeletedAt:
+		m.ClearDeletedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertWebhook nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *UsageAlertWebhookMutation) ResetField(name string) error {
+	switch name {
+	case usagealertwebhook.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case usagealertwebhook.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case usagealertwebhook.FieldDeletedAt:
+		m.ResetDeletedAt()
+		return nil
+	case usagealertwebhook.FieldName:
+		m.ResetName()
+		return nil
+	case usagealertwebhook.FieldURL:
+		m.ResetURL()
+		return nil
+	case usagealertwebhook.FieldEnabled:
+		m.ResetEnabled()
+		return nil
+	case usagealertwebhook.FieldRetryCount:
+		m.ResetRetryCount()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertWebhook field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *UsageAlertWebhookMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.bindings != nil {
+		edges = append(edges, usagealertwebhook.EdgeBindings)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *UsageAlertWebhookMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case usagealertwebhook.EdgeBindings:
+		ids := make([]ent.Value, 0, len(m.bindings))
+		for id := range m.bindings {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *UsageAlertWebhookMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.removedbindings != nil {
+		edges = append(edges, usagealertwebhook.EdgeBindings)
+	}
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *UsageAlertWebhookMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	case usagealertwebhook.EdgeBindings:
+		ids := make([]ent.Value, 0, len(m.removedbindings))
+		for id := range m.removedbindings {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *UsageAlertWebhookMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedbindings {
+		edges = append(edges, usagealertwebhook.EdgeBindings)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *UsageAlertWebhookMutation) EdgeCleared(name string) bool {
+	switch name {
+	case usagealertwebhook.EdgeBindings:
+		return m.clearedbindings
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *UsageAlertWebhookMutation) ClearEdge(name string) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown UsageAlertWebhook unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *UsageAlertWebhookMutation) ResetEdge(name string) error {
+	switch name {
+	case usagealertwebhook.EdgeBindings:
+		m.ResetBindings()
+		return nil
+	}
+	return fmt.Errorf("unknown UsageAlertWebhook edge %s", name)
 }
 
 // UsageCleanupTaskMutation represents an operation that mutates the UsageCleanupTask nodes in the graph.

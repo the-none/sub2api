@@ -31,11 +31,17 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/realaccount"
+	"github.com/Wei-Shaw/sub2api/ent/realaccountusagesnapshot"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertbinding"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertrule"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertstate"
+	"github.com/Wei-Shaw/sub2api/ent/usagealertwebhook"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -696,6 +702,60 @@ func (f TraverseProxy) Traverse(ctx context.Context, q ent.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *ent.ProxyQuery", q)
 }
 
+// The RealAccountFunc type is an adapter to allow the use of ordinary function as a Querier.
+type RealAccountFunc func(context.Context, *ent.RealAccountQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f RealAccountFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.RealAccountQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.RealAccountQuery", q)
+}
+
+// The TraverseRealAccount type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseRealAccount func(context.Context, *ent.RealAccountQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseRealAccount) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseRealAccount) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.RealAccountQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.RealAccountQuery", q)
+}
+
+// The RealAccountUsageSnapshotFunc type is an adapter to allow the use of ordinary function as a Querier.
+type RealAccountUsageSnapshotFunc func(context.Context, *ent.RealAccountUsageSnapshotQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f RealAccountUsageSnapshotFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.RealAccountUsageSnapshotQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.RealAccountUsageSnapshotQuery", q)
+}
+
+// The TraverseRealAccountUsageSnapshot type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseRealAccountUsageSnapshot func(context.Context, *ent.RealAccountUsageSnapshotQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseRealAccountUsageSnapshot) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseRealAccountUsageSnapshot) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.RealAccountUsageSnapshotQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.RealAccountUsageSnapshotQuery", q)
+}
+
 // The RedeemCodeFunc type is an adapter to allow the use of ordinary function as a Querier.
 type RedeemCodeFunc func(context.Context, *ent.RedeemCodeQuery) (ent.Value, error)
 
@@ -829,6 +889,114 @@ func (f TraverseTLSFingerprintProfile) Traverse(ctx context.Context, q ent.Query
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *ent.TLSFingerprintProfileQuery", q)
+}
+
+// The UsageAlertBindingFunc type is an adapter to allow the use of ordinary function as a Querier.
+type UsageAlertBindingFunc func(context.Context, *ent.UsageAlertBindingQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f UsageAlertBindingFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.UsageAlertBindingQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.UsageAlertBindingQuery", q)
+}
+
+// The TraverseUsageAlertBinding type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseUsageAlertBinding func(context.Context, *ent.UsageAlertBindingQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseUsageAlertBinding) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseUsageAlertBinding) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.UsageAlertBindingQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.UsageAlertBindingQuery", q)
+}
+
+// The UsageAlertRuleFunc type is an adapter to allow the use of ordinary function as a Querier.
+type UsageAlertRuleFunc func(context.Context, *ent.UsageAlertRuleQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f UsageAlertRuleFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.UsageAlertRuleQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.UsageAlertRuleQuery", q)
+}
+
+// The TraverseUsageAlertRule type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseUsageAlertRule func(context.Context, *ent.UsageAlertRuleQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseUsageAlertRule) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseUsageAlertRule) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.UsageAlertRuleQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.UsageAlertRuleQuery", q)
+}
+
+// The UsageAlertStateFunc type is an adapter to allow the use of ordinary function as a Querier.
+type UsageAlertStateFunc func(context.Context, *ent.UsageAlertStateQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f UsageAlertStateFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.UsageAlertStateQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.UsageAlertStateQuery", q)
+}
+
+// The TraverseUsageAlertState type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseUsageAlertState func(context.Context, *ent.UsageAlertStateQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseUsageAlertState) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseUsageAlertState) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.UsageAlertStateQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.UsageAlertStateQuery", q)
+}
+
+// The UsageAlertWebhookFunc type is an adapter to allow the use of ordinary function as a Querier.
+type UsageAlertWebhookFunc func(context.Context, *ent.UsageAlertWebhookQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f UsageAlertWebhookFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.UsageAlertWebhookQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.UsageAlertWebhookQuery", q)
+}
+
+// The TraverseUsageAlertWebhook type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseUsageAlertWebhook func(context.Context, *ent.UsageAlertWebhookQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseUsageAlertWebhook) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseUsageAlertWebhook) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.UsageAlertWebhookQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.UsageAlertWebhookQuery", q)
 }
 
 // The UsageCleanupTaskFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -1094,6 +1262,10 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.PromoCodeUsageQuery, predicate.PromoCodeUsage, promocodeusage.OrderOption]{typ: ent.TypePromoCodeUsage, tq: q}, nil
 	case *ent.ProxyQuery:
 		return &query[*ent.ProxyQuery, predicate.Proxy, proxy.OrderOption]{typ: ent.TypeProxy, tq: q}, nil
+	case *ent.RealAccountQuery:
+		return &query[*ent.RealAccountQuery, predicate.RealAccount, realaccount.OrderOption]{typ: ent.TypeRealAccount, tq: q}, nil
+	case *ent.RealAccountUsageSnapshotQuery:
+		return &query[*ent.RealAccountUsageSnapshotQuery, predicate.RealAccountUsageSnapshot, realaccountusagesnapshot.OrderOption]{typ: ent.TypeRealAccountUsageSnapshot, tq: q}, nil
 	case *ent.RedeemCodeQuery:
 		return &query[*ent.RedeemCodeQuery, predicate.RedeemCode, redeemcode.OrderOption]{typ: ent.TypeRedeemCode, tq: q}, nil
 	case *ent.SecuritySecretQuery:
@@ -1104,6 +1276,14 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.SubscriptionPlanQuery, predicate.SubscriptionPlan, subscriptionplan.OrderOption]{typ: ent.TypeSubscriptionPlan, tq: q}, nil
 	case *ent.TLSFingerprintProfileQuery:
 		return &query[*ent.TLSFingerprintProfileQuery, predicate.TLSFingerprintProfile, tlsfingerprintprofile.OrderOption]{typ: ent.TypeTLSFingerprintProfile, tq: q}, nil
+	case *ent.UsageAlertBindingQuery:
+		return &query[*ent.UsageAlertBindingQuery, predicate.UsageAlertBinding, usagealertbinding.OrderOption]{typ: ent.TypeUsageAlertBinding, tq: q}, nil
+	case *ent.UsageAlertRuleQuery:
+		return &query[*ent.UsageAlertRuleQuery, predicate.UsageAlertRule, usagealertrule.OrderOption]{typ: ent.TypeUsageAlertRule, tq: q}, nil
+	case *ent.UsageAlertStateQuery:
+		return &query[*ent.UsageAlertStateQuery, predicate.UsageAlertState, usagealertstate.OrderOption]{typ: ent.TypeUsageAlertState, tq: q}, nil
+	case *ent.UsageAlertWebhookQuery:
+		return &query[*ent.UsageAlertWebhookQuery, predicate.UsageAlertWebhook, usagealertwebhook.OrderOption]{typ: ent.TypeUsageAlertWebhook, tq: q}, nil
 	case *ent.UsageCleanupTaskQuery:
 		return &query[*ent.UsageCleanupTaskQuery, predicate.UsageCleanupTask, usagecleanuptask.OrderOption]{typ: ent.TypeUsageCleanupTask, tq: q}, nil
 	case *ent.UsageLogQuery:

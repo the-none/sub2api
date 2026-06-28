@@ -273,6 +273,30 @@ func (f ProxyFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProxyMutation", m)
 }
 
+// The RealAccountFunc type is an adapter to allow the use of ordinary
+// function as RealAccount mutator.
+type RealAccountFunc func(context.Context, *ent.RealAccountMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f RealAccountFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.RealAccountMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.RealAccountMutation", m)
+}
+
+// The RealAccountUsageSnapshotFunc type is an adapter to allow the use of ordinary
+// function as RealAccountUsageSnapshot mutator.
+type RealAccountUsageSnapshotFunc func(context.Context, *ent.RealAccountUsageSnapshotMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f RealAccountUsageSnapshotFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.RealAccountUsageSnapshotMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.RealAccountUsageSnapshotMutation", m)
+}
+
 // The RedeemCodeFunc type is an adapter to allow the use of ordinary
 // function as RedeemCode mutator.
 type RedeemCodeFunc func(context.Context, *ent.RedeemCodeMutation) (ent.Value, error)
@@ -331,6 +355,54 @@ func (f TLSFingerprintProfileFunc) Mutate(ctx context.Context, m ent.Mutation) (
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.TLSFingerprintProfileMutation", m)
+}
+
+// The UsageAlertBindingFunc type is an adapter to allow the use of ordinary
+// function as UsageAlertBinding mutator.
+type UsageAlertBindingFunc func(context.Context, *ent.UsageAlertBindingMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f UsageAlertBindingFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.UsageAlertBindingMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.UsageAlertBindingMutation", m)
+}
+
+// The UsageAlertRuleFunc type is an adapter to allow the use of ordinary
+// function as UsageAlertRule mutator.
+type UsageAlertRuleFunc func(context.Context, *ent.UsageAlertRuleMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f UsageAlertRuleFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.UsageAlertRuleMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.UsageAlertRuleMutation", m)
+}
+
+// The UsageAlertStateFunc type is an adapter to allow the use of ordinary
+// function as UsageAlertState mutator.
+type UsageAlertStateFunc func(context.Context, *ent.UsageAlertStateMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f UsageAlertStateFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.UsageAlertStateMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.UsageAlertStateMutation", m)
+}
+
+// The UsageAlertWebhookFunc type is an adapter to allow the use of ordinary
+// function as UsageAlertWebhook mutator.
+type UsageAlertWebhookFunc func(context.Context, *ent.UsageAlertWebhookMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f UsageAlertWebhookFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.UsageAlertWebhookMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.UsageAlertWebhookMutation", m)
 }
 
 // The UsageCleanupTaskFunc type is an adapter to allow the use of ordinary

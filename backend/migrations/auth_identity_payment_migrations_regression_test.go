@@ -168,3 +168,25 @@ func TestMigration151AddsAccountAutoPauseExpiryPartialIndex(t *testing.T) {
 	require.Contains(t, sql, "auto_pause_on_expired = TRUE")
 	require.Contains(t, sql, "expires_at IS NOT NULL")
 }
+
+func TestMigration154UsageAlertsKeepsExistingAccountsUpgradeLightweight(t *testing.T) {
+	content, err := FS.ReadFile("154_usage_alert_real_accounts.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS real_account_id BIGINT NULL")
+	require.Contains(t, sql, "table_schema = current_schema()")
+	require.Contains(t, sql, "accounts_real_account_id_fkey")
+	require.Contains(t, sql, "NOT VALID")
+	require.NotContains(t, sql, "CREATE INDEX IF NOT EXISTS accounts_real_account_id_idx")
+}
+
+func TestMigration155CreatesUsageAlertAccountIndexConcurrently(t *testing.T) {
+	content, err := FS.ReadFile("155_usage_alert_accounts_real_account_index_notx.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "CREATE INDEX CONCURRENTLY IF NOT EXISTS accounts_real_account_id_idx")
+	require.Contains(t, sql, "ON accounts (real_account_id)")
+	require.Contains(t, sql, "WHERE real_account_id IS NOT NULL")
+}
