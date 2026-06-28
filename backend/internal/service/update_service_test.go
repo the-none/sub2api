@@ -62,3 +62,10 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.True(t, errors.Is(err, ErrNoUpdateAvailable))
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
 }
+
+func TestCompareVersionsSupportsForkSuffix(t *testing.T) {
+	require.Zero(t, compareVersions("v0.1.139-account-notify-1", "v0.1.139"))
+	require.Zero(t, compareVersions("0.1.139+account-notify.1", "0.1.139"))
+	require.Equal(t, -1, compareVersions("v0.1.139-account-notify-1", "v0.1.140"))
+	require.Equal(t, 1, compareVersions("v0.1.140-account-notify-1", "v0.1.139"))
+}
