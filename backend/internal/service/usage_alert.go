@@ -23,7 +23,6 @@ const (
 
 	UsageAlertWindow5h        = "5h"
 	UsageAlertWindow7d        = "7d"
-	UsageAlertWindow7dSonnet  = "7d_sonnet"
 	UsageAlertMetricUsed      = "used_percent"
 	UsageAlertMetricRemaining = "remaining_percent"
 	UsageAlertOperatorGTE     = ">="
@@ -48,7 +47,7 @@ const (
 
 var (
 	ErrUsageAlertInvalidPlatform = errors.New("usage alert platform must be openai, anthropic, or all")
-	ErrUsageAlertInvalidWindow   = errors.New("usage alert window must be 5h, 7d, or 7d_sonnet")
+	ErrUsageAlertInvalidWindow   = errors.New("usage alert window must be 5h or 7d")
 	ErrUsageAlertInvalidMetric   = errors.New("usage alert metric must be used_percent or remaining_percent")
 	ErrUsageAlertInvalidOperator = errors.New("usage alert operator must be >= or <=")
 	ErrUsageAlertInvalidWebhook  = errors.New("usage alert webhook type must be json_post or telegram")
@@ -706,7 +705,7 @@ func validateUsageAlertRule(rule *UsageAlertRule) error {
 	if rule.Platform != "" && rule.Platform != UsageAlertPlatformAll && rule.Platform != UsageAlertPlatformOpenAI && rule.Platform != UsageAlertPlatformAnthropic {
 		return ErrUsageAlertInvalidPlatform
 	}
-	if rule.Window != UsageAlertWindow5h && rule.Window != UsageAlertWindow7d && rule.Window != UsageAlertWindow7dSonnet {
+	if rule.Window != UsageAlertWindow5h && rule.Window != UsageAlertWindow7d {
 		return ErrUsageAlertInvalidWindow
 	}
 	if rule.Metric != UsageAlertMetricUsed && rule.Metric != UsageAlertMetricRemaining {
@@ -1049,11 +1048,6 @@ func usageAlertWindowDisplayName(window, language string) string {
 			return "7 天"
 		}
 		return "7d"
-	case UsageAlertWindow7dSonnet:
-		if language == "zh" {
-			return "7 天 Sonnet"
-		}
-		return "7d Sonnet"
 	default:
 		return window
 	}
@@ -1205,9 +1199,6 @@ func usageAlertSnapshotFromUsageInfo(accountID int64, platform, source string, u
 	}
 	if usage.SevenDay != nil {
 		windows[UsageAlertWindow7d] = usageAlertWindowFromProgress(usage.SevenDay)
-	}
-	if usage.SevenDaySonnet != nil {
-		windows[UsageAlertWindow7dSonnet] = usageAlertWindowFromProgress(usage.SevenDaySonnet)
 	}
 	return usageAlertSnapshotFromWindows(accountID, platform, source, windows, sampledAt)
 }

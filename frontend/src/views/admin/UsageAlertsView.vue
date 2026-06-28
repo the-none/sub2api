@@ -159,7 +159,6 @@
                 <select v-model="ruleForm.window" class="input">
                   <option value="5h">5h</option>
                   <option value="7d">7d</option>
-                  <option value="7d_sonnet">7d Sonnet</option>
                 </select>
               </label>
               <label class="block">

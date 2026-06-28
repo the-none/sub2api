@@ -1,7 +1,7 @@
 import { apiClient } from '../client'
 
 export type UsageAlertPlatform = 'all' | 'openai' | 'anthropic'
-export type UsageAlertWindow = '5h' | '7d' | '7d_sonnet'
+export type UsageAlertWindow = '5h' | '7d'
 export type UsageAlertMetric = 'used_percent' | 'remaining_percent'
 export type UsageAlertOperator = '>=' | '<='
 export type UsageAlertWebhookType = 'json_post' | 'telegram'

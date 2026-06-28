@@ -49,6 +49,13 @@ func TestValidateUsageAlertRuleRejectsInvalidStepPercent(t *testing.T) {
 	require.NoError(t, validateUsageAlertRule(rule))
 }
 
+func TestValidateUsageAlertRuleRejectsSonnetWindow(t *testing.T) {
+	rule := validUsageAlertRuleForTest()
+	rule.Window = "7d_sonnet"
+
+	require.ErrorIs(t, validateUsageAlertRule(rule), ErrUsageAlertInvalidWindow)
+}
+
 func TestEnsureUsageAlertRuleNameBuildsDefault(t *testing.T) {
 	step := 5.0
 	minReset := 24.0
