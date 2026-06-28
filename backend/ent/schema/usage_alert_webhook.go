@@ -35,9 +35,16 @@ func (UsageAlertWebhook) Fields() []ent.Field {
 		field.String("name").
 			NotEmpty().
 			MaxLen(100),
+		field.String("type").
+			Default("json_post").
+			MaxLen(32),
 		field.String("url").
-			NotEmpty().
+			Optional().
+			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.JSON("config", map[string]any{}).
+			Default(map[string]any{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		field.Bool("enabled").
 			Default(true),
 		field.Int("retry_count").
@@ -56,6 +63,7 @@ func (UsageAlertWebhook) Edges() []ent.Edge {
 func (UsageAlertWebhook) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("enabled"),
+		index.Fields("type"),
 		index.Fields("name"),
 	}
 }

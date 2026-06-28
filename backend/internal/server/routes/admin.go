@@ -611,6 +611,7 @@ func registerUsageAlertRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		{
 			webhooks.GET("", h.Admin.UsageAlert.ListWebhooks)
 			webhooks.POST("", h.Admin.UsageAlert.CreateWebhook)
+			webhooks.POST("/test", h.Admin.UsageAlert.TestWebhook)
 			webhooks.PUT("/:id", h.Admin.UsageAlert.UpdateWebhook)
 			webhooks.DELETE("/:id", h.Admin.UsageAlert.DeleteWebhook)
 		}

@@ -5,6 +5,7 @@ export type UsageAlertPlatform = 'all' | 'openai' | 'anthropic'
 export type UsageAlertWindow = '5h' | '7d' | '7d_sonnet'
 export type UsageAlertMetric = 'used_percent' | 'remaining_percent'
 export type UsageAlertOperator = '>=' | '<='
+export type UsageAlertWebhookType = 'json_post' | 'telegram'
 
 export interface RealAccount {
   id: number
@@ -50,7 +51,9 @@ export interface UsageAlertRule {
 export interface UsageAlertWebhook {
   id: number
   name: string
-  url: string
+  type: UsageAlertWebhookType
+  url?: string | null
+  config?: Record<string, unknown> | null
   enabled: boolean
   retry_count: number
   created_at: string
@@ -152,6 +155,11 @@ export async function deleteWebhook(id: number): Promise<{ message: string }> {
   return data
 }
 
+export async function testWebhook(payload: UsageAlertWebhookPayload): Promise<{ message: string }> {
+  const { data } = await apiClient.post<{ message: string }>(`${base}/webhooks/test`, payload)
+  return data
+}
+
 export async function listBindings(): Promise<UsageAlertBinding[]> {
   const { data } = await apiClient.get<UsageAlertBinding[]>(`${base}/bindings`)
   return data
@@ -188,6 +196,7 @@ export const usageAlertAPI = {
   createWebhook,
   updateWebhook,
   deleteWebhook,
+  testWebhook,
   listBindings,
   createBinding,
   updateBinding,

@@ -1906,16 +1906,22 @@ func init() {
 			return nil
 		}
 	}()
-	// usagealertwebhookDescURL is the schema descriptor for url field.
-	usagealertwebhookDescURL := usagealertwebhookFields[1].Descriptor()
-	// usagealertwebhook.URLValidator is a validator for the "url" field. It is called by the builders before save.
-	usagealertwebhook.URLValidator = usagealertwebhookDescURL.Validators[0].(func(string) error)
+	// usagealertwebhookDescType is the schema descriptor for type field.
+	usagealertwebhookDescType := usagealertwebhookFields[1].Descriptor()
+	// usagealertwebhook.DefaultType holds the default value on creation for the type field.
+	usagealertwebhook.DefaultType = usagealertwebhookDescType.Default.(string)
+	// usagealertwebhook.TypeValidator is a validator for the "type" field. It is called by the builders before save.
+	usagealertwebhook.TypeValidator = usagealertwebhookDescType.Validators[0].(func(string) error)
+	// usagealertwebhookDescConfig is the schema descriptor for config field.
+	usagealertwebhookDescConfig := usagealertwebhookFields[3].Descriptor()
+	// usagealertwebhook.DefaultConfig holds the default value on creation for the config field.
+	usagealertwebhook.DefaultConfig = usagealertwebhookDescConfig.Default.(map[string]interface{})
 	// usagealertwebhookDescEnabled is the schema descriptor for enabled field.
-	usagealertwebhookDescEnabled := usagealertwebhookFields[2].Descriptor()
+	usagealertwebhookDescEnabled := usagealertwebhookFields[4].Descriptor()
 	// usagealertwebhook.DefaultEnabled holds the default value on creation for the enabled field.
 	usagealertwebhook.DefaultEnabled = usagealertwebhookDescEnabled.Default.(bool)
 	// usagealertwebhookDescRetryCount is the schema descriptor for retry_count field.
-	usagealertwebhookDescRetryCount := usagealertwebhookFields[3].Descriptor()
+	usagealertwebhookDescRetryCount := usagealertwebhookFields[5].Descriptor()
 	// usagealertwebhook.DefaultRetryCount holds the default value on creation for the retry_count field.
 	usagealertwebhook.DefaultRetryCount = usagealertwebhookDescRetryCount.Default.(int)
 	// usagealertwebhook.RetryCountValidator is a validator for the "retry_count" field. It is called by the builders before save.

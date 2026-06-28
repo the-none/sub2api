@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,6 +29,9 @@ const (
 	UsageAlertOperatorGTE     = ">="
 	UsageAlertOperatorLTE     = "<="
 
+	UsageAlertWebhookTypeJSONPost = "json_post"
+	UsageAlertWebhookTypeTelegram = "telegram"
+
 	UsageAlertStatusNormal    = "normal"
 	UsageAlertStatusTriggered = "triggered"
 
@@ -41,6 +46,7 @@ var (
 	ErrUsageAlertInvalidWindow   = errors.New("usage alert window must be 5h, 7d, or 7d_sonnet")
 	ErrUsageAlertInvalidMetric   = errors.New("usage alert metric must be used_percent or remaining_percent")
 	ErrUsageAlertInvalidOperator = errors.New("usage alert operator must be >= or <=")
+	ErrUsageAlertInvalidWebhook  = errors.New("usage alert webhook type must be json_post or telegram")
 )
 
 type RealAccount struct {
@@ -70,13 +76,22 @@ type UsageAlertRule struct {
 }
 
 type UsageAlertWebhook struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	URL        string    `json:"url"`
-	Enabled    bool      `json:"enabled"`
-	RetryCount int       `json:"retry_count"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         int64          `json:"id"`
+	Name       string         `json:"name"`
+	Type       string         `json:"type"`
+	URL        string         `json:"url,omitempty"`
+	Config     map[string]any `json:"config,omitempty"`
+	Enabled    bool           `json:"enabled"`
+	RetryCount int            `json:"retry_count"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+}
+
+type UsageAlertTelegramConfig struct {
+	BotToken            string `json:"bot_token"`
+	ChatID              string `json:"chat_id"`
+	MessageThreadID     *int64 `json:"message_thread_id,omitempty"`
+	DisableNotification bool   `json:"disable_notification,omitempty"`
 }
 
 type UsageAlertBinding struct {
@@ -309,6 +324,45 @@ func (s *UsageAlertService) DeleteBinding(ctx context.Context, id int64) error {
 	return s.repo.DeleteBinding(ctx, id)
 }
 
+func (s *UsageAlertService) TestWebhook(ctx context.Context, webhook *UsageAlertWebhook) error {
+	if s == nil {
+		return fmt.Errorf("usage alert service is not configured")
+	}
+	if webhook == nil {
+		return fmt.Errorf("usage alert webhook is required")
+	}
+	if strings.TrimSpace(webhook.Name) == "" {
+		webhook.Name = "Manual test"
+	}
+	webhook.Enabled = true
+	if err := validateUsageAlertWebhook(webhook); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	resetAt := now.Add(6 * time.Hour)
+	event := UsageAlertWebhookEvent{
+		Event:            "account.usage_alert.test",
+		EventID:          fmt.Sprintf("test-%d", now.UnixNano()),
+		TriggeredAt:      now,
+		AccountID:        0,
+		RealAccountID:    0,
+		RealAccountName:  "Test account",
+		Platform:         UsageAlertPlatformOpenAI,
+		Source:           "manual_test",
+		RuleID:           0,
+		RuleName:         "Manual test notification",
+		Window:           UsageAlertWindow7d,
+		Metric:           UsageAlertMetricRemaining,
+		Operator:         UsageAlertOperatorLTE,
+		Threshold:        20,
+		Value:            18.5,
+		UsedPercent:      81.5,
+		RemainingPercent: 18.5,
+		ResetAt:          &resetAt,
+	}
+	return s.deliverWebhookWithRetry(ctx, *webhook, event)
+}
+
 func (s *UsageAlertService) Observe(ctx context.Context, snapshot *UsageAlertSnapshot) {
 	if s == nil || s.repo == nil || snapshot == nil || snapshot.AccountID <= 0 || len(snapshot.Windows) == 0 {
 		return
@@ -455,40 +509,107 @@ func (s *UsageAlertService) deliverWebhook(webhook UsageAlertWebhook, event Usag
 	if s == nil || s.httpClient == nil || !webhook.Enabled {
 		return
 	}
-	payload, err := json.Marshal(event)
-	if err != nil {
-		slog.Warn("usage_alert_webhook_marshal_failed", "webhook_id", webhook.ID, "error", err)
-		return
+	if err := s.deliverWebhookWithRetry(context.Background(), webhook, event); err != nil {
+		slog.Warn("usage_alert_webhook_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "attempts", webhook.RetryCount+1, "error", err)
+	}
+}
+
+func (s *UsageAlertService) deliverWebhookWithRetry(ctx context.Context, webhook UsageAlertWebhook, event UsageAlertWebhookEvent) error {
+	if s == nil || s.httpClient == nil {
+		return fmt.Errorf("usage alert webhook sender is not configured")
+	}
+	if !webhook.Enabled {
+		return nil
+	}
+	if err := validateUsageAlertWebhook(&webhook); err != nil {
+		return err
 	}
 	attempts := webhook.RetryCount + 1
+	var err error
 	for attempt := 1; attempt <= attempts; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, webhook.URL, bytes.NewReader(payload))
-		if reqErr == nil {
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("User-Agent", "Sub2API-UsageAlert/1.0")
-			resp, doErr := s.httpClient.Do(req)
-			if doErr == nil && resp != nil {
-				_ = resp.Body.Close()
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					cancel()
-					slog.Info("usage_alert_webhook_delivered", "webhook_id", webhook.ID, "event_id", event.EventID, "attempt", attempt)
-					return
-				}
-				doErr = fmt.Errorf("webhook returned status %d", resp.StatusCode)
-			}
-			if doErr != nil {
-				err = doErr
-			}
-		} else {
-			err = reqErr
-		}
+		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err = s.deliverWebhookOnce(attemptCtx, webhook, event)
 		cancel()
+		if err == nil {
+			slog.Info("usage_alert_webhook_delivered", "webhook_id", webhook.ID, "event_id", event.EventID, "attempt", attempt, "type", webhook.Type)
+			return nil
+		}
 		if attempt < attempts {
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 		}
 	}
-	slog.Warn("usage_alert_webhook_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "attempts", attempts, "error", err)
+	return err
+}
+
+func (s *UsageAlertService) deliverWebhookOnce(ctx context.Context, webhook UsageAlertWebhook, event UsageAlertWebhookEvent) error {
+	switch webhook.Type {
+	case "", UsageAlertWebhookTypeJSONPost:
+		return s.deliverJSONPostWebhook(ctx, webhook, event)
+	case UsageAlertWebhookTypeTelegram:
+		return s.deliverTelegramWebhook(ctx, webhook, event)
+	default:
+		return ErrUsageAlertInvalidWebhook
+	}
+}
+
+func (s *UsageAlertService) deliverJSONPostWebhook(ctx context.Context, webhook UsageAlertWebhook, event UsageAlertWebhookEvent) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook.URL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Sub2API-UsageAlert/1.0")
+	return s.doWebhookRequest(req)
+}
+
+func (s *UsageAlertService) deliverTelegramWebhook(ctx context.Context, webhook UsageAlertWebhook, event UsageAlertWebhookEvent) error {
+	cfg, err := usageAlertTelegramConfig(webhook.Config)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"chat_id":              cfg.ChatID,
+		"text":                 formatUsageAlertTelegramMessage(event),
+		"disable_notification": cfg.DisableNotification,
+	}
+	if cfg.MessageThreadID != nil && *cfg.MessageThreadID > 0 {
+		payload["message_thread_id"] = *cfg.MessageThreadID
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", cfg.BotToken), bytes.NewReader(raw))
+	if err != nil {
+		return fmt.Errorf("telegram sendMessage request failed: %s", redactUsageAlertSecret(err.Error(), cfg.BotToken))
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Sub2API-UsageAlert/1.0")
+	if err := s.doWebhookRequest(req); err != nil {
+		return fmt.Errorf("telegram sendMessage failed: %s", redactUsageAlertSecret(err.Error(), cfg.BotToken))
+	}
+	return nil
+}
+
+func (s *UsageAlertService) doWebhookRequest(req *http.Request) error {
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	msg := strings.TrimSpace(string(body))
+	if msg == "" {
+		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
+	}
+	return fmt.Errorf("webhook returned status %d: %s", resp.StatusCode, msg)
 }
 
 func validateRealAccount(account *RealAccount) error {
@@ -550,21 +671,174 @@ func validateUsageAlertWebhook(webhook *UsageAlertWebhook) error {
 		return fmt.Errorf("usage alert webhook is required")
 	}
 	webhook.Name = strings.TrimSpace(webhook.Name)
+	webhook.Type = strings.TrimSpace(webhook.Type)
 	webhook.URL = strings.TrimSpace(webhook.URL)
 	if webhook.Name == "" {
 		return fmt.Errorf("webhook name is required")
 	}
-	if webhook.URL == "" {
-		return fmt.Errorf("webhook url is required")
+	if webhook.Type == "" {
+		webhook.Type = UsageAlertWebhookTypeJSONPost
 	}
-	parsed, err := url.ParseRequestURI(webhook.URL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("webhook url is invalid")
+	if webhook.Config == nil {
+		webhook.Config = map[string]any{}
+	}
+	switch webhook.Type {
+	case UsageAlertWebhookTypeJSONPost:
+		if webhook.URL == "" {
+			return fmt.Errorf("webhook url is required")
+		}
+		parsed, err := url.ParseRequestURI(webhook.URL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return fmt.Errorf("webhook url is invalid")
+		}
+	case UsageAlertWebhookTypeTelegram:
+		if _, err := usageAlertTelegramConfig(webhook.Config); err != nil {
+			return err
+		}
+	default:
+		return ErrUsageAlertInvalidWebhook
 	}
 	if webhook.RetryCount < 0 || webhook.RetryCount > 10 {
 		return fmt.Errorf("retry_count must be between 0 and 10")
 	}
 	return nil
+}
+
+func usageAlertTelegramConfig(config map[string]any) (UsageAlertTelegramConfig, error) {
+	cfg := UsageAlertTelegramConfig{
+		BotToken:            strings.TrimSpace(usageAlertConfigString(config, "bot_token")),
+		ChatID:              strings.TrimSpace(usageAlertConfigString(config, "chat_id")),
+		DisableNotification: usageAlertConfigBool(config, "disable_notification"),
+	}
+	if cfg.BotToken == "" {
+		return cfg, fmt.Errorf("telegram bot_token is required")
+	}
+	if strings.ContainsAny(cfg.BotToken, " \t\r\n/") {
+		return cfg, fmt.Errorf("telegram bot_token is invalid")
+	}
+	if cfg.ChatID == "" {
+		return cfg, fmt.Errorf("telegram chat_id is required")
+	}
+	threadID, hasThreadID, err := usageAlertConfigInt64(config, "message_thread_id")
+	if err != nil {
+		return cfg, fmt.Errorf("telegram message_thread_id is invalid")
+	}
+	if hasThreadID {
+		if threadID < 0 {
+			return cfg, fmt.Errorf("telegram message_thread_id must be non-negative")
+		}
+		if threadID > 0 {
+			cfg.MessageThreadID = &threadID
+		}
+	}
+	return cfg, nil
+}
+
+func usageAlertConfigString(config map[string]any, key string) string {
+	if config == nil {
+		return ""
+	}
+	value, ok := config[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func usageAlertConfigBool(config map[string]any, key string) bool {
+	if config == nil {
+		return false
+	}
+	value, ok := config[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		parsed, _ := strconv.ParseBool(strings.TrimSpace(v))
+		return parsed
+	default:
+		return false
+	}
+}
+
+func usageAlertConfigInt64(config map[string]any, key string) (int64, bool, error) {
+	if config == nil {
+		return 0, false, nil
+	}
+	value, ok := config[key]
+	if !ok || value == nil {
+		return 0, false, nil
+	}
+	switch v := value.(type) {
+	case int:
+		return int64(v), true, nil
+	case int64:
+		return v, true, nil
+	case float64:
+		if math.Trunc(v) != v {
+			return 0, true, fmt.Errorf("must be an integer")
+		}
+		return int64(v), true, nil
+	case json.Number:
+		parsed, err := v.Int64()
+		return parsed, true, err
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, false, nil
+		}
+		parsed, err := strconv.ParseInt(trimmed, 10, 64)
+		return parsed, true, err
+	default:
+		return 0, true, fmt.Errorf("unsupported value type")
+	}
+}
+
+func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent) string {
+	title := "[Sub2API] Usage alert"
+	if event.Event == "account.usage_alert.test" {
+		title = "[Sub2API] Test notification"
+	}
+	accountName := strings.TrimSpace(event.RealAccountName)
+	if accountName == "" {
+		accountName = fmt.Sprintf("#%d", event.RealAccountID)
+	}
+	resetAt := "-"
+	if event.ResetAt != nil {
+		resetAt = event.ResetAt.UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprintf(
+		"%s\nAccount: %s\nPlatform: %s\nRule: %s\nWindow: %s\nUsed: %.1f%%\nRemaining: %.1f%%\nThreshold: %s %s %.1f%%\nReset: %s\nTriggered: %s",
+		title,
+		accountName,
+		event.Platform,
+		event.RuleName,
+		event.Window,
+		event.UsedPercent,
+		event.RemainingPercent,
+		event.Metric,
+		event.Operator,
+		event.Threshold,
+		resetAt,
+		event.TriggeredAt.UTC().Format(time.RFC3339),
+	)
+}
+
+func redactUsageAlertSecret(message, secret string) string {
+	if secret == "" {
+		return message
+	}
+	return strings.ReplaceAll(message, secret, "[redacted]")
 }
 
 func ruleAppliesToPlatform(rulePlatform, snapshotPlatform string) bool {

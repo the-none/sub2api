@@ -3,6 +3,7 @@
 package ent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -25,8 +26,12 @@ type UsageAlertWebhook struct {
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 	// Name holds the value of the "name" field.
 	Name string `json:"name,omitempty"`
+	// Type holds the value of the "type" field.
+	Type string `json:"type,omitempty"`
 	// URL holds the value of the "url" field.
-	URL string `json:"url,omitempty"`
+	URL *string `json:"url,omitempty"`
+	// Config holds the value of the "config" field.
+	Config map[string]interface{} `json:"config,omitempty"`
 	// Enabled holds the value of the "enabled" field.
 	Enabled bool `json:"enabled,omitempty"`
 	// RetryCount holds the value of the "retry_count" field.
@@ -60,11 +65,13 @@ func (*UsageAlertWebhook) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case usagealertwebhook.FieldConfig:
+			values[i] = new([]byte)
 		case usagealertwebhook.FieldEnabled:
 			values[i] = new(sql.NullBool)
 		case usagealertwebhook.FieldID, usagealertwebhook.FieldRetryCount:
 			values[i] = new(sql.NullInt64)
-		case usagealertwebhook.FieldName, usagealertwebhook.FieldURL:
+		case usagealertwebhook.FieldName, usagealertwebhook.FieldType, usagealertwebhook.FieldURL:
 			values[i] = new(sql.NullString)
 		case usagealertwebhook.FieldCreatedAt, usagealertwebhook.FieldUpdatedAt, usagealertwebhook.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -114,11 +121,26 @@ func (_m *UsageAlertWebhook) assignValues(columns []string, values []any) error 
 			} else if value.Valid {
 				_m.Name = value.String
 			}
+		case usagealertwebhook.FieldType:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field type", values[i])
+			} else if value.Valid {
+				_m.Type = value.String
+			}
 		case usagealertwebhook.FieldURL:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field url", values[i])
 			} else if value.Valid {
-				_m.URL = value.String
+				_m.URL = new(string)
+				*_m.URL = value.String
+			}
+		case usagealertwebhook.FieldConfig:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field config", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.Config); err != nil {
+					return fmt.Errorf("unmarshal field config: %w", err)
+				}
 			}
 		case usagealertwebhook.FieldEnabled:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -187,8 +209,16 @@ func (_m *UsageAlertWebhook) String() string {
 	builder.WriteString("name=")
 	builder.WriteString(_m.Name)
 	builder.WriteString(", ")
-	builder.WriteString("url=")
-	builder.WriteString(_m.URL)
+	builder.WriteString("type=")
+	builder.WriteString(_m.Type)
+	builder.WriteString(", ")
+	if v := _m.URL; v != nil {
+		builder.WriteString("url=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	builder.WriteString("config=")
+	builder.WriteString(fmt.Sprintf("%v", _m.Config))
 	builder.WriteString(", ")
 	builder.WriteString("enabled=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Enabled))

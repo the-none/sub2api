@@ -91,16 +91,25 @@ CREATE INDEX IF NOT EXISTS usage_alert_rules_window_idx
 CREATE TABLE IF NOT EXISTS usage_alert_webhooks (
     id            BIGSERIAL PRIMARY KEY,
     name          VARCHAR(100) NOT NULL,
-    url           TEXT NOT NULL,
+    type          VARCHAR(32) NOT NULL DEFAULT 'json_post',
+    url           TEXT,
+    config        JSONB NOT NULL DEFAULT '{}'::jsonb,
     enabled       BOOLEAN NOT NULL DEFAULT TRUE,
     retry_count   INTEGER NOT NULL DEFAULT 2 CHECK (retry_count >= 0 AND retry_count <= 10),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at    TIMESTAMPTZ
+    deleted_at    TIMESTAMPTZ,
+    CONSTRAINT usage_alert_webhooks_type_check
+        CHECK (type IN ('json_post', 'telegram')),
+    CONSTRAINT usage_alert_webhooks_json_post_url_check
+        CHECK (type <> 'json_post' OR NULLIF(BTRIM(url), '') IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS usage_alert_webhooks_enabled_idx
     ON usage_alert_webhooks (enabled)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS usage_alert_webhooks_type_idx
+    ON usage_alert_webhooks (type)
     WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS usage_alert_webhooks_name_idx
     ON usage_alert_webhooks (name)

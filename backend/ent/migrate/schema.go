@@ -1500,7 +1500,9 @@ var (
 		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "name", Type: field.TypeString, Size: 100},
-		{Name: "url", Type: field.TypeString, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "type", Type: field.TypeString, Size: 32, Default: "json_post"},
+		{Name: "url", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "enabled", Type: field.TypeBool, Default: true},
 		{Name: "retry_count", Type: field.TypeInt, Default: 2},
 	}
@@ -1513,7 +1515,12 @@ var (
 			{
 				Name:    "usagealertwebhook_enabled",
 				Unique:  false,
-				Columns: []*schema.Column{UsageAlertWebhooksColumns[6]},
+				Columns: []*schema.Column{UsageAlertWebhooksColumns[8]},
+			},
+			{
+				Name:    "usagealertwebhook_type",
+				Unique:  false,
+				Columns: []*schema.Column{UsageAlertWebhooksColumns[5]},
 			},
 			{
 				Name:    "usagealertwebhook_name",

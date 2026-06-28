@@ -334,12 +334,16 @@ func (r *usageAlertRepository) GetWebhook(ctx context.Context, id int64) (*servi
 }
 
 func (r *usageAlertRepository) CreateWebhook(ctx context.Context, webhook *service.UsageAlertWebhook) (*service.UsageAlertWebhook, error) {
-	row, err := r.client.UsageAlertWebhook.Create().
+	builder := r.client.UsageAlertWebhook.Create().
 		SetName(webhook.Name).
-		SetURL(webhook.URL).
+		SetType(webhook.Type).
+		SetConfig(webhook.Config).
 		SetEnabled(webhook.Enabled).
-		SetRetryCount(webhook.RetryCount).
-		Save(ctx)
+		SetRetryCount(webhook.RetryCount)
+	if webhook.URL != "" {
+		builder.SetURL(webhook.URL)
+	}
+	row, err := builder.Save(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -347,12 +351,18 @@ func (r *usageAlertRepository) CreateWebhook(ctx context.Context, webhook *servi
 }
 
 func (r *usageAlertRepository) UpdateWebhook(ctx context.Context, webhook *service.UsageAlertWebhook) (*service.UsageAlertWebhook, error) {
-	row, err := r.client.UsageAlertWebhook.UpdateOneID(webhook.ID).
+	builder := r.client.UsageAlertWebhook.UpdateOneID(webhook.ID).
 		SetName(webhook.Name).
-		SetURL(webhook.URL).
+		SetType(webhook.Type).
+		SetConfig(webhook.Config).
 		SetEnabled(webhook.Enabled).
-		SetRetryCount(webhook.RetryCount).
-		Save(ctx)
+		SetRetryCount(webhook.RetryCount)
+	if webhook.URL != "" {
+		builder.SetURL(webhook.URL)
+	} else {
+		builder.ClearURL()
+	}
+	row, err := builder.Save(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -585,10 +595,16 @@ func usageAlertWebhookEntityToService(row *dbent.UsageAlertWebhook) *service.Usa
 	if row == nil {
 		return nil
 	}
+	url := ""
+	if row.URL != nil {
+		url = *row.URL
+	}
 	return &service.UsageAlertWebhook{
 		ID:         row.ID,
 		Name:       row.Name,
-		URL:        row.URL,
+		Type:       row.Type,
+		URL:        url,
+		Config:     row.Config,
 		Enabled:    row.Enabled,
 		RetryCount: row.RetryCount,
 		CreatedAt:  row.CreatedAt,

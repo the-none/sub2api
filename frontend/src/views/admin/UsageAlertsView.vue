@@ -220,24 +220,52 @@
               <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
                 <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ text.webhooks }}</h2>
               </div>
-              <form class="grid gap-3 p-6 md:grid-cols-[1fr_120px]" @submit.prevent="saveWebhook">
+              <form class="grid gap-3 p-6 md:grid-cols-[1fr_150px_120px]" @submit.prevent="saveWebhook">
                 <label class="block">
                   <span class="input-label">{{ text.name }}</span>
                   <input v-model.trim="webhookForm.name" class="input" required />
                 </label>
                 <label class="block">
+                  <span class="input-label">{{ text.channelType }}</span>
+                  <select v-model="webhookForm.type" class="input">
+                    <option value="json_post">JSON POST</option>
+                    <option value="telegram">Telegram</option>
+                  </select>
+                </label>
+                <label class="block">
                   <span class="input-label">{{ text.retry }}</span>
                   <input v-model.number="webhookForm.retryCount" class="input" type="number" min="0" max="10" />
                 </label>
-                <label class="block md:col-span-2">
+                <label v-if="webhookForm.type === 'json_post'" class="block md:col-span-3">
                   <span class="input-label">URL</span>
                   <input v-model.trim="webhookForm.url" class="input" required />
                 </label>
+                <template v-else>
+                  <label class="block md:col-span-3">
+                    <span class="input-label">{{ text.telegramBotToken }}</span>
+                    <input v-model.trim="webhookForm.telegramBotToken" class="input" type="password" autocomplete="off" required />
+                  </label>
+                  <label class="block">
+                    <span class="input-label">{{ text.telegramChatID }}</span>
+                    <input v-model.trim="webhookForm.telegramChatID" class="input" required />
+                  </label>
+                  <label class="block">
+                    <span class="input-label">{{ text.telegramTopicID }}</span>
+                    <input v-model.trim="webhookForm.telegramMessageThreadID" class="input" inputmode="numeric" />
+                  </label>
+                  <label class="flex items-center gap-2 pt-6 text-sm text-gray-700 dark:text-gray-300">
+                    <input v-model="webhookForm.telegramDisableNotification" type="checkbox" class="rounded border-gray-300 text-primary-600" />
+                    {{ text.disableNotification }}
+                  </label>
+                </template>
                 <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                   <input v-model="webhookForm.enabled" type="checkbox" class="rounded border-gray-300 text-primary-600" />
                   {{ text.enabled }}
                 </label>
-                <div class="flex justify-end gap-2">
+                <div class="flex justify-end gap-2 md:col-span-2">
+                  <button type="button" class="btn btn-secondary" :disabled="saving.webhookTest" @click="testWebhook">
+                    {{ saving.webhookTest ? text.testing : text.testSend }}
+                  </button>
                   <button type="button" class="btn btn-secondary" @click="resetWebhookForm">{{ text.reset }}</button>
                   <button type="submit" class="btn btn-primary" :disabled="saving.webhook">{{ webhookForm.id ? text.update : text.create }}</button>
                 </div>
@@ -246,7 +274,9 @@
                 <div v-for="webhook in webhooks" :key="webhook.id" class="flex items-center justify-between gap-3 px-6 py-3 text-sm">
                   <div class="min-w-0">
                     <div class="truncate font-medium text-gray-900 dark:text-white">{{ webhook.name }}</div>
-                    <div class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{{ webhook.url }}</div>
+                    <div class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                      {{ webhookTypeLabel(webhook.type) }} · {{ webhookSummary(webhook) }}
+                    </div>
                   </div>
                   <div class="flex flex-shrink-0 gap-2">
                     <button type="button" class="text-primary-600 hover:text-primary-700" @click="editWebhook(webhook)">{{ text.edit }}</button>
@@ -314,6 +344,8 @@ import usageAlertAPI, {
   type UsageAlertRule,
   type UsageAlertSnapshot,
   type UsageAlertWebhook,
+  type UsageAlertWebhookPayload,
+  type UsageAlertWebhookType,
   type UsageAlertWindow
 } from '@/api/admin/usageAlert'
 import type { Account } from '@/types'
@@ -326,12 +358,12 @@ const appStore = useAppStore()
 
 const zhText = {
   title: '用量告警',
-  subtitle: '真实账户、规则和 Webhook 绑定',
+  subtitle: '真实账户、规则和通知渠道绑定',
   refresh: '刷新',
   loading: '加载中',
   realAccounts: '真实账户',
   rules: '规则',
-  webhooks: 'Webhook',
+  webhooks: '通知渠道',
   bindings: '绑定',
   name: '名称',
   platform: '平台',
@@ -348,7 +380,7 @@ const zhText = {
   merge: '合并',
   empty: '暂无数据',
   selectRealAccount: '选择真实账户',
-  selectWebhook: '选择 Webhook',
+  selectWebhook: '选择通知渠道',
   loadSnapshot: '加载快照',
   allPlatforms: '全部平台',
   window: '窗口',
@@ -362,6 +394,14 @@ const zhText = {
   usedPercent: '已用百分比',
   remainingPercent: '剩余百分比',
   retry: '重试',
+  channelType: '类型',
+  telegramBotToken: 'Bot Token',
+  telegramChatID: 'Chat ID',
+  telegramTopicID: 'Topic ID',
+  disableNotification: '静默通知',
+  testSend: '测试发送',
+  testing: '测试中',
+  testSent: '测试已发送',
   saved: '已保存',
   deleted: '已删除',
   merged: '已合并',
@@ -371,12 +411,12 @@ const zhText = {
 
 const enText: typeof zhText = {
   title: 'Usage Alerts',
-  subtitle: 'Real accounts, rules, and webhook bindings',
+  subtitle: 'Real accounts, rules, and notification channel bindings',
   refresh: 'Refresh',
   loading: 'Loading',
   realAccounts: 'Real Accounts',
   rules: 'Rules',
-  webhooks: 'Webhooks',
+  webhooks: 'Notification Channels',
   bindings: 'Bindings',
   name: 'Name',
   platform: 'Platform',
@@ -393,7 +433,7 @@ const enText: typeof zhText = {
   merge: 'Merge',
   empty: 'No data',
   selectRealAccount: 'Select real account',
-  selectWebhook: 'Select webhook',
+  selectWebhook: 'Select notification channel',
   loadSnapshot: 'Load snapshot',
   allPlatforms: 'All platforms',
   window: 'Window',
@@ -407,6 +447,14 @@ const enText: typeof zhText = {
   usedPercent: 'Used percent',
   remainingPercent: 'Remaining percent',
   retry: 'Retry',
+  channelType: 'Type',
+  telegramBotToken: 'Bot Token',
+  telegramChatID: 'Chat ID',
+  telegramTopicID: 'Topic ID',
+  disableNotification: 'Silent notification',
+  testSend: 'Test',
+  testing: 'Testing',
+  testSent: 'Test sent',
   saved: 'Saved',
   deleted: 'Deleted',
   merged: 'Merged',
@@ -430,6 +478,7 @@ const saving = reactive({
   realAccount: false,
   rule: false,
   webhook: false,
+  webhookTest: false,
   binding: false
 })
 
@@ -457,7 +506,12 @@ const ruleForm = reactive({
 const webhookForm = reactive({
   id: null as number | null,
   name: '',
+  type: 'json_post' as UsageAlertWebhookType,
   url: '',
+  telegramBotToken: '',
+  telegramChatID: '',
+  telegramMessageThreadID: '',
+  telegramDisableNotification: false,
   retryCount: 2,
   enabled: true
 })
@@ -656,12 +710,7 @@ async function deleteRule(id: number) {
 async function saveWebhook() {
   saving.webhook = true
   try {
-    const payload = {
-      name: webhookForm.name,
-      url: webhookForm.url,
-      retry_count: Number(webhookForm.retryCount),
-      enabled: webhookForm.enabled
-    }
+    const payload = buildWebhookPayload()
     if (webhookForm.id) {
       await usageAlertAPI.updateWebhook(webhookForm.id, payload)
     } else {
@@ -677,10 +726,52 @@ async function saveWebhook() {
   }
 }
 
+async function testWebhook() {
+  saving.webhookTest = true
+  try {
+    await usageAlertAPI.testWebhook(buildWebhookPayload(true))
+    appStore.showSuccess(text.value.testSent)
+  } catch (error) {
+    appStore.showError(errorMessage(error))
+  } finally {
+    saving.webhookTest = false
+  }
+}
+
+function buildWebhookPayload(forceEnabled = false): UsageAlertWebhookPayload {
+  const payload: UsageAlertWebhookPayload = {
+    name: webhookForm.name,
+    type: webhookForm.type,
+    url: webhookForm.type === 'json_post' ? webhookForm.url : '',
+    config: {},
+    retry_count: Number(webhookForm.retryCount),
+    enabled: forceEnabled ? true : webhookForm.enabled
+  }
+  if (webhookForm.type === 'telegram') {
+    const config: Record<string, unknown> = {
+      bot_token: webhookForm.telegramBotToken,
+      chat_id: webhookForm.telegramChatID,
+      disable_notification: webhookForm.telegramDisableNotification
+    }
+    const threadID = nullable(webhookForm.telegramMessageThreadID)
+    if (threadID) {
+      config.message_thread_id = Number(threadID)
+    }
+    payload.config = config
+  }
+  return payload
+}
+
 function editWebhook(webhook: UsageAlertWebhook) {
+  const config = webhook.config || {}
   webhookForm.id = webhook.id
   webhookForm.name = webhook.name
-  webhookForm.url = webhook.url
+  webhookForm.type = webhook.type || 'json_post'
+  webhookForm.url = webhook.url || ''
+  webhookForm.telegramBotToken = configString(config.bot_token)
+  webhookForm.telegramChatID = configString(config.chat_id)
+  webhookForm.telegramMessageThreadID = configString(config.message_thread_id)
+  webhookForm.telegramDisableNotification = Boolean(config.disable_notification)
   webhookForm.retryCount = webhook.retry_count
   webhookForm.enabled = webhook.enabled
 }
@@ -688,7 +779,12 @@ function editWebhook(webhook: UsageAlertWebhook) {
 function resetWebhookForm() {
   webhookForm.id = null
   webhookForm.name = ''
+  webhookForm.type = 'json_post'
   webhookForm.url = ''
+  webhookForm.telegramBotToken = ''
+  webhookForm.telegramChatID = ''
+  webhookForm.telegramMessageThreadID = ''
+  webhookForm.telegramDisableNotification = false
   webhookForm.retryCount = 2
   webhookForm.enabled = true
 }
@@ -777,6 +873,26 @@ function realAccountName(id: number) {
 
 function webhookName(id: number) {
   return webhooks.value.find((item) => item.id === id)?.name || `#${id}`
+}
+
+function webhookTypeLabel(type?: string) {
+  if (type === 'telegram') return 'Telegram'
+  return 'JSON POST'
+}
+
+function webhookSummary(webhook: UsageAlertWebhook) {
+  if (webhook.type === 'telegram') {
+    const config = webhook.config || {}
+    const chatID = configString(config.chat_id)
+    const threadID = configString(config.message_thread_id)
+    return threadID ? `${chatID} / topic ${threadID}` : chatID
+  }
+  return webhook.url || '-'
+}
+
+function configString(value: unknown) {
+  if (value == null) return ''
+  return String(value)
 }
 
 function formatPercent(value?: number | null) {

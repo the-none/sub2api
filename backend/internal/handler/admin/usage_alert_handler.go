@@ -41,10 +41,12 @@ type usageAlertRuleRequest struct {
 }
 
 type usageAlertWebhookRequest struct {
-	Name       string `json:"name" binding:"required"`
-	URL        string `json:"url" binding:"required"`
-	Enabled    *bool  `json:"enabled"`
-	RetryCount *int   `json:"retry_count"`
+	Name       string         `json:"name" binding:"required"`
+	Type       string         `json:"type"`
+	URL        string         `json:"url"`
+	Config     map[string]any `json:"config"`
+	Enabled    *bool          `json:"enabled"`
+	RetryCount *int           `json:"retry_count"`
 }
 
 type usageAlertBindingRequest struct {
@@ -311,7 +313,9 @@ func (h *UsageAlertHandler) CreateWebhook(c *gin.Context) {
 	}
 	item, err := h.service.CreateWebhook(c.Request.Context(), &service.UsageAlertWebhook{
 		Name:       req.Name,
+		Type:       req.Type,
 		URL:        req.URL,
+		Config:     req.Config,
 		Enabled:    usageAlertEnabledOrDefault(req.Enabled, true),
 		RetryCount: usageAlertRetryOrDefault(req.RetryCount),
 	})
@@ -335,7 +339,9 @@ func (h *UsageAlertHandler) UpdateWebhook(c *gin.Context) {
 	item, err := h.service.UpdateWebhook(c.Request.Context(), &service.UsageAlertWebhook{
 		ID:         id,
 		Name:       req.Name,
+		Type:       req.Type,
 		URL:        req.URL,
+		Config:     req.Config,
 		Enabled:    usageAlertEnabledOrDefault(req.Enabled, true),
 		RetryCount: usageAlertRetryOrDefault(req.RetryCount),
 	})
@@ -356,6 +362,27 @@ func (h *UsageAlertHandler) DeleteWebhook(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"message": "Webhook deleted"})
+}
+
+func (h *UsageAlertHandler) TestWebhook(c *gin.Context) {
+	var req usageAlertWebhookRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	err := h.service.TestWebhook(c.Request.Context(), &service.UsageAlertWebhook{
+		Name:       req.Name,
+		Type:       req.Type,
+		URL:        req.URL,
+		Config:     req.Config,
+		Enabled:    true,
+		RetryCount: usageAlertRetryOrDefault(req.RetryCount),
+	})
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"message": "Webhook test sent"})
 }
 
 func (h *UsageAlertHandler) ListBindings(c *gin.Context) {

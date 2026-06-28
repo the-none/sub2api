@@ -75,6 +75,11 @@ func Name(v string) predicate.UsageAlertWebhook {
 	return predicate.UsageAlertWebhook(sql.FieldEQ(FieldName, v))
 }
 
+// Type applies equality check predicate on the "type" field. It's identical to TypeEQ.
+func Type(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldEQ(FieldType, v))
+}
+
 // URL applies equality check predicate on the "url" field. It's identical to URLEQ.
 func URL(v string) predicate.UsageAlertWebhook {
 	return predicate.UsageAlertWebhook(sql.FieldEQ(FieldURL, v))
@@ -285,6 +290,71 @@ func NameContainsFold(v string) predicate.UsageAlertWebhook {
 	return predicate.UsageAlertWebhook(sql.FieldContainsFold(FieldName, v))
 }
 
+// TypeEQ applies the EQ predicate on the "type" field.
+func TypeEQ(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldEQ(FieldType, v))
+}
+
+// TypeNEQ applies the NEQ predicate on the "type" field.
+func TypeNEQ(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldNEQ(FieldType, v))
+}
+
+// TypeIn applies the In predicate on the "type" field.
+func TypeIn(vs ...string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldIn(FieldType, vs...))
+}
+
+// TypeNotIn applies the NotIn predicate on the "type" field.
+func TypeNotIn(vs ...string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldNotIn(FieldType, vs...))
+}
+
+// TypeGT applies the GT predicate on the "type" field.
+func TypeGT(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldGT(FieldType, v))
+}
+
+// TypeGTE applies the GTE predicate on the "type" field.
+func TypeGTE(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldGTE(FieldType, v))
+}
+
+// TypeLT applies the LT predicate on the "type" field.
+func TypeLT(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldLT(FieldType, v))
+}
+
+// TypeLTE applies the LTE predicate on the "type" field.
+func TypeLTE(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldLTE(FieldType, v))
+}
+
+// TypeContains applies the Contains predicate on the "type" field.
+func TypeContains(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldContains(FieldType, v))
+}
+
+// TypeHasPrefix applies the HasPrefix predicate on the "type" field.
+func TypeHasPrefix(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldHasPrefix(FieldType, v))
+}
+
+// TypeHasSuffix applies the HasSuffix predicate on the "type" field.
+func TypeHasSuffix(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldHasSuffix(FieldType, v))
+}
+
+// TypeEqualFold applies the EqualFold predicate on the "type" field.
+func TypeEqualFold(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldEqualFold(FieldType, v))
+}
+
+// TypeContainsFold applies the ContainsFold predicate on the "type" field.
+func TypeContainsFold(v string) predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldContainsFold(FieldType, v))
+}
+
 // URLEQ applies the EQ predicate on the "url" field.
 func URLEQ(v string) predicate.UsageAlertWebhook {
 	return predicate.UsageAlertWebhook(sql.FieldEQ(FieldURL, v))
@@ -338,6 +408,16 @@ func URLHasPrefix(v string) predicate.UsageAlertWebhook {
 // URLHasSuffix applies the HasSuffix predicate on the "url" field.
 func URLHasSuffix(v string) predicate.UsageAlertWebhook {
 	return predicate.UsageAlertWebhook(sql.FieldHasSuffix(FieldURL, v))
+}
+
+// URLIsNil applies the IsNil predicate on the "url" field.
+func URLIsNil() predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldIsNull(FieldURL))
+}
+
+// URLNotNil applies the NotNil predicate on the "url" field.
+func URLNotNil() predicate.UsageAlertWebhook {
+	return predicate.UsageAlertWebhook(sql.FieldNotNull(FieldURL))
 }
 
 // URLEqualFold applies the EqualFold predicate on the "url" field.

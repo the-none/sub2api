@@ -69,6 +69,20 @@ func (_u *UsageAlertWebhookUpdate) SetNillableName(v *string) *UsageAlertWebhook
 	return _u
 }
 
+// SetType sets the "type" field.
+func (_u *UsageAlertWebhookUpdate) SetType(v string) *UsageAlertWebhookUpdate {
+	_u.mutation.SetType(v)
+	return _u
+}
+
+// SetNillableType sets the "type" field if the given value is not nil.
+func (_u *UsageAlertWebhookUpdate) SetNillableType(v *string) *UsageAlertWebhookUpdate {
+	if v != nil {
+		_u.SetType(*v)
+	}
+	return _u
+}
+
 // SetURL sets the "url" field.
 func (_u *UsageAlertWebhookUpdate) SetURL(v string) *UsageAlertWebhookUpdate {
 	_u.mutation.SetURL(v)
@@ -80,6 +94,18 @@ func (_u *UsageAlertWebhookUpdate) SetNillableURL(v *string) *UsageAlertWebhookU
 	if v != nil {
 		_u.SetURL(*v)
 	}
+	return _u
+}
+
+// ClearURL clears the value of the "url" field.
+func (_u *UsageAlertWebhookUpdate) ClearURL() *UsageAlertWebhookUpdate {
+	_u.mutation.ClearURL()
+	return _u
+}
+
+// SetConfig sets the "config" field.
+func (_u *UsageAlertWebhookUpdate) SetConfig(v map[string]interface{}) *UsageAlertWebhookUpdate {
+	_u.mutation.SetConfig(v)
 	return _u
 }
 
@@ -208,9 +234,9 @@ func (_u *UsageAlertWebhookUpdate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "UsageAlertWebhook.name": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.URL(); ok {
-		if err := usagealertwebhook.URLValidator(v); err != nil {
-			return &ValidationError{Name: "url", err: fmt.Errorf(`ent: validator failed for field "UsageAlertWebhook.url": %w`, err)}
+	if v, ok := _u.mutation.GetType(); ok {
+		if err := usagealertwebhook.TypeValidator(v); err != nil {
+			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "UsageAlertWebhook.type": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.RetryCount(); ok {
@@ -245,8 +271,17 @@ func (_u *UsageAlertWebhookUpdate) sqlSave(ctx context.Context) (_node int, err 
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(usagealertwebhook.FieldName, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.GetType(); ok {
+		_spec.SetField(usagealertwebhook.FieldType, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.URL(); ok {
 		_spec.SetField(usagealertwebhook.FieldURL, field.TypeString, value)
+	}
+	if _u.mutation.URLCleared() {
+		_spec.ClearField(usagealertwebhook.FieldURL, field.TypeString)
+	}
+	if value, ok := _u.mutation.Config(); ok {
+		_spec.SetField(usagealertwebhook.FieldConfig, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.Enabled(); ok {
 		_spec.SetField(usagealertwebhook.FieldEnabled, field.TypeBool, value)
@@ -362,6 +397,20 @@ func (_u *UsageAlertWebhookUpdateOne) SetNillableName(v *string) *UsageAlertWebh
 	return _u
 }
 
+// SetType sets the "type" field.
+func (_u *UsageAlertWebhookUpdateOne) SetType(v string) *UsageAlertWebhookUpdateOne {
+	_u.mutation.SetType(v)
+	return _u
+}
+
+// SetNillableType sets the "type" field if the given value is not nil.
+func (_u *UsageAlertWebhookUpdateOne) SetNillableType(v *string) *UsageAlertWebhookUpdateOne {
+	if v != nil {
+		_u.SetType(*v)
+	}
+	return _u
+}
+
 // SetURL sets the "url" field.
 func (_u *UsageAlertWebhookUpdateOne) SetURL(v string) *UsageAlertWebhookUpdateOne {
 	_u.mutation.SetURL(v)
@@ -373,6 +422,18 @@ func (_u *UsageAlertWebhookUpdateOne) SetNillableURL(v *string) *UsageAlertWebho
 	if v != nil {
 		_u.SetURL(*v)
 	}
+	return _u
+}
+
+// ClearURL clears the value of the "url" field.
+func (_u *UsageAlertWebhookUpdateOne) ClearURL() *UsageAlertWebhookUpdateOne {
+	_u.mutation.ClearURL()
+	return _u
+}
+
+// SetConfig sets the "config" field.
+func (_u *UsageAlertWebhookUpdateOne) SetConfig(v map[string]interface{}) *UsageAlertWebhookUpdateOne {
+	_u.mutation.SetConfig(v)
 	return _u
 }
 
@@ -514,9 +575,9 @@ func (_u *UsageAlertWebhookUpdateOne) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "UsageAlertWebhook.name": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.URL(); ok {
-		if err := usagealertwebhook.URLValidator(v); err != nil {
-			return &ValidationError{Name: "url", err: fmt.Errorf(`ent: validator failed for field "UsageAlertWebhook.url": %w`, err)}
+	if v, ok := _u.mutation.GetType(); ok {
+		if err := usagealertwebhook.TypeValidator(v); err != nil {
+			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "UsageAlertWebhook.type": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.RetryCount(); ok {
@@ -568,8 +629,17 @@ func (_u *UsageAlertWebhookUpdateOne) sqlSave(ctx context.Context) (_node *Usage
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(usagealertwebhook.FieldName, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.GetType(); ok {
+		_spec.SetField(usagealertwebhook.FieldType, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.URL(); ok {
 		_spec.SetField(usagealertwebhook.FieldURL, field.TypeString, value)
+	}
+	if _u.mutation.URLCleared() {
+		_spec.ClearField(usagealertwebhook.FieldURL, field.TypeString)
+	}
+	if value, ok := _u.mutation.Config(); ok {
+		_spec.SetField(usagealertwebhook.FieldConfig, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.Enabled(); ok {
 		_spec.SetField(usagealertwebhook.FieldEnabled, field.TypeBool, value)

@@ -71,9 +71,37 @@ func (_c *UsageAlertWebhookCreate) SetName(v string) *UsageAlertWebhookCreate {
 	return _c
 }
 
+// SetType sets the "type" field.
+func (_c *UsageAlertWebhookCreate) SetType(v string) *UsageAlertWebhookCreate {
+	_c.mutation.SetType(v)
+	return _c
+}
+
+// SetNillableType sets the "type" field if the given value is not nil.
+func (_c *UsageAlertWebhookCreate) SetNillableType(v *string) *UsageAlertWebhookCreate {
+	if v != nil {
+		_c.SetType(*v)
+	}
+	return _c
+}
+
 // SetURL sets the "url" field.
 func (_c *UsageAlertWebhookCreate) SetURL(v string) *UsageAlertWebhookCreate {
 	_c.mutation.SetURL(v)
+	return _c
+}
+
+// SetNillableURL sets the "url" field if the given value is not nil.
+func (_c *UsageAlertWebhookCreate) SetNillableURL(v *string) *UsageAlertWebhookCreate {
+	if v != nil {
+		_c.SetURL(*v)
+	}
+	return _c
+}
+
+// SetConfig sets the "config" field.
+func (_c *UsageAlertWebhookCreate) SetConfig(v map[string]interface{}) *UsageAlertWebhookCreate {
+	_c.mutation.SetConfig(v)
 	return _c
 }
 
@@ -171,6 +199,14 @@ func (_c *UsageAlertWebhookCreate) defaults() error {
 		v := usagealertwebhook.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.GetType(); !ok {
+		v := usagealertwebhook.DefaultType
+		_c.mutation.SetType(v)
+	}
+	if _, ok := _c.mutation.Config(); !ok {
+		v := usagealertwebhook.DefaultConfig
+		_c.mutation.SetConfig(v)
+	}
 	if _, ok := _c.mutation.Enabled(); !ok {
 		v := usagealertwebhook.DefaultEnabled
 		_c.mutation.SetEnabled(v)
@@ -198,13 +234,16 @@ func (_c *UsageAlertWebhookCreate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "UsageAlertWebhook.name": %w`, err)}
 		}
 	}
-	if _, ok := _c.mutation.URL(); !ok {
-		return &ValidationError{Name: "url", err: errors.New(`ent: missing required field "UsageAlertWebhook.url"`)}
+	if _, ok := _c.mutation.GetType(); !ok {
+		return &ValidationError{Name: "type", err: errors.New(`ent: missing required field "UsageAlertWebhook.type"`)}
 	}
-	if v, ok := _c.mutation.URL(); ok {
-		if err := usagealertwebhook.URLValidator(v); err != nil {
-			return &ValidationError{Name: "url", err: fmt.Errorf(`ent: validator failed for field "UsageAlertWebhook.url": %w`, err)}
+	if v, ok := _c.mutation.GetType(); ok {
+		if err := usagealertwebhook.TypeValidator(v); err != nil {
+			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "UsageAlertWebhook.type": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.Config(); !ok {
+		return &ValidationError{Name: "config", err: errors.New(`ent: missing required field "UsageAlertWebhook.config"`)}
 	}
 	if _, ok := _c.mutation.Enabled(); !ok {
 		return &ValidationError{Name: "enabled", err: errors.New(`ent: missing required field "UsageAlertWebhook.enabled"`)}
@@ -260,9 +299,17 @@ func (_c *UsageAlertWebhookCreate) createSpec() (*UsageAlertWebhook, *sqlgraph.C
 		_spec.SetField(usagealertwebhook.FieldName, field.TypeString, value)
 		_node.Name = value
 	}
+	if value, ok := _c.mutation.GetType(); ok {
+		_spec.SetField(usagealertwebhook.FieldType, field.TypeString, value)
+		_node.Type = value
+	}
 	if value, ok := _c.mutation.URL(); ok {
 		_spec.SetField(usagealertwebhook.FieldURL, field.TypeString, value)
-		_node.URL = value
+		_node.URL = &value
+	}
+	if value, ok := _c.mutation.Config(); ok {
+		_spec.SetField(usagealertwebhook.FieldConfig, field.TypeJSON, value)
+		_node.Config = value
 	}
 	if value, ok := _c.mutation.Enabled(); ok {
 		_spec.SetField(usagealertwebhook.FieldEnabled, field.TypeBool, value)
@@ -382,6 +429,18 @@ func (u *UsageAlertWebhookUpsert) UpdateName() *UsageAlertWebhookUpsert {
 	return u
 }
 
+// SetType sets the "type" field.
+func (u *UsageAlertWebhookUpsert) SetType(v string) *UsageAlertWebhookUpsert {
+	u.Set(usagealertwebhook.FieldType, v)
+	return u
+}
+
+// UpdateType sets the "type" field to the value that was provided on create.
+func (u *UsageAlertWebhookUpsert) UpdateType() *UsageAlertWebhookUpsert {
+	u.SetExcluded(usagealertwebhook.FieldType)
+	return u
+}
+
 // SetURL sets the "url" field.
 func (u *UsageAlertWebhookUpsert) SetURL(v string) *UsageAlertWebhookUpsert {
 	u.Set(usagealertwebhook.FieldURL, v)
@@ -391,6 +450,24 @@ func (u *UsageAlertWebhookUpsert) SetURL(v string) *UsageAlertWebhookUpsert {
 // UpdateURL sets the "url" field to the value that was provided on create.
 func (u *UsageAlertWebhookUpsert) UpdateURL() *UsageAlertWebhookUpsert {
 	u.SetExcluded(usagealertwebhook.FieldURL)
+	return u
+}
+
+// ClearURL clears the value of the "url" field.
+func (u *UsageAlertWebhookUpsert) ClearURL() *UsageAlertWebhookUpsert {
+	u.SetNull(usagealertwebhook.FieldURL)
+	return u
+}
+
+// SetConfig sets the "config" field.
+func (u *UsageAlertWebhookUpsert) SetConfig(v map[string]interface{}) *UsageAlertWebhookUpsert {
+	u.Set(usagealertwebhook.FieldConfig, v)
+	return u
+}
+
+// UpdateConfig sets the "config" field to the value that was provided on create.
+func (u *UsageAlertWebhookUpsert) UpdateConfig() *UsageAlertWebhookUpsert {
+	u.SetExcluded(usagealertwebhook.FieldConfig)
 	return u
 }
 
@@ -518,6 +595,20 @@ func (u *UsageAlertWebhookUpsertOne) UpdateName() *UsageAlertWebhookUpsertOne {
 	})
 }
 
+// SetType sets the "type" field.
+func (u *UsageAlertWebhookUpsertOne) SetType(v string) *UsageAlertWebhookUpsertOne {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.SetType(v)
+	})
+}
+
+// UpdateType sets the "type" field to the value that was provided on create.
+func (u *UsageAlertWebhookUpsertOne) UpdateType() *UsageAlertWebhookUpsertOne {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.UpdateType()
+	})
+}
+
 // SetURL sets the "url" field.
 func (u *UsageAlertWebhookUpsertOne) SetURL(v string) *UsageAlertWebhookUpsertOne {
 	return u.Update(func(s *UsageAlertWebhookUpsert) {
@@ -529,6 +620,27 @@ func (u *UsageAlertWebhookUpsertOne) SetURL(v string) *UsageAlertWebhookUpsertOn
 func (u *UsageAlertWebhookUpsertOne) UpdateURL() *UsageAlertWebhookUpsertOne {
 	return u.Update(func(s *UsageAlertWebhookUpsert) {
 		s.UpdateURL()
+	})
+}
+
+// ClearURL clears the value of the "url" field.
+func (u *UsageAlertWebhookUpsertOne) ClearURL() *UsageAlertWebhookUpsertOne {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.ClearURL()
+	})
+}
+
+// SetConfig sets the "config" field.
+func (u *UsageAlertWebhookUpsertOne) SetConfig(v map[string]interface{}) *UsageAlertWebhookUpsertOne {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.SetConfig(v)
+	})
+}
+
+// UpdateConfig sets the "config" field to the value that was provided on create.
+func (u *UsageAlertWebhookUpsertOne) UpdateConfig() *UsageAlertWebhookUpsertOne {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.UpdateConfig()
 	})
 }
 
@@ -827,6 +939,20 @@ func (u *UsageAlertWebhookUpsertBulk) UpdateName() *UsageAlertWebhookUpsertBulk 
 	})
 }
 
+// SetType sets the "type" field.
+func (u *UsageAlertWebhookUpsertBulk) SetType(v string) *UsageAlertWebhookUpsertBulk {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.SetType(v)
+	})
+}
+
+// UpdateType sets the "type" field to the value that was provided on create.
+func (u *UsageAlertWebhookUpsertBulk) UpdateType() *UsageAlertWebhookUpsertBulk {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.UpdateType()
+	})
+}
+
 // SetURL sets the "url" field.
 func (u *UsageAlertWebhookUpsertBulk) SetURL(v string) *UsageAlertWebhookUpsertBulk {
 	return u.Update(func(s *UsageAlertWebhookUpsert) {
@@ -838,6 +964,27 @@ func (u *UsageAlertWebhookUpsertBulk) SetURL(v string) *UsageAlertWebhookUpsertB
 func (u *UsageAlertWebhookUpsertBulk) UpdateURL() *UsageAlertWebhookUpsertBulk {
 	return u.Update(func(s *UsageAlertWebhookUpsert) {
 		s.UpdateURL()
+	})
+}
+
+// ClearURL clears the value of the "url" field.
+func (u *UsageAlertWebhookUpsertBulk) ClearURL() *UsageAlertWebhookUpsertBulk {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.ClearURL()
+	})
+}
+
+// SetConfig sets the "config" field.
+func (u *UsageAlertWebhookUpsertBulk) SetConfig(v map[string]interface{}) *UsageAlertWebhookUpsertBulk {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.SetConfig(v)
+	})
+}
+
+// UpdateConfig sets the "config" field to the value that was provided on create.
+func (u *UsageAlertWebhookUpsertBulk) UpdateConfig() *UsageAlertWebhookUpsertBulk {
+	return u.Update(func(s *UsageAlertWebhookUpsert) {
+		s.UpdateConfig()
 	})
 }
 

@@ -38543,7 +38543,9 @@ type UsageAlertWebhookMutation struct {
 	updated_at      *time.Time
 	deleted_at      *time.Time
 	name            *string
+	_type           *string
 	url             *string
+	_config         *map[string]interface{}
 	enabled         *bool
 	retry_count     *int
 	addretry_count  *int
@@ -38811,6 +38813,42 @@ func (m *UsageAlertWebhookMutation) ResetName() {
 	m.name = nil
 }
 
+// SetType sets the "type" field.
+func (m *UsageAlertWebhookMutation) SetType(s string) {
+	m._type = &s
+}
+
+// GetType returns the value of the "type" field in the mutation.
+func (m *UsageAlertWebhookMutation) GetType() (r string, exists bool) {
+	v := m._type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldType returns the old "type" field's value of the UsageAlertWebhook entity.
+// If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertWebhookMutation) OldType(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldType: %w", err)
+	}
+	return oldValue.Type, nil
+}
+
+// ResetType resets all changes to the "type" field.
+func (m *UsageAlertWebhookMutation) ResetType() {
+	m._type = nil
+}
+
 // SetURL sets the "url" field.
 func (m *UsageAlertWebhookMutation) SetURL(s string) {
 	m.url = &s
@@ -38828,7 +38866,7 @@ func (m *UsageAlertWebhookMutation) URL() (r string, exists bool) {
 // OldURL returns the old "url" field's value of the UsageAlertWebhook entity.
 // If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *UsageAlertWebhookMutation) OldURL(ctx context.Context) (v string, err error) {
+func (m *UsageAlertWebhookMutation) OldURL(ctx context.Context) (v *string, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldURL is only allowed on UpdateOne operations")
 	}
@@ -38842,9 +38880,58 @@ func (m *UsageAlertWebhookMutation) OldURL(ctx context.Context) (v string, err e
 	return oldValue.URL, nil
 }
 
+// ClearURL clears the value of the "url" field.
+func (m *UsageAlertWebhookMutation) ClearURL() {
+	m.url = nil
+	m.clearedFields[usagealertwebhook.FieldURL] = struct{}{}
+}
+
+// URLCleared returns if the "url" field was cleared in this mutation.
+func (m *UsageAlertWebhookMutation) URLCleared() bool {
+	_, ok := m.clearedFields[usagealertwebhook.FieldURL]
+	return ok
+}
+
 // ResetURL resets all changes to the "url" field.
 func (m *UsageAlertWebhookMutation) ResetURL() {
 	m.url = nil
+	delete(m.clearedFields, usagealertwebhook.FieldURL)
+}
+
+// SetConfig sets the "config" field.
+func (m *UsageAlertWebhookMutation) SetConfig(value map[string]interface{}) {
+	m._config = &value
+}
+
+// Config returns the value of the "config" field in the mutation.
+func (m *UsageAlertWebhookMutation) Config() (r map[string]interface{}, exists bool) {
+	v := m._config
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConfig returns the old "config" field's value of the UsageAlertWebhook entity.
+// If the UsageAlertWebhook object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertWebhookMutation) OldConfig(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConfig is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConfig requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConfig: %w", err)
+	}
+	return oldValue.Config, nil
+}
+
+// ResetConfig resets all changes to the "config" field.
+func (m *UsageAlertWebhookMutation) ResetConfig() {
+	m._config = nil
 }
 
 // SetEnabled sets the "enabled" field.
@@ -39027,7 +39114,7 @@ func (m *UsageAlertWebhookMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageAlertWebhookMutation) Fields() []string {
-	fields := make([]string, 0, 7)
+	fields := make([]string, 0, 9)
 	if m.created_at != nil {
 		fields = append(fields, usagealertwebhook.FieldCreatedAt)
 	}
@@ -39040,8 +39127,14 @@ func (m *UsageAlertWebhookMutation) Fields() []string {
 	if m.name != nil {
 		fields = append(fields, usagealertwebhook.FieldName)
 	}
+	if m._type != nil {
+		fields = append(fields, usagealertwebhook.FieldType)
+	}
 	if m.url != nil {
 		fields = append(fields, usagealertwebhook.FieldURL)
+	}
+	if m._config != nil {
+		fields = append(fields, usagealertwebhook.FieldConfig)
 	}
 	if m.enabled != nil {
 		fields = append(fields, usagealertwebhook.FieldEnabled)
@@ -39065,8 +39158,12 @@ func (m *UsageAlertWebhookMutation) Field(name string) (ent.Value, bool) {
 		return m.DeletedAt()
 	case usagealertwebhook.FieldName:
 		return m.Name()
+	case usagealertwebhook.FieldType:
+		return m.GetType()
 	case usagealertwebhook.FieldURL:
 		return m.URL()
+	case usagealertwebhook.FieldConfig:
+		return m.Config()
 	case usagealertwebhook.FieldEnabled:
 		return m.Enabled()
 	case usagealertwebhook.FieldRetryCount:
@@ -39088,8 +39185,12 @@ func (m *UsageAlertWebhookMutation) OldField(ctx context.Context, name string) (
 		return m.OldDeletedAt(ctx)
 	case usagealertwebhook.FieldName:
 		return m.OldName(ctx)
+	case usagealertwebhook.FieldType:
+		return m.OldType(ctx)
 	case usagealertwebhook.FieldURL:
 		return m.OldURL(ctx)
+	case usagealertwebhook.FieldConfig:
+		return m.OldConfig(ctx)
 	case usagealertwebhook.FieldEnabled:
 		return m.OldEnabled(ctx)
 	case usagealertwebhook.FieldRetryCount:
@@ -39131,12 +39232,26 @@ func (m *UsageAlertWebhookMutation) SetField(name string, value ent.Value) error
 		}
 		m.SetName(v)
 		return nil
+	case usagealertwebhook.FieldType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetType(v)
+		return nil
 	case usagealertwebhook.FieldURL:
 		v, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetURL(v)
+		return nil
+	case usagealertwebhook.FieldConfig:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConfig(v)
 		return nil
 	case usagealertwebhook.FieldEnabled:
 		v, ok := value.(bool)
@@ -39200,6 +39315,9 @@ func (m *UsageAlertWebhookMutation) ClearedFields() []string {
 	if m.FieldCleared(usagealertwebhook.FieldDeletedAt) {
 		fields = append(fields, usagealertwebhook.FieldDeletedAt)
 	}
+	if m.FieldCleared(usagealertwebhook.FieldURL) {
+		fields = append(fields, usagealertwebhook.FieldURL)
+	}
 	return fields
 }
 
@@ -39216,6 +39334,9 @@ func (m *UsageAlertWebhookMutation) ClearField(name string) error {
 	switch name {
 	case usagealertwebhook.FieldDeletedAt:
 		m.ClearDeletedAt()
+		return nil
+	case usagealertwebhook.FieldURL:
+		m.ClearURL()
 		return nil
 	}
 	return fmt.Errorf("unknown UsageAlertWebhook nullable field %s", name)
@@ -39237,8 +39358,14 @@ func (m *UsageAlertWebhookMutation) ResetField(name string) error {
 	case usagealertwebhook.FieldName:
 		m.ResetName()
 		return nil
+	case usagealertwebhook.FieldType:
+		m.ResetType()
+		return nil
 	case usagealertwebhook.FieldURL:
 		m.ResetURL()
+		return nil
+	case usagealertwebhook.FieldConfig:
+		m.ResetConfig()
 		return nil
 	case usagealertwebhook.FieldEnabled:
 		m.ResetEnabled()
