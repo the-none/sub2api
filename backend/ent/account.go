@@ -80,6 +80,10 @@ type Account struct {
 	SessionWindowEnd *time.Time `json:"session_window_end,omitempty"`
 	// SessionWindowStatus holds the value of the "session_window_status" field.
 	SessionWindowStatus *string `json:"session_window_status,omitempty"`
+	// Parent account id for a linked spark shadow (NULL = normal).
+	ParentAccountID *int64 `json:"parent_account_id,omitempty"`
+	// 'global' (default) or 'spark' (shadow reads codex_bengalfox).
+	QuotaDimension account.QuotaDimension `json:"quota_dimension,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the AccountQuery when eager-loading is set.
 	Edges        AccountEdges `json:"edges"`
@@ -94,13 +98,17 @@ type AccountEdges struct {
 	Proxy *Proxy `json:"proxy,omitempty"`
 	// RealAccount holds the value of the real_account edge.
 	RealAccount *RealAccount `json:"real_account,omitempty"`
+	// Parent holds the value of the parent edge.
+	Parent *Account `json:"parent,omitempty"`
+	// Children holds the value of the children edge.
+	Children []*Account `json:"children,omitempty"`
 	// UsageLogs holds the value of the usage_logs edge.
 	UsageLogs []*UsageLog `json:"usage_logs,omitempty"`
 	// AccountGroups holds the value of the account_groups edge.
 	AccountGroups []*AccountGroup `json:"account_groups,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [5]bool
+	loadedTypes [7]bool
 }
 
 // GroupsOrErr returns the Groups value or an error if the edge
@@ -134,10 +142,30 @@ func (e AccountEdges) RealAccountOrErr() (*RealAccount, error) {
 	return nil, &NotLoadedError{edge: "real_account"}
 }
 
+// ParentOrErr returns the Parent value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e AccountEdges) ParentOrErr() (*Account, error) {
+	if e.Parent != nil {
+		return e.Parent, nil
+	} else if e.loadedTypes[3] {
+		return nil, &NotFoundError{label: account.Label}
+	}
+	return nil, &NotLoadedError{edge: "parent"}
+}
+
+// ChildrenOrErr returns the Children value or an error if the edge
+// was not loaded in eager-loading.
+func (e AccountEdges) ChildrenOrErr() ([]*Account, error) {
+	if e.loadedTypes[4] {
+		return e.Children, nil
+	}
+	return nil, &NotLoadedError{edge: "children"}
+}
+
 // UsageLogsOrErr returns the UsageLogs value or an error if the edge
 // was not loaded in eager-loading.
 func (e AccountEdges) UsageLogsOrErr() ([]*UsageLog, error) {
-	if e.loadedTypes[3] {
+	if e.loadedTypes[5] {
 		return e.UsageLogs, nil
 	}
 	return nil, &NotLoadedError{edge: "usage_logs"}
@@ -146,7 +174,7 @@ func (e AccountEdges) UsageLogsOrErr() ([]*UsageLog, error) {
 // AccountGroupsOrErr returns the AccountGroups value or an error if the edge
 // was not loaded in eager-loading.
 func (e AccountEdges) AccountGroupsOrErr() ([]*AccountGroup, error) {
-	if e.loadedTypes[4] {
+	if e.loadedTypes[6] {
 		return e.AccountGroups, nil
 	}
 	return nil, &NotLoadedError{edge: "account_groups"}
@@ -163,9 +191,9 @@ func (*Account) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case account.FieldRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case account.FieldID, account.FieldProxyID, account.FieldProxyFallbackOriginID, account.FieldRealAccountID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldPriority:
+		case account.FieldID, account.FieldProxyID, account.FieldProxyFallbackOriginID, account.FieldRealAccountID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldPriority, account.FieldParentAccountID:
 			values[i] = new(sql.NullInt64)
-		case account.FieldName, account.FieldNotes, account.FieldPlatform, account.FieldType, account.FieldStatus, account.FieldErrorMessage, account.FieldTempUnschedulableReason, account.FieldSessionWindowStatus:
+		case account.FieldName, account.FieldNotes, account.FieldPlatform, account.FieldType, account.FieldStatus, account.FieldErrorMessage, account.FieldTempUnschedulableReason, account.FieldSessionWindowStatus, account.FieldQuotaDimension:
 			values[i] = new(sql.NullString)
 		case account.FieldCreatedAt, account.FieldUpdatedAt, account.FieldDeletedAt, account.FieldLastUsedAt, account.FieldExpiresAt, account.FieldRateLimitedAt, account.FieldRateLimitResetAt, account.FieldOverloadUntil, account.FieldTempUnschedulableUntil, account.FieldSessionWindowStart, account.FieldSessionWindowEnd:
 			values[i] = new(sql.NullTime)
@@ -391,6 +419,19 @@ func (_m *Account) assignValues(columns []string, values []any) error {
 				_m.SessionWindowStatus = new(string)
 				*_m.SessionWindowStatus = value.String
 			}
+		case account.FieldParentAccountID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field parent_account_id", values[i])
+			} else if value.Valid {
+				_m.ParentAccountID = new(int64)
+				*_m.ParentAccountID = value.Int64
+			}
+		case account.FieldQuotaDimension:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field quota_dimension", values[i])
+			} else if value.Valid {
+				_m.QuotaDimension = account.QuotaDimension(value.String)
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -417,6 +458,16 @@ func (_m *Account) QueryProxy() *ProxyQuery {
 // QueryRealAccount queries the "real_account" edge of the Account entity.
 func (_m *Account) QueryRealAccount() *RealAccountQuery {
 	return NewAccountClient(_m.config).QueryRealAccount(_m)
+}
+
+// QueryParent queries the "parent" edge of the Account entity.
+func (_m *Account) QueryParent() *AccountQuery {
+	return NewAccountClient(_m.config).QueryParent(_m)
+}
+
+// QueryChildren queries the "children" edge of the Account entity.
+func (_m *Account) QueryChildren() *AccountQuery {
+	return NewAccountClient(_m.config).QueryChildren(_m)
 }
 
 // QueryUsageLogs queries the "usage_logs" edge of the Account entity.
@@ -575,6 +626,14 @@ func (_m *Account) String() string {
 		builder.WriteString("session_window_status=")
 		builder.WriteString(*v)
 	}
+	builder.WriteString(", ")
+	if v := _m.ParentAccountID; v != nil {
+		builder.WriteString("parent_account_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("quota_dimension=")
+	builder.WriteString(fmt.Sprintf("%v", _m.QuotaDimension))
 	builder.WriteByte(')')
 	return builder.String()
 }
