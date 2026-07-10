@@ -70,6 +70,11 @@ func RealAccountID(v int64) predicate.RealAccountUsageSnapshot {
 	return predicate.RealAccountUsageSnapshot(sql.FieldEQ(FieldRealAccountID, v))
 }
 
+// QuotaDimension applies equality check predicate on the "quota_dimension" field. It's identical to QuotaDimensionEQ.
+func QuotaDimension(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldEQ(FieldQuotaDimension, v))
+}
+
 // Platform applies equality check predicate on the "platform" field. It's identical to PlatformEQ.
 func Platform(v string) predicate.RealAccountUsageSnapshot {
 	return predicate.RealAccountUsageSnapshot(sql.FieldEQ(FieldPlatform, v))
@@ -183,6 +188,71 @@ func RealAccountIDIn(vs ...int64) predicate.RealAccountUsageSnapshot {
 // RealAccountIDNotIn applies the NotIn predicate on the "real_account_id" field.
 func RealAccountIDNotIn(vs ...int64) predicate.RealAccountUsageSnapshot {
 	return predicate.RealAccountUsageSnapshot(sql.FieldNotIn(FieldRealAccountID, vs...))
+}
+
+// QuotaDimensionEQ applies the EQ predicate on the "quota_dimension" field.
+func QuotaDimensionEQ(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldEQ(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionNEQ applies the NEQ predicate on the "quota_dimension" field.
+func QuotaDimensionNEQ(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldNEQ(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionIn applies the In predicate on the "quota_dimension" field.
+func QuotaDimensionIn(vs ...string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldIn(FieldQuotaDimension, vs...))
+}
+
+// QuotaDimensionNotIn applies the NotIn predicate on the "quota_dimension" field.
+func QuotaDimensionNotIn(vs ...string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldNotIn(FieldQuotaDimension, vs...))
+}
+
+// QuotaDimensionGT applies the GT predicate on the "quota_dimension" field.
+func QuotaDimensionGT(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldGT(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionGTE applies the GTE predicate on the "quota_dimension" field.
+func QuotaDimensionGTE(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldGTE(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionLT applies the LT predicate on the "quota_dimension" field.
+func QuotaDimensionLT(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldLT(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionLTE applies the LTE predicate on the "quota_dimension" field.
+func QuotaDimensionLTE(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldLTE(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionContains applies the Contains predicate on the "quota_dimension" field.
+func QuotaDimensionContains(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldContains(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionHasPrefix applies the HasPrefix predicate on the "quota_dimension" field.
+func QuotaDimensionHasPrefix(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldHasPrefix(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionHasSuffix applies the HasSuffix predicate on the "quota_dimension" field.
+func QuotaDimensionHasSuffix(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldHasSuffix(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionEqualFold applies the EqualFold predicate on the "quota_dimension" field.
+func QuotaDimensionEqualFold(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldEqualFold(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionContainsFold applies the ContainsFold predicate on the "quota_dimension" field.
+func QuotaDimensionContainsFold(v string) predicate.RealAccountUsageSnapshot {
+	return predicate.RealAccountUsageSnapshot(sql.FieldContainsFold(FieldQuotaDimension, v))
 }
 
 // PlatformEQ applies the EQ predicate on the "platform" field.

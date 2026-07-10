@@ -30,12 +30,14 @@ type attachAccountsRequest struct {
 }
 
 type usageAlertAccountResponse struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	Platform      string `json:"platform"`
-	Type          string `json:"type"`
-	Status        string `json:"status"`
-	RealAccountID *int64 `json:"real_account_id,omitempty"`
+	ID              int64  `json:"id"`
+	Name            string `json:"name"`
+	Platform        string `json:"platform"`
+	Type            string `json:"type"`
+	Status          string `json:"status"`
+	RealAccountID   *int64 `json:"real_account_id,omitempty"`
+	ParentAccountID *int64 `json:"parent_account_id,omitempty"`
+	QuotaDimension  string `json:"quota_dimension"`
 }
 
 type usageAlertRealAccountResponse struct {
@@ -53,6 +55,7 @@ type usageAlertRuleRequest struct {
 	Name               string   `json:"name"`
 	RealAccountID      *int64   `json:"real_account_id"`
 	Platform           string   `json:"platform"`
+	QuotaDimension     string   `json:"quota_dimension"`
 	Window             string   `json:"window" binding:"required"`
 	Metric             string   `json:"metric" binding:"required"`
 	Operator           string   `json:"operator" binding:"required"`
@@ -143,12 +146,14 @@ func usageAlertAccountResponseFromService(account *service.Account) *usageAlertA
 		return nil
 	}
 	return &usageAlertAccountResponse{
-		ID:            account.ID,
-		Name:          account.Name,
-		Platform:      account.Platform,
-		Type:          account.Type,
-		Status:        account.Status,
-		RealAccountID: account.RealAccountID,
+		ID:              account.ID,
+		Name:            account.Name,
+		Platform:        account.Platform,
+		Type:            account.Type,
+		Status:          account.Status,
+		RealAccountID:   account.RealAccountID,
+		ParentAccountID: account.ParentAccountID,
+		QuotaDimension:  account.QuotaDimensionOrDefault(),
 	}
 }
 
@@ -281,7 +286,7 @@ func (h *UsageAlertHandler) GetSnapshot(c *gin.Context) {
 	if !ok {
 		return
 	}
-	snapshot, err := h.service.GetSnapshot(c.Request.Context(), id)
+	snapshot, err := h.service.GetSnapshot(c.Request.Context(), id, c.Query("quota_dimension"))
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -308,6 +313,7 @@ func (h *UsageAlertHandler) CreateRule(c *gin.Context) {
 		Name:               req.Name,
 		RealAccountID:      req.RealAccountID,
 		Platform:           req.Platform,
+		QuotaDimension:     req.QuotaDimension,
 		Window:             req.Window,
 		Metric:             req.Metric,
 		Operator:           req.Operator,
@@ -339,6 +345,7 @@ func (h *UsageAlertHandler) UpdateRule(c *gin.Context) {
 		Name:               req.Name,
 		RealAccountID:      req.RealAccountID,
 		Platform:           req.Platform,
+		QuotaDimension:     req.QuotaDimension,
 		Window:             req.Window,
 		Metric:             req.Metric,
 		Operator:           req.Operator,

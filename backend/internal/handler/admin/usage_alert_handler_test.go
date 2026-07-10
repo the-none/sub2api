@@ -46,6 +46,7 @@ func TestUsageAlertRealAccountResponseUsesLinkedAccountJSONShape(t *testing.T) {
 	require.Equal(t, service.PlatformAnthropic, account["platform"])
 	require.Equal(t, service.AccountTypeOAuth, account["type"])
 	require.Equal(t, service.StatusActive, account["status"])
+	require.Equal(t, service.QuotaDimensionGlobal, account["quota_dimension"])
 	require.NotContains(t, account, "ID")
 	require.NotContains(t, account, "Name")
 	require.NotContains(t, account, "credentials")

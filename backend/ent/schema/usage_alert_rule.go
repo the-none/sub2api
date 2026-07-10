@@ -42,6 +42,9 @@ func (UsageAlertRule) Fields() []ent.Field {
 		field.Int64("real_account_id").
 			Optional().
 			Nillable(),
+		field.String("quota_dimension").
+			Default("global").
+			MaxLen(32),
 		field.String("window").
 			NotEmpty().
 			MaxLen(32),
@@ -83,6 +86,7 @@ func (UsageAlertRule) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("enabled", "platform"),
 		index.Fields("enabled", "real_account_id"),
+		index.Fields("enabled", "real_account_id", "quota_dimension"),
 		index.Fields("window"),
 	}
 }

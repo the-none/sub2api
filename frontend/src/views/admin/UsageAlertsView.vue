@@ -80,18 +80,20 @@
                               class="inline-flex max-w-[150px] items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700 dark:bg-dark-700 dark:text-gray-300"
                             >
                               <span class="truncate">{{ account.name }}</span>
+                              <span v-if="account.quota_dimension === 'spark'" class="text-[10px] font-semibold text-amber-600 dark:text-amber-400">Spark</span>
                               <button type="button" class="text-gray-400 hover:text-red-600" @click="detachAccount(item.id, account.id)">x</button>
                             </span>
                             <span v-if="!item.accounts?.length" class="text-xs text-gray-400">{{ text.empty }}</span>
                           </div>
                         </td>
                         <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
-                          <div v-if="snapshots[item.id]" class="space-y-1">
-                            <div v-for="entry in snapshotEntries(snapshots[item.id])" :key="entry.window">
-                              {{ entry.window }}: {{ entry.used }}% / {{ entry.remaining }}%
+                          <div v-if="snapshotLoaded[item.id]" class="space-y-1">
+                            <div v-for="entry in snapshotEntries(item)" :key="`${entry.dimension}-${entry.window}`">
+                              {{ quotaDimensionLabel(entry.dimension) }} · {{ entry.window }}: {{ entry.used }}% / {{ entry.remaining }}%
                             </div>
+                            <div v-if="snapshotEntries(item).length === 0" class="text-gray-400">{{ text.empty }}</div>
                           </div>
-                          <button v-else type="button" class="text-primary-600 hover:text-primary-700" @click="loadSnapshot(item.id)">
+                          <button v-else type="button" class="text-primary-600 hover:text-primary-700" @click="loadSnapshot(item)">
                             {{ text.loadSnapshot }}
                           </button>
                         </td>
@@ -159,6 +161,13 @@
                 <select v-model="ruleForm.window" class="input">
                   <option value="5h">5h</option>
                   <option value="7d">7d</option>
+                </select>
+              </label>
+              <label class="block">
+                <span class="input-label">{{ text.quotaDimension }}</span>
+                <select v-model="ruleForm.quotaDimension" class="input">
+                  <option value="global">{{ text.globalQuota }}</option>
+                  <option v-if="selectedRuleRealAccount?.platform === 'openai'" value="spark">{{ text.sparkQuota }}</option>
                 </select>
               </label>
               <label class="block">
@@ -354,7 +363,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import accountsAPI from '@/api/admin/accounts'
@@ -362,6 +371,7 @@ import usageAlertAPI, {
   type RealAccount,
   type UsageAlertBinding,
   type UsageAlertMetric,
+  type UsageAlertQuotaDimension,
   type UsageAlertPlatform,
   type UsageAlertRule,
   type UsageAlertSnapshot,
@@ -394,6 +404,9 @@ const zhText = {
   notes: '备注',
   accounts: '账号',
   snapshot: '快照',
+  quotaDimension: '额度维度',
+  globalQuota: '全局额度',
+  sparkQuota: 'Spark 额度',
   actions: '操作',
   create: '创建',
   update: '更新',
@@ -455,6 +468,9 @@ const enText: typeof zhText = {
   notes: 'Notes',
   accounts: 'Accounts',
   snapshot: 'Snapshot',
+  quotaDimension: 'Quota dimension',
+  globalQuota: 'Global quota',
+  sparkQuota: 'Spark quota',
   actions: 'Actions',
   create: 'Create',
   update: 'Update',
@@ -508,7 +524,8 @@ const rules = ref<UsageAlertRule[]>([])
 const webhooks = ref<UsageAlertWebhook[]>([])
 const bindings = ref<UsageAlertBinding[]>([])
 const accounts = ref<Account[]>([])
-const snapshots = reactive<Record<number, UsageAlertSnapshot | null>>({})
+const snapshots = reactive<Record<string, UsageAlertSnapshot | null>>({})
+const snapshotLoaded = reactive<Record<number, boolean>>({})
 const attachRealAccountID = ref(0)
 const attachAccountIDs = ref<number[]>([])
 
@@ -532,6 +549,7 @@ const ruleForm = reactive({
   id: null as number | null,
   name: '',
   realAccountID: 0,
+  quotaDimension: 'global' as UsageAlertQuotaDimension,
   window: '7d' as UsageAlertWindow,
   metric: 'remaining_percent' as UsageAlertMetric,
   operator: '<=' as '<=' | '>=',
@@ -570,6 +588,9 @@ const bindingForm = reactive({
 
 const selectedAttachRealAccount = computed(() => realAccounts.value.find((item) => item.id === attachRealAccountID.value) || null)
 const selectedRuleRealAccount = computed(() => realAccounts.value.find((item) => item.id === ruleForm.realAccountID) || null)
+watch(() => selectedRuleRealAccount.value?.platform, (platform) => {
+  if (platform !== 'openai') ruleForm.quotaDimension = 'global'
+})
 const attachableAccounts = computed(() => {
   const realAccount = selectedAttachRealAccount.value
   return accounts.value.filter((account) => {
@@ -605,9 +626,14 @@ async function loadAll() {
   }
 }
 
-async function loadSnapshot(id: number) {
+async function loadSnapshot(item: RealAccount) {
   try {
-    snapshots[id] = await usageAlertAPI.getSnapshot(id)
+    const dimensions = realAccountQuotaDimensions(item)
+    const rows = await Promise.all(dimensions.map((dimension) => usageAlertAPI.getSnapshot(item.id, dimension)))
+    dimensions.forEach((dimension, index) => {
+      snapshots[snapshotKey(item.id, dimension)] = rows[index]
+    })
+    snapshotLoaded[item.id] = true
   } catch (error) {
     appStore.showError(errorMessage(error))
   }
@@ -695,6 +721,7 @@ async function saveRule() {
       name: ruleForm.name,
       real_account_id: ruleForm.realAccountID,
       platform: (selectedRuleRealAccount.value?.platform || 'all') as UsageAlertPlatform,
+      quota_dimension: ruleForm.quotaDimension,
       window: ruleForm.window,
       metric: ruleForm.metric,
       operator: ruleForm.operator,
@@ -723,6 +750,7 @@ function editRule(rule: UsageAlertRule) {
   ruleForm.id = rule.id
   ruleForm.name = rule.name
   ruleForm.realAccountID = rule.real_account_id || 0
+  ruleForm.quotaDimension = rule.quota_dimension || 'global'
   ruleForm.window = rule.window
   ruleForm.metric = rule.metric
   ruleForm.operator = rule.operator
@@ -737,6 +765,7 @@ function resetRuleForm() {
   ruleForm.id = null
   ruleForm.name = ''
   ruleForm.realAccountID = 0
+  ruleForm.quotaDimension = 'global'
   ruleForm.window = '7d'
   ruleForm.metric = 'remaining_percent'
   ruleForm.operator = '<='
@@ -905,13 +934,33 @@ async function deleteBinding(id: number) {
   }
 }
 
-function snapshotEntries(snapshot?: UsageAlertSnapshot | null) {
-  if (!snapshot) return []
-  return Object.entries(snapshot.windows || {}).map(([window, value]) => ({
-    window,
-    used: formatPercent(value?.used_percent),
-    remaining: formatPercent(value?.remaining_percent)
-  }))
+function snapshotEntries(realAccount: RealAccount) {
+  return realAccountQuotaDimensions(realAccount).flatMap((dimension) => {
+    const snapshot = snapshots[snapshotKey(realAccount.id, dimension)]
+    if (!snapshot) return []
+    return Object.entries(snapshot.windows || {}).map(([window, value]) => ({
+      dimension,
+      window,
+      used: formatPercent(value?.used_percent),
+      remaining: formatPercent(value?.remaining_percent)
+    }))
+  })
+}
+
+function snapshotKey(realAccountID: number, quotaDimension: UsageAlertQuotaDimension) {
+  return `${realAccountID}:${quotaDimension}`
+}
+
+function realAccountQuotaDimensions(realAccount: RealAccount): UsageAlertQuotaDimension[] {
+  const dimensions = new Set<UsageAlertQuotaDimension>(['global'])
+  for (const account of realAccount.accounts || []) {
+    dimensions.add(account.quota_dimension || 'global')
+  }
+  return [...dimensions]
+}
+
+function quotaDimensionLabel(quotaDimension: UsageAlertQuotaDimension | string) {
+  return quotaDimension === 'spark' ? text.value.sparkQuota : text.value.globalQuota
 }
 
 function platformLabel(platform: string) {
@@ -932,6 +981,7 @@ function ruleDetailItems(rule: UsageAlertRule) {
   return [
     ruleRealAccountLabel(rule),
     platformLabel(rule.real_account?.platform || rule.platform),
+    quotaDimensionLabel(rule.quota_dimension),
     rule.window,
     `${metricLabel(rule.metric)} ${rule.operator} ${formatRuleNumber(rule.threshold)}%`,
     `${text.value.stepPercentShort} ${rule.step_percent == null ? '-' : `${formatRuleNumber(rule.step_percent)}%`}`,

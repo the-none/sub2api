@@ -75,6 +75,11 @@ func RuleID(v int64) predicate.UsageAlertState {
 	return predicate.UsageAlertState(sql.FieldEQ(FieldRuleID, v))
 }
 
+// QuotaDimension applies equality check predicate on the "quota_dimension" field. It's identical to QuotaDimensionEQ.
+func QuotaDimension(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldEQ(FieldQuotaDimension, v))
+}
+
 // Window applies equality check predicate on the "window" field. It's identical to WindowEQ.
 func Window(v string) predicate.UsageAlertState {
 	return predicate.UsageAlertState(sql.FieldEQ(FieldWindow, v))
@@ -218,6 +223,71 @@ func RuleIDIn(vs ...int64) predicate.UsageAlertState {
 // RuleIDNotIn applies the NotIn predicate on the "rule_id" field.
 func RuleIDNotIn(vs ...int64) predicate.UsageAlertState {
 	return predicate.UsageAlertState(sql.FieldNotIn(FieldRuleID, vs...))
+}
+
+// QuotaDimensionEQ applies the EQ predicate on the "quota_dimension" field.
+func QuotaDimensionEQ(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldEQ(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionNEQ applies the NEQ predicate on the "quota_dimension" field.
+func QuotaDimensionNEQ(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldNEQ(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionIn applies the In predicate on the "quota_dimension" field.
+func QuotaDimensionIn(vs ...string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldIn(FieldQuotaDimension, vs...))
+}
+
+// QuotaDimensionNotIn applies the NotIn predicate on the "quota_dimension" field.
+func QuotaDimensionNotIn(vs ...string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldNotIn(FieldQuotaDimension, vs...))
+}
+
+// QuotaDimensionGT applies the GT predicate on the "quota_dimension" field.
+func QuotaDimensionGT(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldGT(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionGTE applies the GTE predicate on the "quota_dimension" field.
+func QuotaDimensionGTE(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldGTE(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionLT applies the LT predicate on the "quota_dimension" field.
+func QuotaDimensionLT(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldLT(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionLTE applies the LTE predicate on the "quota_dimension" field.
+func QuotaDimensionLTE(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldLTE(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionContains applies the Contains predicate on the "quota_dimension" field.
+func QuotaDimensionContains(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldContains(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionHasPrefix applies the HasPrefix predicate on the "quota_dimension" field.
+func QuotaDimensionHasPrefix(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldHasPrefix(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionHasSuffix applies the HasSuffix predicate on the "quota_dimension" field.
+func QuotaDimensionHasSuffix(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldHasSuffix(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionEqualFold applies the EqualFold predicate on the "quota_dimension" field.
+func QuotaDimensionEqualFold(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldEqualFold(FieldQuotaDimension, v))
+}
+
+// QuotaDimensionContainsFold applies the ContainsFold predicate on the "quota_dimension" field.
+func QuotaDimensionContainsFold(v string) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldContainsFold(FieldQuotaDimension, v))
 }
 
 // WindowEQ applies the EQ predicate on the "window" field.

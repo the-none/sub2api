@@ -57,6 +57,20 @@ func (_c *RealAccountUsageSnapshotCreate) SetRealAccountID(v int64) *RealAccount
 	return _c
 }
 
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_c *RealAccountUsageSnapshotCreate) SetQuotaDimension(v string) *RealAccountUsageSnapshotCreate {
+	_c.mutation.SetQuotaDimension(v)
+	return _c
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_c *RealAccountUsageSnapshotCreate) SetNillableQuotaDimension(v *string) *RealAccountUsageSnapshotCreate {
+	if v != nil {
+		_c.SetQuotaDimension(*v)
+	}
+	return _c
+}
+
 // SetPlatform sets the "platform" field.
 func (_c *RealAccountUsageSnapshotCreate) SetPlatform(v string) *RealAccountUsageSnapshotCreate {
 	_c.mutation.SetPlatform(v)
@@ -129,6 +143,10 @@ func (_c *RealAccountUsageSnapshotCreate) defaults() {
 		v := realaccountusagesnapshot.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.QuotaDimension(); !ok {
+		v := realaccountusagesnapshot.DefaultQuotaDimension
+		_c.mutation.SetQuotaDimension(v)
+	}
 	if _, ok := _c.mutation.SnapshotJSON(); !ok {
 		v := realaccountusagesnapshot.DefaultSnapshotJSON()
 		_c.mutation.SetSnapshotJSON(v)
@@ -145,6 +163,14 @@ func (_c *RealAccountUsageSnapshotCreate) check() error {
 	}
 	if _, ok := _c.mutation.RealAccountID(); !ok {
 		return &ValidationError{Name: "real_account_id", err: errors.New(`ent: missing required field "RealAccountUsageSnapshot.real_account_id"`)}
+	}
+	if _, ok := _c.mutation.QuotaDimension(); !ok {
+		return &ValidationError{Name: "quota_dimension", err: errors.New(`ent: missing required field "RealAccountUsageSnapshot.quota_dimension"`)}
+	}
+	if v, ok := _c.mutation.QuotaDimension(); ok {
+		if err := realaccountusagesnapshot.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "RealAccountUsageSnapshot.quota_dimension": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.Platform(); !ok {
 		return &ValidationError{Name: "platform", err: errors.New(`ent: missing required field "RealAccountUsageSnapshot.platform"`)}
@@ -205,6 +231,10 @@ func (_c *RealAccountUsageSnapshotCreate) createSpec() (*RealAccountUsageSnapsho
 	if value, ok := _c.mutation.UpdatedAt(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldUpdatedAt, field.TypeTime, value)
 		_node.UpdatedAt = value
+	}
+	if value, ok := _c.mutation.QuotaDimension(); ok {
+		_spec.SetField(realaccountusagesnapshot.FieldQuotaDimension, field.TypeString, value)
+		_node.QuotaDimension = value
 	}
 	if value, ok := _c.mutation.Platform(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldPlatform, field.TypeString, value)
@@ -312,6 +342,18 @@ func (u *RealAccountUsageSnapshotUpsert) SetRealAccountID(v int64) *RealAccountU
 // UpdateRealAccountID sets the "real_account_id" field to the value that was provided on create.
 func (u *RealAccountUsageSnapshotUpsert) UpdateRealAccountID() *RealAccountUsageSnapshotUpsert {
 	u.SetExcluded(realaccountusagesnapshot.FieldRealAccountID)
+	return u
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (u *RealAccountUsageSnapshotUpsert) SetQuotaDimension(v string) *RealAccountUsageSnapshotUpsert {
+	u.Set(realaccountusagesnapshot.FieldQuotaDimension, v)
+	return u
+}
+
+// UpdateQuotaDimension sets the "quota_dimension" field to the value that was provided on create.
+func (u *RealAccountUsageSnapshotUpsert) UpdateQuotaDimension() *RealAccountUsageSnapshotUpsert {
+	u.SetExcluded(realaccountusagesnapshot.FieldQuotaDimension)
 	return u
 }
 
@@ -433,6 +475,20 @@ func (u *RealAccountUsageSnapshotUpsertOne) SetRealAccountID(v int64) *RealAccou
 func (u *RealAccountUsageSnapshotUpsertOne) UpdateRealAccountID() *RealAccountUsageSnapshotUpsertOne {
 	return u.Update(func(s *RealAccountUsageSnapshotUpsert) {
 		s.UpdateRealAccountID()
+	})
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (u *RealAccountUsageSnapshotUpsertOne) SetQuotaDimension(v string) *RealAccountUsageSnapshotUpsertOne {
+	return u.Update(func(s *RealAccountUsageSnapshotUpsert) {
+		s.SetQuotaDimension(v)
+	})
+}
+
+// UpdateQuotaDimension sets the "quota_dimension" field to the value that was provided on create.
+func (u *RealAccountUsageSnapshotUpsertOne) UpdateQuotaDimension() *RealAccountUsageSnapshotUpsertOne {
+	return u.Update(func(s *RealAccountUsageSnapshotUpsert) {
+		s.UpdateQuotaDimension()
 	})
 }
 
@@ -728,6 +784,20 @@ func (u *RealAccountUsageSnapshotUpsertBulk) SetRealAccountID(v int64) *RealAcco
 func (u *RealAccountUsageSnapshotUpsertBulk) UpdateRealAccountID() *RealAccountUsageSnapshotUpsertBulk {
 	return u.Update(func(s *RealAccountUsageSnapshotUpsert) {
 		s.UpdateRealAccountID()
+	})
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (u *RealAccountUsageSnapshotUpsertBulk) SetQuotaDimension(v string) *RealAccountUsageSnapshotUpsertBulk {
+	return u.Update(func(s *RealAccountUsageSnapshotUpsert) {
+		s.SetQuotaDimension(v)
+	})
+}
+
+// UpdateQuotaDimension sets the "quota_dimension" field to the value that was provided on create.
+func (u *RealAccountUsageSnapshotUpsertBulk) UpdateQuotaDimension() *RealAccountUsageSnapshotUpsertBulk {
+	return u.Update(func(s *RealAccountUsageSnapshotUpsert) {
+		s.UpdateQuotaDimension()
 	})
 }
 

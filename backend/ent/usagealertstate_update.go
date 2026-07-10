@@ -64,6 +64,20 @@ func (_u *UsageAlertStateUpdate) SetNillableRuleID(v *int64) *UsageAlertStateUpd
 	return _u
 }
 
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_u *UsageAlertStateUpdate) SetQuotaDimension(v string) *UsageAlertStateUpdate {
+	_u.mutation.SetQuotaDimension(v)
+	return _u
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_u *UsageAlertStateUpdate) SetNillableQuotaDimension(v *string) *UsageAlertStateUpdate {
+	if v != nil {
+		_u.SetQuotaDimension(*v)
+	}
+	return _u
+}
+
 // SetWindow sets the "window" field.
 func (_u *UsageAlertStateUpdate) SetWindow(v string) *UsageAlertStateUpdate {
 	_u.mutation.SetWindow(v)
@@ -224,6 +238,11 @@ func (_u *UsageAlertStateUpdate) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *UsageAlertStateUpdate) check() error {
+	if v, ok := _u.mutation.QuotaDimension(); ok {
+		if err := usagealertstate.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.quota_dimension": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Window(); ok {
 		if err := usagealertstate.WindowValidator(v); err != nil {
 			return &ValidationError{Name: "window", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.window": %w`, err)}
@@ -257,6 +276,9 @@ func (_u *UsageAlertStateUpdate) sqlSave(ctx context.Context) (_node int, err er
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(usagealertstate.FieldUpdatedAt, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.QuotaDimension(); ok {
+		_spec.SetField(usagealertstate.FieldQuotaDimension, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Window(); ok {
 		_spec.SetField(usagealertstate.FieldWindow, field.TypeString, value)
@@ -393,6 +415,20 @@ func (_u *UsageAlertStateUpdateOne) SetRuleID(v int64) *UsageAlertStateUpdateOne
 func (_u *UsageAlertStateUpdateOne) SetNillableRuleID(v *int64) *UsageAlertStateUpdateOne {
 	if v != nil {
 		_u.SetRuleID(*v)
+	}
+	return _u
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_u *UsageAlertStateUpdateOne) SetQuotaDimension(v string) *UsageAlertStateUpdateOne {
+	_u.mutation.SetQuotaDimension(v)
+	return _u
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_u *UsageAlertStateUpdateOne) SetNillableQuotaDimension(v *string) *UsageAlertStateUpdateOne {
+	if v != nil {
+		_u.SetQuotaDimension(*v)
 	}
 	return _u
 }
@@ -570,6 +606,11 @@ func (_u *UsageAlertStateUpdateOne) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *UsageAlertStateUpdateOne) check() error {
+	if v, ok := _u.mutation.QuotaDimension(); ok {
+		if err := usagealertstate.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.quota_dimension": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Window(); ok {
 		if err := usagealertstate.WindowValidator(v); err != nil {
 			return &ValidationError{Name: "window", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.window": %w`, err)}
@@ -620,6 +661,9 @@ func (_u *UsageAlertStateUpdateOne) sqlSave(ctx context.Context) (_node *UsageAl
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(usagealertstate.FieldUpdatedAt, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.QuotaDimension(); ok {
+		_spec.SetField(usagealertstate.FieldQuotaDimension, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Window(); ok {
 		_spec.SetField(usagealertstate.FieldWindow, field.TypeString, value)

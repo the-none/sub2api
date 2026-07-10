@@ -64,6 +64,20 @@ func (_c *UsageAlertStateCreate) SetRuleID(v int64) *UsageAlertStateCreate {
 	return _c
 }
 
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_c *UsageAlertStateCreate) SetQuotaDimension(v string) *UsageAlertStateCreate {
+	_c.mutation.SetQuotaDimension(v)
+	return _c
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_c *UsageAlertStateCreate) SetNillableQuotaDimension(v *string) *UsageAlertStateCreate {
+	if v != nil {
+		_c.SetQuotaDimension(*v)
+	}
+	return _c
+}
+
 // SetWindow sets the "window" field.
 func (_c *UsageAlertStateCreate) SetWindow(v string) *UsageAlertStateCreate {
 	_c.mutation.SetWindow(v)
@@ -179,6 +193,10 @@ func (_c *UsageAlertStateCreate) defaults() {
 		v := usagealertstate.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.QuotaDimension(); !ok {
+		v := usagealertstate.DefaultQuotaDimension
+		_c.mutation.SetQuotaDimension(v)
+	}
 	if _, ok := _c.mutation.LastStatus(); !ok {
 		v := usagealertstate.DefaultLastStatus
 		_c.mutation.SetLastStatus(v)
@@ -198,6 +216,14 @@ func (_c *UsageAlertStateCreate) check() error {
 	}
 	if _, ok := _c.mutation.RuleID(); !ok {
 		return &ValidationError{Name: "rule_id", err: errors.New(`ent: missing required field "UsageAlertState.rule_id"`)}
+	}
+	if _, ok := _c.mutation.QuotaDimension(); !ok {
+		return &ValidationError{Name: "quota_dimension", err: errors.New(`ent: missing required field "UsageAlertState.quota_dimension"`)}
+	}
+	if v, ok := _c.mutation.QuotaDimension(); ok {
+		if err := usagealertstate.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.quota_dimension": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.Window(); !ok {
 		return &ValidationError{Name: "window", err: errors.New(`ent: missing required field "UsageAlertState.window"`)}
@@ -255,6 +281,10 @@ func (_c *UsageAlertStateCreate) createSpec() (*UsageAlertState, *sqlgraph.Creat
 	if value, ok := _c.mutation.UpdatedAt(); ok {
 		_spec.SetField(usagealertstate.FieldUpdatedAt, field.TypeTime, value)
 		_node.UpdatedAt = value
+	}
+	if value, ok := _c.mutation.QuotaDimension(); ok {
+		_spec.SetField(usagealertstate.FieldQuotaDimension, field.TypeString, value)
+		_node.QuotaDimension = value
 	}
 	if value, ok := _c.mutation.Window(); ok {
 		_spec.SetField(usagealertstate.FieldWindow, field.TypeString, value)
@@ -395,6 +425,18 @@ func (u *UsageAlertStateUpsert) SetRuleID(v int64) *UsageAlertStateUpsert {
 // UpdateRuleID sets the "rule_id" field to the value that was provided on create.
 func (u *UsageAlertStateUpsert) UpdateRuleID() *UsageAlertStateUpsert {
 	u.SetExcluded(usagealertstate.FieldRuleID)
+	return u
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (u *UsageAlertStateUpsert) SetQuotaDimension(v string) *UsageAlertStateUpsert {
+	u.Set(usagealertstate.FieldQuotaDimension, v)
+	return u
+}
+
+// UpdateQuotaDimension sets the "quota_dimension" field to the value that was provided on create.
+func (u *UsageAlertStateUpsert) UpdateQuotaDimension() *UsageAlertStateUpsert {
+	u.SetExcluded(usagealertstate.FieldQuotaDimension)
 	return u
 }
 
@@ -566,6 +608,20 @@ func (u *UsageAlertStateUpsertOne) SetRuleID(v int64) *UsageAlertStateUpsertOne 
 func (u *UsageAlertStateUpsertOne) UpdateRuleID() *UsageAlertStateUpsertOne {
 	return u.Update(func(s *UsageAlertStateUpsert) {
 		s.UpdateRuleID()
+	})
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (u *UsageAlertStateUpsertOne) SetQuotaDimension(v string) *UsageAlertStateUpsertOne {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.SetQuotaDimension(v)
+	})
+}
+
+// UpdateQuotaDimension sets the "quota_dimension" field to the value that was provided on create.
+func (u *UsageAlertStateUpsertOne) UpdateQuotaDimension() *UsageAlertStateUpsertOne {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.UpdateQuotaDimension()
 	})
 }
 
@@ -917,6 +973,20 @@ func (u *UsageAlertStateUpsertBulk) SetRuleID(v int64) *UsageAlertStateUpsertBul
 func (u *UsageAlertStateUpsertBulk) UpdateRuleID() *UsageAlertStateUpsertBulk {
 	return u.Update(func(s *UsageAlertStateUpsert) {
 		s.UpdateRuleID()
+	})
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (u *UsageAlertStateUpsertBulk) SetQuotaDimension(v string) *UsageAlertStateUpsertBulk {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.SetQuotaDimension(v)
+	})
+}
+
+// UpdateQuotaDimension sets the "quota_dimension" field to the value that was provided on create.
+func (u *UsageAlertStateUpsertBulk) UpdateQuotaDimension() *UsageAlertStateUpsertBulk {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.UpdateQuotaDimension()
 	})
 }
 

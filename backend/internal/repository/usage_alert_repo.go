@@ -237,11 +237,12 @@ func (r *usageAlertRepository) ListRules(ctx context.Context) ([]*service.UsageA
 	return out, nil
 }
 
-func (r *usageAlertRepository) ListEnabledRules(ctx context.Context, realAccountID int64) ([]*service.UsageAlertRule, error) {
+func (r *usageAlertRepository) ListEnabledRules(ctx context.Context, realAccountID int64, quotaDimension string) ([]*service.UsageAlertRule, error) {
 	rows, err := r.client.UsageAlertRule.Query().
 		Where(
 			dbusagealertrule.EnabledEQ(true),
 			dbusagealertrule.RealAccountIDEQ(realAccountID),
+			dbusagealertrule.QuotaDimensionEQ(quotaDimension),
 		).
 		Order(dbent.Asc(dbusagealertrule.FieldID)).
 		All(ctx)
@@ -270,6 +271,7 @@ func (r *usageAlertRepository) CreateRule(ctx context.Context, rule *service.Usa
 	builder := r.client.UsageAlertRule.Create().
 		SetName(rule.Name).
 		SetPlatform(rule.Platform).
+		SetQuotaDimension(rule.QuotaDimension).
 		SetWindow(rule.Window).
 		SetMetric(rule.Metric).
 		SetOperator(rule.Operator).
@@ -296,6 +298,7 @@ func (r *usageAlertRepository) UpdateRule(ctx context.Context, rule *service.Usa
 	builder := r.client.UsageAlertRule.UpdateOneID(rule.ID).
 		SetName(rule.Name).
 		SetPlatform(rule.Platform).
+		SetQuotaDimension(rule.QuotaDimension).
 		SetWindow(rule.Window).
 		SetMetric(rule.Metric).
 		SetOperator(rule.Operator).
@@ -484,9 +487,12 @@ func (r *usageAlertRepository) DeleteBinding(ctx context.Context, id int64) erro
 	return r.client.UsageAlertBinding.DeleteOneID(id).Exec(ctx)
 }
 
-func (r *usageAlertRepository) GetSnapshot(ctx context.Context, realAccountID int64) (*service.UsageAlertSnapshot, error) {
+func (r *usageAlertRepository) GetSnapshot(ctx context.Context, realAccountID int64, quotaDimension string) (*service.UsageAlertSnapshot, error) {
 	row, err := r.client.RealAccountUsageSnapshot.Query().
-		Where(dbrealaccountusagesnapshot.RealAccountIDEQ(realAccountID)).
+		Where(
+			dbrealaccountusagesnapshot.RealAccountIDEQ(realAccountID),
+			dbrealaccountusagesnapshot.QuotaDimensionEQ(quotaDimension),
+		).
 		Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
@@ -494,7 +500,17 @@ func (r *usageAlertRepository) GetSnapshot(ctx context.Context, realAccountID in
 		}
 		return nil, err
 	}
-	return usageAlertSnapshotFromMap(row.SnapshotJSON)
+	snapshot, err := usageAlertSnapshotFromMap(row.SnapshotJSON)
+	if err != nil || snapshot == nil {
+		return snapshot, err
+	}
+	if snapshot.RealAccountID <= 0 {
+		snapshot.RealAccountID = row.RealAccountID
+	}
+	if snapshot.QuotaDimension == "" {
+		snapshot.QuotaDimension = row.QuotaDimension
+	}
+	return snapshot, nil
 }
 
 func (r *usageAlertRepository) UpsertSnapshot(ctx context.Context, snapshot *service.UsageAlertSnapshot) error {
@@ -507,23 +523,24 @@ func (r *usageAlertRepository) UpsertSnapshot(ctx context.Context, snapshot *ser
 	}
 	_, err = r.sql.ExecContext(ctx, `
 		INSERT INTO real_account_usage_snapshots (
-			real_account_id, platform, source, snapshot_json, sampled_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4::jsonb, $5, NOW(), NOW())
-		ON CONFLICT (real_account_id) DO UPDATE SET
+				real_account_id, quota_dimension, platform, source, snapshot_json, sampled_at, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5::jsonb, $6, NOW(), NOW())
+			ON CONFLICT (real_account_id, quota_dimension) DO UPDATE SET
 			platform = EXCLUDED.platform,
 			source = EXCLUDED.source,
 			snapshot_json = EXCLUDED.snapshot_json,
 			sampled_at = EXCLUDED.sampled_at,
 			updated_at = NOW()
-	`, snapshot.RealAccountID, snapshot.Platform, snapshot.Source, string(raw), snapshot.SampledAt)
+		`, snapshot.RealAccountID, snapshot.QuotaDimension, snapshot.Platform, snapshot.Source, string(raw), snapshot.SampledAt)
 	return err
 }
 
-func (r *usageAlertRepository) GetState(ctx context.Context, realAccountID, ruleID int64, window string) (*service.UsageAlertState, error) {
+func (r *usageAlertRepository) GetState(ctx context.Context, realAccountID, ruleID int64, quotaDimension, window string) (*service.UsageAlertState, error) {
 	row, err := r.client.UsageAlertState.Query().
 		Where(
 			dbusagealertstate.RealAccountIDEQ(realAccountID),
 			dbusagealertstate.RuleIDEQ(ruleID),
+			dbusagealertstate.QuotaDimensionEQ(quotaDimension),
 			dbusagealertstate.WindowEQ(window),
 		).
 		Only(ctx)
@@ -554,15 +571,15 @@ func (r *usageAlertRepository) UpsertState(ctx context.Context, state *service.U
 	}
 	_, err := r.sql.ExecContext(ctx, `
 		INSERT INTO usage_alert_states (
-			real_account_id, rule_id, "window", last_status, last_triggered_at, last_value, last_reset_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-		ON CONFLICT (real_account_id, rule_id, "window") DO UPDATE SET
+				real_account_id, rule_id, quota_dimension, "window", last_status, last_triggered_at, last_value, last_reset_at, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+			ON CONFLICT (real_account_id, rule_id, quota_dimension, "window") DO UPDATE SET
 			last_status = EXCLUDED.last_status,
 			last_triggered_at = COALESCE(EXCLUDED.last_triggered_at, usage_alert_states.last_triggered_at),
 			last_value = EXCLUDED.last_value,
 			last_reset_at = EXCLUDED.last_reset_at,
 			updated_at = NOW()
-	`, state.RealAccountID, state.RuleID, state.Window, state.LastStatus, triggeredAt, lastValue, resetAt)
+		`, state.RealAccountID, state.RuleID, state.QuotaDimension, state.Window, state.LastStatus, triggeredAt, lastValue, resetAt)
 	return err
 }
 
@@ -597,6 +614,7 @@ func usageAlertRuleEntityToService(row *dbent.UsageAlertRule) *service.UsageAler
 		Name:               row.Name,
 		Platform:           row.Platform,
 		RealAccountID:      row.RealAccountID,
+		QuotaDimension:     row.QuotaDimension,
 		Window:             row.Window,
 		Metric:             row.Metric,
 		Operator:           row.Operator,
@@ -662,6 +680,7 @@ func usageAlertStateEntityToService(row *dbent.UsageAlertState) *service.UsageAl
 		ID:              row.ID,
 		RealAccountID:   row.RealAccountID,
 		RuleID:          row.RuleID,
+		QuotaDimension:  row.QuotaDimension,
 		Window:          row.Window,
 		LastStatus:      row.LastStatus,
 		LastTriggeredAt: row.LastTriggeredAt,

@@ -22,6 +22,8 @@ const (
 	FieldRealAccountID = "real_account_id"
 	// FieldRuleID holds the string denoting the rule_id field in the database.
 	FieldRuleID = "rule_id"
+	// FieldQuotaDimension holds the string denoting the quota_dimension field in the database.
+	FieldQuotaDimension = "quota_dimension"
 	// FieldWindow holds the string denoting the window field in the database.
 	FieldWindow = "window"
 	// FieldLastStatus holds the string denoting the last_status field in the database.
@@ -61,6 +63,7 @@ var Columns = []string{
 	FieldUpdatedAt,
 	FieldRealAccountID,
 	FieldRuleID,
+	FieldQuotaDimension,
 	FieldWindow,
 	FieldLastStatus,
 	FieldLastTriggeredAt,
@@ -85,6 +88,10 @@ var (
 	DefaultUpdatedAt func() time.Time
 	// UpdateDefaultUpdatedAt holds the default value on update for the "updated_at" field.
 	UpdateDefaultUpdatedAt func() time.Time
+	// DefaultQuotaDimension holds the default value on creation for the "quota_dimension" field.
+	DefaultQuotaDimension string
+	// QuotaDimensionValidator is a validator for the "quota_dimension" field. It is called by the builders before save.
+	QuotaDimensionValidator func(string) error
 	// WindowValidator is a validator for the "window" field. It is called by the builders before save.
 	WindowValidator func(string) error
 	// DefaultLastStatus holds the default value on creation for the "last_status" field.
@@ -119,6 +126,11 @@ func ByRealAccountID(opts ...sql.OrderTermOption) OrderOption {
 // ByRuleID orders the results by the rule_id field.
 func ByRuleID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRuleID, opts...).ToFunc()
+}
+
+// ByQuotaDimension orders the results by the quota_dimension field.
+func ByQuotaDimension(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldQuotaDimension, opts...).ToFunc()
 }
 
 // ByWindow orders the results by the window field.

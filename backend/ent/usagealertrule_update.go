@@ -104,6 +104,20 @@ func (_u *UsageAlertRuleUpdate) ClearRealAccountID() *UsageAlertRuleUpdate {
 	return _u
 }
 
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_u *UsageAlertRuleUpdate) SetQuotaDimension(v string) *UsageAlertRuleUpdate {
+	_u.mutation.SetQuotaDimension(v)
+	return _u
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_u *UsageAlertRuleUpdate) SetNillableQuotaDimension(v *string) *UsageAlertRuleUpdate {
+	if v != nil {
+		_u.SetQuotaDimension(*v)
+	}
+	return _u
+}
+
 // SetWindow sets the "window" field.
 func (_u *UsageAlertRuleUpdate) SetWindow(v string) *UsageAlertRuleUpdate {
 	_u.mutation.SetWindow(v)
@@ -362,6 +376,11 @@ func (_u *UsageAlertRuleUpdate) check() error {
 			return &ValidationError{Name: "platform", err: fmt.Errorf(`ent: validator failed for field "UsageAlertRule.platform": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.QuotaDimension(); ok {
+		if err := usagealertrule.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "UsageAlertRule.quota_dimension": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Window(); ok {
 		if err := usagealertrule.WindowValidator(v); err != nil {
 			return &ValidationError{Name: "window", err: fmt.Errorf(`ent: validator failed for field "UsageAlertRule.window": %w`, err)}
@@ -411,6 +430,9 @@ func (_u *UsageAlertRuleUpdate) sqlSave(ctx context.Context) (_node int, err err
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(usagealertrule.FieldPlatform, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.QuotaDimension(); ok {
+		_spec.SetField(usagealertrule.FieldQuotaDimension, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Window(); ok {
 		_spec.SetField(usagealertrule.FieldWindow, field.TypeString, value)
@@ -619,6 +641,20 @@ func (_u *UsageAlertRuleUpdateOne) SetNillableRealAccountID(v *int64) *UsageAler
 // ClearRealAccountID clears the value of the "real_account_id" field.
 func (_u *UsageAlertRuleUpdateOne) ClearRealAccountID() *UsageAlertRuleUpdateOne {
 	_u.mutation.ClearRealAccountID()
+	return _u
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_u *UsageAlertRuleUpdateOne) SetQuotaDimension(v string) *UsageAlertRuleUpdateOne {
+	_u.mutation.SetQuotaDimension(v)
+	return _u
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_u *UsageAlertRuleUpdateOne) SetNillableQuotaDimension(v *string) *UsageAlertRuleUpdateOne {
+	if v != nil {
+		_u.SetQuotaDimension(*v)
+	}
 	return _u
 }
 
@@ -893,6 +929,11 @@ func (_u *UsageAlertRuleUpdateOne) check() error {
 			return &ValidationError{Name: "platform", err: fmt.Errorf(`ent: validator failed for field "UsageAlertRule.platform": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.QuotaDimension(); ok {
+		if err := usagealertrule.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "UsageAlertRule.quota_dimension": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Window(); ok {
 		if err := usagealertrule.WindowValidator(v); err != nil {
 			return &ValidationError{Name: "window", err: fmt.Errorf(`ent: validator failed for field "UsageAlertRule.window": %w`, err)}
@@ -959,6 +1000,9 @@ func (_u *UsageAlertRuleUpdateOne) sqlSave(ctx context.Context) (_node *UsageAle
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(usagealertrule.FieldPlatform, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.QuotaDimension(); ok {
+		_spec.SetField(usagealertrule.FieldQuotaDimension, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Window(); ok {
 		_spec.SetField(usagealertrule.FieldWindow, field.TypeString, value)

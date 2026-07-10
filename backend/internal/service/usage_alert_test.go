@@ -56,6 +56,20 @@ func TestValidateUsageAlertRuleRejectsSonnetWindow(t *testing.T) {
 	require.ErrorIs(t, validateUsageAlertRule(rule), ErrUsageAlertInvalidWindow)
 }
 
+func TestValidateUsageAlertRuleNormalizesQuotaDimension(t *testing.T) {
+	rule := validUsageAlertRuleForTest()
+	rule.QuotaDimension = ""
+	require.NoError(t, validateUsageAlertRule(rule))
+	require.Equal(t, QuotaDimensionGlobal, rule.QuotaDimension)
+
+	rule = validUsageAlertRuleForTest()
+	rule.QuotaDimension = QuotaDimensionSpark
+	require.NoError(t, validateUsageAlertRule(rule))
+
+	rule.QuotaDimension = "unknown"
+	require.ErrorIs(t, validateUsageAlertRule(rule), ErrUsageAlertInvalidDimension)
+}
+
 func TestEnsureUsageAlertRuleNameBuildsDefault(t *testing.T) {
 	step := 5.0
 	minReset := 24.0
@@ -172,10 +186,11 @@ func TestBuildUsageAlertWebhookEventUsesResolvedType(t *testing.T) {
 	rule.ID = 7
 	triggeredAt := time.Date(2026, 6, 28, 10, 30, 0, 0, time.UTC)
 	snapshot := &UsageAlertSnapshot{
-		AccountID:     11,
-		RealAccountID: 22,
-		Platform:      UsageAlertPlatformOpenAI,
-		Source:        UsageAlertSourceOpenAICodexHeaders,
+		AccountID:      11,
+		RealAccountID:  22,
+		QuotaDimension: QuotaDimensionSpark,
+		Platform:       UsageAlertPlatformOpenAI,
+		Source:         UsageAlertSourceOpenAICodexHeaders,
 	}
 
 	event := buildUsageAlertWebhookEvent(snapshot, &RealAccount{Name: "OpenAI Main"}, UsageAlertTrigger{
@@ -189,6 +204,8 @@ func TestBuildUsageAlertWebhookEventUsesResolvedType(t *testing.T) {
 
 	require.Equal(t, UsageAlertEventResolved, event.Event)
 	require.Equal(t, "OpenAI Main", event.RealAccountName)
+	require.Equal(t, QuotaDimensionSpark, event.QuotaDimension)
+	require.Contains(t, event.EventID, "-spark-")
 	require.Equal(t, 90.0, event.Value)
 }
 
@@ -198,6 +215,7 @@ func TestFormatUsageAlertTelegramMessageUsesLanguageAndTimezone(t *testing.T) {
 		Event:            "account.usage_alert",
 		TriggeredAt:      time.Date(2026, 6, 28, 10, 30, 0, 0, time.UTC),
 		RealAccountName:  "OpenAI Main",
+		QuotaDimension:   QuotaDimensionSpark,
 		Platform:         UsageAlertPlatformOpenAI,
 		RuleName:         "weekly remaining low",
 		Window:           UsageAlertWindow7d,
@@ -216,6 +234,7 @@ func TestFormatUsageAlertTelegramMessageUsesLanguageAndTimezone(t *testing.T) {
 
 	require.Contains(t, message, "[Sub2API] 用量告警")
 	require.Contains(t, message, "账户：OpenAI Main")
+	require.Contains(t, message, "额度维度：Spark")
 	require.Contains(t, message, "阈值：剩余 <= 20.0%")
 	require.Contains(t, message, "触发时间：2026-06-28 18:30:00")
 	require.Contains(t, message, "重置时间：2026-06-28 20:00:00")
@@ -261,11 +280,69 @@ func TestUsageAlertTelegramConfigRejectsInvalidTimezone(t *testing.T) {
 	require.ErrorContains(t, err, "telegram timezone is invalid")
 }
 
+type usageAlertAccountRepoStub struct {
+	AccountRepository
+	accounts map[int64]*Account
+}
+
+func (s *usageAlertAccountRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
+	return s.accounts[id], nil
+}
+
+type usageAlertRepoStub struct {
+	UsageAlertRepository
+	ensuredAccountID  int64
+	attachedRealID    int64
+	attachedAccountID int64
+}
+
+func (s *usageAlertRepoStub) EnsureRealAccountForAccount(_ context.Context, account *Account) (*RealAccount, error) {
+	s.ensuredAccountID = account.ID
+	return &RealAccount{ID: 99, Name: account.Name, Platform: account.Platform}, nil
+}
+
+func (s *usageAlertRepoStub) AttachAccount(_ context.Context, realAccountID, accountID int64) error {
+	s.attachedRealID = realAccountID
+	s.attachedAccountID = accountID
+	return nil
+}
+
+func TestResolveUsageAlertScopeSharesRealAccountButSeparatesSparkQuota(t *testing.T) {
+	parentID := int64(10)
+	accountRepo := &usageAlertAccountRepoStub{accounts: map[int64]*Account{
+		parentID: {
+			ID:       parentID,
+			Name:     "OpenAI Main",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+		},
+		20: {
+			ID:              20,
+			Name:            "OpenAI Main (Spark)",
+			Platform:        PlatformOpenAI,
+			Type:            AccountTypeOAuth,
+			ParentAccountID: &parentID,
+			QuotaDimension:  QuotaDimensionSpark,
+		},
+	}}
+	alertRepo := &usageAlertRepoStub{}
+	svc := NewUsageAlertService(alertRepo, accountRepo)
+
+	realAccountID, quotaDimension := svc.resolveUsageAlertScope(context.Background(), 20)
+
+	require.Equal(t, int64(99), realAccountID)
+	require.Equal(t, QuotaDimensionSpark, quotaDimension)
+	require.Equal(t, parentID, alertRepo.ensuredAccountID)
+	require.Equal(t, int64(99), alertRepo.attachedRealID)
+	require.Equal(t, int64(20), alertRepo.attachedAccountID)
+}
+
 func validUsageAlertRuleForTest() *UsageAlertRule {
 	realAccountID := int64(1)
 	return &UsageAlertRule{
 		Name:            "weekly remaining low",
 		Platform:        UsageAlertPlatformOpenAI,
+		QuotaDimension:  QuotaDimensionGlobal,
 		RealAccountID:   &realAccountID,
 		Window:          UsageAlertWindow7d,
 		Metric:          UsageAlertMetricRemaining,

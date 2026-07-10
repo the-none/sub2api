@@ -100,6 +100,20 @@ func (_c *UsageAlertRuleCreate) SetNillableRealAccountID(v *int64) *UsageAlertRu
 	return _c
 }
 
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_c *UsageAlertRuleCreate) SetQuotaDimension(v string) *UsageAlertRuleCreate {
+	_c.mutation.SetQuotaDimension(v)
+	return _c
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_c *UsageAlertRuleCreate) SetNillableQuotaDimension(v *string) *UsageAlertRuleCreate {
+	if v != nil {
+		_c.SetQuotaDimension(*v)
+	}
+	return _c
+}
+
 // SetWindow sets the "window" field.
 func (_c *UsageAlertRuleCreate) SetWindow(v string) *UsageAlertRuleCreate {
 	_c.mutation.SetWindow(v)
@@ -255,6 +269,10 @@ func (_c *UsageAlertRuleCreate) defaults() error {
 		v := usagealertrule.DefaultPlatform
 		_c.mutation.SetPlatform(v)
 	}
+	if _, ok := _c.mutation.QuotaDimension(); !ok {
+		v := usagealertrule.DefaultQuotaDimension
+		_c.mutation.SetQuotaDimension(v)
+	}
 	if _, ok := _c.mutation.CooldownMinutes(); !ok {
 		v := usagealertrule.DefaultCooldownMinutes
 		_c.mutation.SetCooldownMinutes(v)
@@ -288,6 +306,14 @@ func (_c *UsageAlertRuleCreate) check() error {
 	if v, ok := _c.mutation.Platform(); ok {
 		if err := usagealertrule.PlatformValidator(v); err != nil {
 			return &ValidationError{Name: "platform", err: fmt.Errorf(`ent: validator failed for field "UsageAlertRule.platform": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.QuotaDimension(); !ok {
+		return &ValidationError{Name: "quota_dimension", err: errors.New(`ent: missing required field "UsageAlertRule.quota_dimension"`)}
+	}
+	if v, ok := _c.mutation.QuotaDimension(); ok {
+		if err := usagealertrule.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "UsageAlertRule.quota_dimension": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.Window(); !ok {
@@ -374,6 +400,10 @@ func (_c *UsageAlertRuleCreate) createSpec() (*UsageAlertRule, *sqlgraph.CreateS
 	if value, ok := _c.mutation.Platform(); ok {
 		_spec.SetField(usagealertrule.FieldPlatform, field.TypeString, value)
 		_node.Platform = value
+	}
+	if value, ok := _c.mutation.QuotaDimension(); ok {
+		_spec.SetField(usagealertrule.FieldQuotaDimension, field.TypeString, value)
+		_node.QuotaDimension = value
 	}
 	if value, ok := _c.mutation.Window(); ok {
 		_spec.SetField(usagealertrule.FieldWindow, field.TypeString, value)
@@ -561,6 +591,18 @@ func (u *UsageAlertRuleUpsert) UpdateRealAccountID() *UsageAlertRuleUpsert {
 // ClearRealAccountID clears the value of the "real_account_id" field.
 func (u *UsageAlertRuleUpsert) ClearRealAccountID() *UsageAlertRuleUpsert {
 	u.SetNull(usagealertrule.FieldRealAccountID)
+	return u
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (u *UsageAlertRuleUpsert) SetQuotaDimension(v string) *UsageAlertRuleUpsert {
+	u.Set(usagealertrule.FieldQuotaDimension, v)
+	return u
+}
+
+// UpdateQuotaDimension sets the "quota_dimension" field to the value that was provided on create.
+func (u *UsageAlertRuleUpsert) UpdateQuotaDimension() *UsageAlertRuleUpsert {
+	u.SetExcluded(usagealertrule.FieldQuotaDimension)
 	return u
 }
 
@@ -822,6 +864,20 @@ func (u *UsageAlertRuleUpsertOne) UpdateRealAccountID() *UsageAlertRuleUpsertOne
 func (u *UsageAlertRuleUpsertOne) ClearRealAccountID() *UsageAlertRuleUpsertOne {
 	return u.Update(func(s *UsageAlertRuleUpsert) {
 		s.ClearRealAccountID()
+	})
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (u *UsageAlertRuleUpsertOne) SetQuotaDimension(v string) *UsageAlertRuleUpsertOne {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.SetQuotaDimension(v)
+	})
+}
+
+// UpdateQuotaDimension sets the "quota_dimension" field to the value that was provided on create.
+func (u *UsageAlertRuleUpsertOne) UpdateQuotaDimension() *UsageAlertRuleUpsertOne {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.UpdateQuotaDimension()
 	})
 }
 
@@ -1271,6 +1327,20 @@ func (u *UsageAlertRuleUpsertBulk) UpdateRealAccountID() *UsageAlertRuleUpsertBu
 func (u *UsageAlertRuleUpsertBulk) ClearRealAccountID() *UsageAlertRuleUpsertBulk {
 	return u.Update(func(s *UsageAlertRuleUpsert) {
 		s.ClearRealAccountID()
+	})
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (u *UsageAlertRuleUpsertBulk) SetQuotaDimension(v string) *UsageAlertRuleUpsertBulk {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.SetQuotaDimension(v)
+	})
+}
+
+// UpdateQuotaDimension sets the "quota_dimension" field to the value that was provided on create.
+func (u *UsageAlertRuleUpsertBulk) UpdateQuotaDimension() *UsageAlertRuleUpsertBulk {
+	return u.Update(func(s *UsageAlertRuleUpsert) {
+		s.UpdateQuotaDimension()
 	})
 }
 

@@ -20,6 +20,8 @@ const (
 	FieldUpdatedAt = "updated_at"
 	// FieldRealAccountID holds the string denoting the real_account_id field in the database.
 	FieldRealAccountID = "real_account_id"
+	// FieldQuotaDimension holds the string denoting the quota_dimension field in the database.
+	FieldQuotaDimension = "quota_dimension"
 	// FieldPlatform holds the string denoting the platform field in the database.
 	FieldPlatform = "platform"
 	// FieldSource holds the string denoting the source field in the database.
@@ -47,6 +49,7 @@ var Columns = []string{
 	FieldCreatedAt,
 	FieldUpdatedAt,
 	FieldRealAccountID,
+	FieldQuotaDimension,
 	FieldPlatform,
 	FieldSource,
 	FieldSnapshotJSON,
@@ -70,6 +73,10 @@ var (
 	DefaultUpdatedAt func() time.Time
 	// UpdateDefaultUpdatedAt holds the default value on update for the "updated_at" field.
 	UpdateDefaultUpdatedAt func() time.Time
+	// DefaultQuotaDimension holds the default value on creation for the "quota_dimension" field.
+	DefaultQuotaDimension string
+	// QuotaDimensionValidator is a validator for the "quota_dimension" field. It is called by the builders before save.
+	QuotaDimensionValidator func(string) error
 	// PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	PlatformValidator func(string) error
 	// SourceValidator is a validator for the "source" field. It is called by the builders before save.
@@ -99,6 +106,11 @@ func ByUpdatedAt(opts ...sql.OrderTermOption) OrderOption {
 // ByRealAccountID orders the results by the real_account_id field.
 func ByRealAccountID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRealAccountID, opts...).ToFunc()
+}
+
+// ByQuotaDimension orders the results by the quota_dimension field.
+func ByQuotaDimension(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldQuotaDimension, opts...).ToFunc()
 }
 
 // ByPlatform orders the results by the platform field.

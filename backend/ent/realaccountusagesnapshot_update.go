@@ -49,6 +49,20 @@ func (_u *RealAccountUsageSnapshotUpdate) SetNillableRealAccountID(v *int64) *Re
 	return _u
 }
 
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_u *RealAccountUsageSnapshotUpdate) SetQuotaDimension(v string) *RealAccountUsageSnapshotUpdate {
+	_u.mutation.SetQuotaDimension(v)
+	return _u
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_u *RealAccountUsageSnapshotUpdate) SetNillableQuotaDimension(v *string) *RealAccountUsageSnapshotUpdate {
+	if v != nil {
+		_u.SetQuotaDimension(*v)
+	}
+	return _u
+}
+
 // SetPlatform sets the "platform" field.
 func (_u *RealAccountUsageSnapshotUpdate) SetPlatform(v string) *RealAccountUsageSnapshotUpdate {
 	_u.mutation.SetPlatform(v)
@@ -151,6 +165,11 @@ func (_u *RealAccountUsageSnapshotUpdate) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *RealAccountUsageSnapshotUpdate) check() error {
+	if v, ok := _u.mutation.QuotaDimension(); ok {
+		if err := realaccountusagesnapshot.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "RealAccountUsageSnapshot.quota_dimension": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Platform(); ok {
 		if err := realaccountusagesnapshot.PlatformValidator(v); err != nil {
 			return &ValidationError{Name: "platform", err: fmt.Errorf(`ent: validator failed for field "RealAccountUsageSnapshot.platform": %w`, err)}
@@ -181,6 +200,9 @@ func (_u *RealAccountUsageSnapshotUpdate) sqlSave(ctx context.Context) (_node in
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldUpdatedAt, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.QuotaDimension(); ok {
+		_spec.SetField(realaccountusagesnapshot.FieldQuotaDimension, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldPlatform, field.TypeString, value)
@@ -259,6 +281,20 @@ func (_u *RealAccountUsageSnapshotUpdateOne) SetRealAccountID(v int64) *RealAcco
 func (_u *RealAccountUsageSnapshotUpdateOne) SetNillableRealAccountID(v *int64) *RealAccountUsageSnapshotUpdateOne {
 	if v != nil {
 		_u.SetRealAccountID(*v)
+	}
+	return _u
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_u *RealAccountUsageSnapshotUpdateOne) SetQuotaDimension(v string) *RealAccountUsageSnapshotUpdateOne {
+	_u.mutation.SetQuotaDimension(v)
+	return _u
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_u *RealAccountUsageSnapshotUpdateOne) SetNillableQuotaDimension(v *string) *RealAccountUsageSnapshotUpdateOne {
+	if v != nil {
+		_u.SetQuotaDimension(*v)
 	}
 	return _u
 }
@@ -378,6 +414,11 @@ func (_u *RealAccountUsageSnapshotUpdateOne) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *RealAccountUsageSnapshotUpdateOne) check() error {
+	if v, ok := _u.mutation.QuotaDimension(); ok {
+		if err := realaccountusagesnapshot.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "RealAccountUsageSnapshot.quota_dimension": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Platform(); ok {
 		if err := realaccountusagesnapshot.PlatformValidator(v); err != nil {
 			return &ValidationError{Name: "platform", err: fmt.Errorf(`ent: validator failed for field "RealAccountUsageSnapshot.platform": %w`, err)}
@@ -425,6 +466,9 @@ func (_u *RealAccountUsageSnapshotUpdateOne) sqlSave(ctx context.Context) (_node
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldUpdatedAt, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.QuotaDimension(); ok {
+		_spec.SetField(realaccountusagesnapshot.FieldQuotaDimension, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldPlatform, field.TypeString, value)
