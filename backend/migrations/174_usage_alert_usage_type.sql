@@ -2,6 +2,16 @@
 -- column name is retained so deployed databases can upgrade without rewriting
 -- custom alert tables; application APIs expose this value as usage_type.
 
+-- Migration 173 constrained these columns to global/spark. Remove those
+-- constraints before introducing overall, otherwise any legacy row makes the
+-- backfill fail immediately.
+ALTER TABLE real_account_usage_snapshots
+    DROP CONSTRAINT IF EXISTS real_account_usage_snapshots_quota_dimension_check;
+ALTER TABLE usage_alert_rules
+    DROP CONSTRAINT IF EXISTS usage_alert_rules_quota_dimension_check;
+ALTER TABLE usage_alert_states
+    DROP CONSTRAINT IF EXISTS usage_alert_states_quota_dimension_check;
+
 ALTER TABLE real_account_usage_snapshots
     ALTER COLUMN quota_dimension SET DEFAULT 'overall';
 ALTER TABLE usage_alert_rules
@@ -26,13 +36,6 @@ WHERE legacy.real_account_id = current.real_account_id
 UPDATE real_account_usage_snapshots SET quota_dimension = 'overall' WHERE quota_dimension = 'global';
 UPDATE usage_alert_rules SET quota_dimension = 'overall' WHERE quota_dimension = 'global';
 UPDATE usage_alert_states SET quota_dimension = 'overall' WHERE quota_dimension = 'global';
-
-ALTER TABLE real_account_usage_snapshots
-    DROP CONSTRAINT IF EXISTS real_account_usage_snapshots_quota_dimension_check;
-ALTER TABLE usage_alert_rules
-    DROP CONSTRAINT IF EXISTS usage_alert_rules_quota_dimension_check;
-ALTER TABLE usage_alert_states
-    DROP CONSTRAINT IF EXISTS usage_alert_states_quota_dimension_check;
 
 COMMENT ON COLUMN real_account_usage_snapshots.quota_dimension IS
     'Extensible usage type key (overall, spark, fable, ...).';

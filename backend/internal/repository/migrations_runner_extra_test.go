@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io/fs"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -104,12 +105,25 @@ func TestMigrationChecksumCompatibilityRules_CoverEditedUpgradeCompatibilityMigr
 		"118_wechat_dual_mode_and_auth_source_defaults.sql",
 		"120_enforce_payment_orders_out_trade_no_unique_notx.sql",
 		"123_fix_legacy_auth_source_grant_on_signup_defaults.sql",
+		"174_usage_alert_usage_type.sql",
 	} {
 		rule, ok := migrationChecksumCompatibilityRules[name]
 		require.Truef(t, ok, "missing compatibility rule for %s", name)
 		require.NotEmpty(t, rule.fileChecksum)
 		require.NotEmpty(t, rule.acceptedDBChecksum)
 	}
+}
+
+func TestMigration174ChecksumAcceptsPublishedBrokenOrdering(t *testing.T) {
+	content, err := os.ReadFile("../../migrations/174_usage_alert_usage_type.sql")
+	require.NoError(t, err)
+	current := migrationChecksum(string(content))
+	require.Equal(t, "fecdc44366fcedfcb723700c412693aec5b7148982d0a4a320f6b44271c7952d", current)
+	require.True(t, isMigrationChecksumCompatible(
+		"174_usage_alert_usage_type.sql",
+		"ed8430de4aeef247b45ba245d94191af6698b2f572eefd2370e747fe47fbd445",
+		current,
+	))
 }
 
 func TestEnsureAtlasBaselineAligned(t *testing.T) {

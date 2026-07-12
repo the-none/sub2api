@@ -200,6 +200,10 @@ func TestMigration174GeneralizesUsageAlertTypesCompatibly(t *testing.T) {
 	require.Contains(t, sql, "WHERE quota_dimension = 'global'")
 	require.Contains(t, sql, "DROP CONSTRAINT IF EXISTS usage_alert_rules_quota_dimension_check")
 	require.Contains(t, sql, "ALTER COLUMN quota_dimension SET DEFAULT 'overall'")
+	dropConstraintAt := strings.Index(sql, "DROP CONSTRAINT IF EXISTS real_account_usage_snapshots_quota_dimension_check")
+	backfillAt := strings.Index(sql, "UPDATE real_account_usage_snapshots SET quota_dimension = 'overall'")
+	require.GreaterOrEqual(t, dropConstraintAt, 0)
+	require.Greater(t, backfillAt, dropConstraintAt)
 	require.NotContains(t, sql, "DROP COLUMN")
 	require.NotContains(t, sql, "RENAME COLUMN")
 }
