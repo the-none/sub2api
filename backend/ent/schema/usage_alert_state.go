@@ -33,8 +33,9 @@ func (UsageAlertState) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int64("real_account_id"),
 		field.Int64("rule_id"),
-		field.String("quota_dimension").
-			Default("global").
+		field.String("usage_type").
+			StorageKey("quota_dimension").
+			Default("overall").
 			MaxLen(32),
 		field.String("window").
 			NotEmpty().
@@ -74,7 +75,7 @@ func (UsageAlertState) Edges() []ent.Edge {
 
 func (UsageAlertState) Indexes() []ent.Index {
 	return []ent.Index{
-		index.Fields("real_account_id", "rule_id", "quota_dimension", "window").Unique(),
+		index.Fields("real_account_id", "rule_id", "usage_type", "window").Unique(),
 		index.Fields("rule_id"),
 	}
 }

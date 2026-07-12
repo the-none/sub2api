@@ -33,8 +33,9 @@ func (RealAccountUsageSnapshot) Mixin() []ent.Mixin {
 func (RealAccountUsageSnapshot) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int64("real_account_id"),
-		field.String("quota_dimension").
-			Default("global").
+		field.String("usage_type").
+			StorageKey("quota_dimension").
+			Default("overall").
 			MaxLen(32),
 		field.String("platform").
 			NotEmpty().
@@ -62,7 +63,7 @@ func (RealAccountUsageSnapshot) Edges() []ent.Edge {
 
 func (RealAccountUsageSnapshot) Indexes() []ent.Index {
 	return []ent.Index{
-		index.Fields("real_account_id", "quota_dimension").Unique(),
+		index.Fields("real_account_id", "usage_type").Unique(),
 		index.Fields("platform"),
 		index.Fields("sampled_at"),
 	}

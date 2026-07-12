@@ -85,9 +85,9 @@ func RealAccountID(v int64) predicate.UsageAlertRule {
 	return predicate.UsageAlertRule(sql.FieldEQ(FieldRealAccountID, v))
 }
 
-// QuotaDimension applies equality check predicate on the "quota_dimension" field. It's identical to QuotaDimensionEQ.
-func QuotaDimension(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldEQ(FieldQuotaDimension, v))
+// UsageType applies equality check predicate on the "usage_type" field. It's identical to UsageTypeEQ.
+func UsageType(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldEQ(FieldUsageType, v))
 }
 
 // Window applies equality check predicate on the "window" field. It's identical to WindowEQ.
@@ -420,69 +420,69 @@ func RealAccountIDNotNil() predicate.UsageAlertRule {
 	return predicate.UsageAlertRule(sql.FieldNotNull(FieldRealAccountID))
 }
 
-// QuotaDimensionEQ applies the EQ predicate on the "quota_dimension" field.
-func QuotaDimensionEQ(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldEQ(FieldQuotaDimension, v))
+// UsageTypeEQ applies the EQ predicate on the "usage_type" field.
+func UsageTypeEQ(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldEQ(FieldUsageType, v))
 }
 
-// QuotaDimensionNEQ applies the NEQ predicate on the "quota_dimension" field.
-func QuotaDimensionNEQ(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldNEQ(FieldQuotaDimension, v))
+// UsageTypeNEQ applies the NEQ predicate on the "usage_type" field.
+func UsageTypeNEQ(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldNEQ(FieldUsageType, v))
 }
 
-// QuotaDimensionIn applies the In predicate on the "quota_dimension" field.
-func QuotaDimensionIn(vs ...string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldIn(FieldQuotaDimension, vs...))
+// UsageTypeIn applies the In predicate on the "usage_type" field.
+func UsageTypeIn(vs ...string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldIn(FieldUsageType, vs...))
 }
 
-// QuotaDimensionNotIn applies the NotIn predicate on the "quota_dimension" field.
-func QuotaDimensionNotIn(vs ...string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldNotIn(FieldQuotaDimension, vs...))
+// UsageTypeNotIn applies the NotIn predicate on the "usage_type" field.
+func UsageTypeNotIn(vs ...string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldNotIn(FieldUsageType, vs...))
 }
 
-// QuotaDimensionGT applies the GT predicate on the "quota_dimension" field.
-func QuotaDimensionGT(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldGT(FieldQuotaDimension, v))
+// UsageTypeGT applies the GT predicate on the "usage_type" field.
+func UsageTypeGT(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldGT(FieldUsageType, v))
 }
 
-// QuotaDimensionGTE applies the GTE predicate on the "quota_dimension" field.
-func QuotaDimensionGTE(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldGTE(FieldQuotaDimension, v))
+// UsageTypeGTE applies the GTE predicate on the "usage_type" field.
+func UsageTypeGTE(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldGTE(FieldUsageType, v))
 }
 
-// QuotaDimensionLT applies the LT predicate on the "quota_dimension" field.
-func QuotaDimensionLT(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldLT(FieldQuotaDimension, v))
+// UsageTypeLT applies the LT predicate on the "usage_type" field.
+func UsageTypeLT(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldLT(FieldUsageType, v))
 }
 
-// QuotaDimensionLTE applies the LTE predicate on the "quota_dimension" field.
-func QuotaDimensionLTE(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldLTE(FieldQuotaDimension, v))
+// UsageTypeLTE applies the LTE predicate on the "usage_type" field.
+func UsageTypeLTE(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldLTE(FieldUsageType, v))
 }
 
-// QuotaDimensionContains applies the Contains predicate on the "quota_dimension" field.
-func QuotaDimensionContains(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldContains(FieldQuotaDimension, v))
+// UsageTypeContains applies the Contains predicate on the "usage_type" field.
+func UsageTypeContains(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldContains(FieldUsageType, v))
 }
 
-// QuotaDimensionHasPrefix applies the HasPrefix predicate on the "quota_dimension" field.
-func QuotaDimensionHasPrefix(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldHasPrefix(FieldQuotaDimension, v))
+// UsageTypeHasPrefix applies the HasPrefix predicate on the "usage_type" field.
+func UsageTypeHasPrefix(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldHasPrefix(FieldUsageType, v))
 }
 
-// QuotaDimensionHasSuffix applies the HasSuffix predicate on the "quota_dimension" field.
-func QuotaDimensionHasSuffix(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldHasSuffix(FieldQuotaDimension, v))
+// UsageTypeHasSuffix applies the HasSuffix predicate on the "usage_type" field.
+func UsageTypeHasSuffix(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldHasSuffix(FieldUsageType, v))
 }
 
-// QuotaDimensionEqualFold applies the EqualFold predicate on the "quota_dimension" field.
-func QuotaDimensionEqualFold(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldEqualFold(FieldQuotaDimension, v))
+// UsageTypeEqualFold applies the EqualFold predicate on the "usage_type" field.
+func UsageTypeEqualFold(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldEqualFold(FieldUsageType, v))
 }
 
-// QuotaDimensionContainsFold applies the ContainsFold predicate on the "quota_dimension" field.
-func QuotaDimensionContainsFold(v string) predicate.UsageAlertRule {
-	return predicate.UsageAlertRule(sql.FieldContainsFold(FieldQuotaDimension, v))
+// UsageTypeContainsFold applies the ContainsFold predicate on the "usage_type" field.
+func UsageTypeContainsFold(v string) predicate.UsageAlertRule {
+	return predicate.UsageAlertRule(sql.FieldContainsFold(FieldUsageType, v))
 }
 
 // WindowEQ applies the EQ predicate on the "window" field.

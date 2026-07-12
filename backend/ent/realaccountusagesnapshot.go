@@ -25,8 +25,8 @@ type RealAccountUsageSnapshot struct {
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 	// RealAccountID holds the value of the "real_account_id" field.
 	RealAccountID int64 `json:"real_account_id,omitempty"`
-	// QuotaDimension holds the value of the "quota_dimension" field.
-	QuotaDimension string `json:"quota_dimension,omitempty"`
+	// UsageType holds the value of the "usage_type" field.
+	UsageType string `json:"usage_type,omitempty"`
 	// Platform holds the value of the "platform" field.
 	Platform string `json:"platform,omitempty"`
 	// Source holds the value of the "source" field.
@@ -70,7 +70,7 @@ func (*RealAccountUsageSnapshot) scanValues(columns []string) ([]any, error) {
 			values[i] = new([]byte)
 		case realaccountusagesnapshot.FieldID, realaccountusagesnapshot.FieldRealAccountID:
 			values[i] = new(sql.NullInt64)
-		case realaccountusagesnapshot.FieldQuotaDimension, realaccountusagesnapshot.FieldPlatform, realaccountusagesnapshot.FieldSource:
+		case realaccountusagesnapshot.FieldUsageType, realaccountusagesnapshot.FieldPlatform, realaccountusagesnapshot.FieldSource:
 			values[i] = new(sql.NullString)
 		case realaccountusagesnapshot.FieldCreatedAt, realaccountusagesnapshot.FieldUpdatedAt, realaccountusagesnapshot.FieldSampledAt:
 			values[i] = new(sql.NullTime)
@@ -113,11 +113,11 @@ func (_m *RealAccountUsageSnapshot) assignValues(columns []string, values []any)
 			} else if value.Valid {
 				_m.RealAccountID = value.Int64
 			}
-		case realaccountusagesnapshot.FieldQuotaDimension:
+		case realaccountusagesnapshot.FieldUsageType:
 			if value, ok := values[i].(*sql.NullString); !ok {
-				return fmt.Errorf("unexpected type %T for field quota_dimension", values[i])
+				return fmt.Errorf("unexpected type %T for field usage_type", values[i])
 			} else if value.Valid {
-				_m.QuotaDimension = value.String
+				_m.UsageType = value.String
 			}
 		case realaccountusagesnapshot.FieldPlatform:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -195,8 +195,8 @@ func (_m *RealAccountUsageSnapshot) String() string {
 	builder.WriteString("real_account_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.RealAccountID))
 	builder.WriteString(", ")
-	builder.WriteString("quota_dimension=")
-	builder.WriteString(_m.QuotaDimension)
+	builder.WriteString("usage_type=")
+	builder.WriteString(_m.UsageType)
 	builder.WriteString(", ")
 	builder.WriteString("platform=")
 	builder.WriteString(_m.Platform)

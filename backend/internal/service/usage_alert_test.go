@@ -56,18 +56,45 @@ func TestValidateUsageAlertRuleRejectsSonnetWindow(t *testing.T) {
 	require.ErrorIs(t, validateUsageAlertRule(rule), ErrUsageAlertInvalidWindow)
 }
 
-func TestValidateUsageAlertRuleNormalizesQuotaDimension(t *testing.T) {
+func TestValidateUsageAlertRuleNormalizesUsageType(t *testing.T) {
 	rule := validUsageAlertRuleForTest()
-	rule.QuotaDimension = ""
+	rule.UsageType = ""
 	require.NoError(t, validateUsageAlertRule(rule))
-	require.Equal(t, QuotaDimensionGlobal, rule.QuotaDimension)
+	require.Equal(t, UsageAlertTypeOverall, rule.UsageType)
 
 	rule = validUsageAlertRuleForTest()
-	rule.QuotaDimension = QuotaDimensionSpark
+	rule.UsageType = UsageAlertTypeSpark
 	require.NoError(t, validateUsageAlertRule(rule))
 
-	rule.QuotaDimension = "unknown"
-	require.ErrorIs(t, validateUsageAlertRule(rule), ErrUsageAlertInvalidDimension)
+	rule.UsageType = "bad type!"
+	require.ErrorIs(t, validateUsageAlertRule(rule), ErrUsageAlertInvalidUsageType)
+}
+
+func TestUsageAlertTypeSupportsPlatformAndWindow(t *testing.T) {
+	require.True(t, usageAlertTypeSupportsRule(UsageAlertPlatformOpenAI, UsageAlertTypeSpark, UsageAlertWindow5h))
+	require.True(t, usageAlertTypeSupportsRule(UsageAlertPlatformAnthropic, UsageAlertTypeFable, UsageAlertWindow7d))
+	require.False(t, usageAlertTypeSupportsRule(UsageAlertPlatformAnthropic, UsageAlertTypeFable, UsageAlertWindow5h))
+	require.False(t, usageAlertTypeSupportsRule(UsageAlertPlatformOpenAI, UsageAlertTypeFable, UsageAlertWindow7d))
+}
+
+func TestUsageAlertSnapshotsKeepFableAsOverallSubLimit(t *testing.T) {
+	overallReset := time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC)
+	fableReset := overallReset.Add(time.Hour)
+	snapshots := usageAlertSnapshotsFromUsageInfo(42, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeUsageAPI, &UsageInfo{
+		FiveHour:      &UsageProgress{Utilization: 25},
+		SevenDay:      &UsageProgress{Utilization: 40, ResetsAt: &overallReset},
+		SevenDayFable: &UsageProgress{Utilization: 65, ResetsAt: &fableReset},
+	}, time.Date(2026, 7, 12, 8, 0, 0, 0, time.UTC))
+
+	require.Len(t, snapshots, 2)
+	require.Equal(t, UsageAlertTypeOverall, snapshots[0].UsageType)
+	require.Equal(t, UsageAlertRelationPrimary, snapshots[0].UsageRelation)
+	require.Equal(t, 40.0, snapshots[0].Windows[UsageAlertWindow7d].UsedPercent)
+	require.Equal(t, UsageAlertTypeFable, snapshots[1].UsageType)
+	require.Equal(t, UsageAlertRelationSubLimit, snapshots[1].UsageRelation)
+	require.Equal(t, UsageAlertTypeOverall, snapshots[1].ParentUsageType)
+	require.Equal(t, 65.0, snapshots[1].Windows[UsageAlertWindow7d].UsedPercent)
+	require.Equal(t, overallReset, *snapshots[1].Windows[UsageAlertWindow7d].ResetAt)
 }
 
 func TestEnsureUsageAlertRuleNameBuildsDefault(t *testing.T) {
@@ -186,11 +213,11 @@ func TestBuildUsageAlertWebhookEventUsesResolvedType(t *testing.T) {
 	rule.ID = 7
 	triggeredAt := time.Date(2026, 6, 28, 10, 30, 0, 0, time.UTC)
 	snapshot := &UsageAlertSnapshot{
-		AccountID:      11,
-		RealAccountID:  22,
-		QuotaDimension: QuotaDimensionSpark,
-		Platform:       UsageAlertPlatformOpenAI,
-		Source:         UsageAlertSourceOpenAICodexHeaders,
+		AccountID:     11,
+		RealAccountID: 22,
+		UsageType:     UsageAlertTypeSpark,
+		Platform:      UsageAlertPlatformOpenAI,
+		Source:        UsageAlertSourceOpenAICodexHeaders,
 	}
 
 	event := buildUsageAlertWebhookEvent(snapshot, &RealAccount{Name: "OpenAI Main"}, UsageAlertTrigger{
@@ -204,6 +231,7 @@ func TestBuildUsageAlertWebhookEventUsesResolvedType(t *testing.T) {
 
 	require.Equal(t, UsageAlertEventResolved, event.Event)
 	require.Equal(t, "OpenAI Main", event.RealAccountName)
+	require.Equal(t, UsageAlertTypeSpark, event.UsageType)
 	require.Equal(t, QuotaDimensionSpark, event.QuotaDimension)
 	require.Contains(t, event.EventID, "-spark-")
 	require.Equal(t, 90.0, event.Value)
@@ -215,7 +243,7 @@ func TestFormatUsageAlertTelegramMessageUsesLanguageAndTimezone(t *testing.T) {
 		Event:            "account.usage_alert",
 		TriggeredAt:      time.Date(2026, 6, 28, 10, 30, 0, 0, time.UTC),
 		RealAccountName:  "OpenAI Main",
-		QuotaDimension:   QuotaDimensionSpark,
+		UsageType:        UsageAlertTypeSpark,
 		Platform:         UsageAlertPlatformOpenAI,
 		RuleName:         "weekly remaining low",
 		Window:           UsageAlertWindow7d,
@@ -234,7 +262,7 @@ func TestFormatUsageAlertTelegramMessageUsesLanguageAndTimezone(t *testing.T) {
 
 	require.Contains(t, message, "[Sub2API] 用量告警")
 	require.Contains(t, message, "账户：OpenAI Main")
-	require.Contains(t, message, "额度维度：Spark")
+	require.Contains(t, message, "用量类型：Spark")
 	require.Contains(t, message, "阈值：剩余 <= 20.0%")
 	require.Contains(t, message, "触发时间：2026-06-28 18:30:00")
 	require.Contains(t, message, "重置时间：2026-06-28 20:00:00")
@@ -328,10 +356,10 @@ func TestResolveUsageAlertScopeSharesRealAccountButSeparatesSparkQuota(t *testin
 	alertRepo := &usageAlertRepoStub{}
 	svc := NewUsageAlertService(alertRepo, accountRepo)
 
-	realAccountID, quotaDimension := svc.resolveUsageAlertScope(context.Background(), 20)
+	realAccountID, usageType := svc.resolveUsageAlertScope(context.Background(), 20)
 
 	require.Equal(t, int64(99), realAccountID)
-	require.Equal(t, QuotaDimensionSpark, quotaDimension)
+	require.Equal(t, UsageAlertTypeSpark, usageType)
 	require.Equal(t, parentID, alertRepo.ensuredAccountID)
 	require.Equal(t, int64(99), alertRepo.attachedRealID)
 	require.Equal(t, int64(20), alertRepo.attachedAccountID)
@@ -342,7 +370,7 @@ func validUsageAlertRuleForTest() *UsageAlertRule {
 	return &UsageAlertRule{
 		Name:            "weekly remaining low",
 		Platform:        UsageAlertPlatformOpenAI,
-		QuotaDimension:  QuotaDimensionGlobal,
+		UsageType:       UsageAlertTypeOverall,
 		RealAccountID:   &realAccountID,
 		Window:          UsageAlertWindow7d,
 		Metric:          UsageAlertMetricRemaining,

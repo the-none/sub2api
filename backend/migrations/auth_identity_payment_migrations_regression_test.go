@@ -191,6 +191,19 @@ func TestMigration155CreatesUsageAlertAccountIndexConcurrently(t *testing.T) {
 	require.Contains(t, sql, "WHERE real_account_id IS NOT NULL")
 }
 
+func TestMigration174GeneralizesUsageAlertTypesCompatibly(t *testing.T) {
+	content, err := FS.ReadFile("174_usage_alert_usage_type.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "SET quota_dimension = 'overall'")
+	require.Contains(t, sql, "WHERE quota_dimension = 'global'")
+	require.Contains(t, sql, "DROP CONSTRAINT IF EXISTS usage_alert_rules_quota_dimension_check")
+	require.Contains(t, sql, "ALTER COLUMN quota_dimension SET DEFAULT 'overall'")
+	require.NotContains(t, sql, "DROP COLUMN")
+	require.NotContains(t, sql, "RENAME COLUMN")
+}
+
 func TestMigration158BackfillsGrokMediaGenerationGroups(t *testing.T) {
 	content, err := FS.ReadFile("158_enable_grok_media_generation_groups.sql")
 	require.NoError(t, err)

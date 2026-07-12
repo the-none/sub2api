@@ -64,16 +64,16 @@ func (_u *UsageAlertStateUpdate) SetNillableRuleID(v *int64) *UsageAlertStateUpd
 	return _u
 }
 
-// SetQuotaDimension sets the "quota_dimension" field.
-func (_u *UsageAlertStateUpdate) SetQuotaDimension(v string) *UsageAlertStateUpdate {
-	_u.mutation.SetQuotaDimension(v)
+// SetUsageType sets the "usage_type" field.
+func (_u *UsageAlertStateUpdate) SetUsageType(v string) *UsageAlertStateUpdate {
+	_u.mutation.SetUsageType(v)
 	return _u
 }
 
-// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
-func (_u *UsageAlertStateUpdate) SetNillableQuotaDimension(v *string) *UsageAlertStateUpdate {
+// SetNillableUsageType sets the "usage_type" field if the given value is not nil.
+func (_u *UsageAlertStateUpdate) SetNillableUsageType(v *string) *UsageAlertStateUpdate {
 	if v != nil {
-		_u.SetQuotaDimension(*v)
+		_u.SetUsageType(*v)
 	}
 	return _u
 }
@@ -238,9 +238,9 @@ func (_u *UsageAlertStateUpdate) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *UsageAlertStateUpdate) check() error {
-	if v, ok := _u.mutation.QuotaDimension(); ok {
-		if err := usagealertstate.QuotaDimensionValidator(v); err != nil {
-			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.quota_dimension": %w`, err)}
+	if v, ok := _u.mutation.UsageType(); ok {
+		if err := usagealertstate.UsageTypeValidator(v); err != nil {
+			return &ValidationError{Name: "usage_type", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.usage_type": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.Window(); ok {
@@ -277,8 +277,8 @@ func (_u *UsageAlertStateUpdate) sqlSave(ctx context.Context) (_node int, err er
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(usagealertstate.FieldUpdatedAt, field.TypeTime, value)
 	}
-	if value, ok := _u.mutation.QuotaDimension(); ok {
-		_spec.SetField(usagealertstate.FieldQuotaDimension, field.TypeString, value)
+	if value, ok := _u.mutation.UsageType(); ok {
+		_spec.SetField(usagealertstate.FieldUsageType, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Window(); ok {
 		_spec.SetField(usagealertstate.FieldWindow, field.TypeString, value)
@@ -419,16 +419,16 @@ func (_u *UsageAlertStateUpdateOne) SetNillableRuleID(v *int64) *UsageAlertState
 	return _u
 }
 
-// SetQuotaDimension sets the "quota_dimension" field.
-func (_u *UsageAlertStateUpdateOne) SetQuotaDimension(v string) *UsageAlertStateUpdateOne {
-	_u.mutation.SetQuotaDimension(v)
+// SetUsageType sets the "usage_type" field.
+func (_u *UsageAlertStateUpdateOne) SetUsageType(v string) *UsageAlertStateUpdateOne {
+	_u.mutation.SetUsageType(v)
 	return _u
 }
 
-// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
-func (_u *UsageAlertStateUpdateOne) SetNillableQuotaDimension(v *string) *UsageAlertStateUpdateOne {
+// SetNillableUsageType sets the "usage_type" field if the given value is not nil.
+func (_u *UsageAlertStateUpdateOne) SetNillableUsageType(v *string) *UsageAlertStateUpdateOne {
 	if v != nil {
-		_u.SetQuotaDimension(*v)
+		_u.SetUsageType(*v)
 	}
 	return _u
 }
@@ -606,9 +606,9 @@ func (_u *UsageAlertStateUpdateOne) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *UsageAlertStateUpdateOne) check() error {
-	if v, ok := _u.mutation.QuotaDimension(); ok {
-		if err := usagealertstate.QuotaDimensionValidator(v); err != nil {
-			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.quota_dimension": %w`, err)}
+	if v, ok := _u.mutation.UsageType(); ok {
+		if err := usagealertstate.UsageTypeValidator(v); err != nil {
+			return &ValidationError{Name: "usage_type", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.usage_type": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.Window(); ok {
@@ -662,8 +662,8 @@ func (_u *UsageAlertStateUpdateOne) sqlSave(ctx context.Context) (_node *UsageAl
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(usagealertstate.FieldUpdatedAt, field.TypeTime, value)
 	}
-	if value, ok := _u.mutation.QuotaDimension(); ok {
-		_spec.SetField(usagealertstate.FieldQuotaDimension, field.TypeString, value)
+	if value, ok := _u.mutation.UsageType(); ok {
+		_spec.SetField(usagealertstate.FieldUsageType, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Window(); ok {
 		_spec.SetField(usagealertstate.FieldWindow, field.TypeString, value)

@@ -49,16 +49,16 @@ func (_u *RealAccountUsageSnapshotUpdate) SetNillableRealAccountID(v *int64) *Re
 	return _u
 }
 
-// SetQuotaDimension sets the "quota_dimension" field.
-func (_u *RealAccountUsageSnapshotUpdate) SetQuotaDimension(v string) *RealAccountUsageSnapshotUpdate {
-	_u.mutation.SetQuotaDimension(v)
+// SetUsageType sets the "usage_type" field.
+func (_u *RealAccountUsageSnapshotUpdate) SetUsageType(v string) *RealAccountUsageSnapshotUpdate {
+	_u.mutation.SetUsageType(v)
 	return _u
 }
 
-// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
-func (_u *RealAccountUsageSnapshotUpdate) SetNillableQuotaDimension(v *string) *RealAccountUsageSnapshotUpdate {
+// SetNillableUsageType sets the "usage_type" field if the given value is not nil.
+func (_u *RealAccountUsageSnapshotUpdate) SetNillableUsageType(v *string) *RealAccountUsageSnapshotUpdate {
 	if v != nil {
-		_u.SetQuotaDimension(*v)
+		_u.SetUsageType(*v)
 	}
 	return _u
 }
@@ -165,9 +165,9 @@ func (_u *RealAccountUsageSnapshotUpdate) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *RealAccountUsageSnapshotUpdate) check() error {
-	if v, ok := _u.mutation.QuotaDimension(); ok {
-		if err := realaccountusagesnapshot.QuotaDimensionValidator(v); err != nil {
-			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "RealAccountUsageSnapshot.quota_dimension": %w`, err)}
+	if v, ok := _u.mutation.UsageType(); ok {
+		if err := realaccountusagesnapshot.UsageTypeValidator(v); err != nil {
+			return &ValidationError{Name: "usage_type", err: fmt.Errorf(`ent: validator failed for field "RealAccountUsageSnapshot.usage_type": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.Platform(); ok {
@@ -201,8 +201,8 @@ func (_u *RealAccountUsageSnapshotUpdate) sqlSave(ctx context.Context) (_node in
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldUpdatedAt, field.TypeTime, value)
 	}
-	if value, ok := _u.mutation.QuotaDimension(); ok {
-		_spec.SetField(realaccountusagesnapshot.FieldQuotaDimension, field.TypeString, value)
+	if value, ok := _u.mutation.UsageType(); ok {
+		_spec.SetField(realaccountusagesnapshot.FieldUsageType, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldPlatform, field.TypeString, value)
@@ -285,16 +285,16 @@ func (_u *RealAccountUsageSnapshotUpdateOne) SetNillableRealAccountID(v *int64) 
 	return _u
 }
 
-// SetQuotaDimension sets the "quota_dimension" field.
-func (_u *RealAccountUsageSnapshotUpdateOne) SetQuotaDimension(v string) *RealAccountUsageSnapshotUpdateOne {
-	_u.mutation.SetQuotaDimension(v)
+// SetUsageType sets the "usage_type" field.
+func (_u *RealAccountUsageSnapshotUpdateOne) SetUsageType(v string) *RealAccountUsageSnapshotUpdateOne {
+	_u.mutation.SetUsageType(v)
 	return _u
 }
 
-// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
-func (_u *RealAccountUsageSnapshotUpdateOne) SetNillableQuotaDimension(v *string) *RealAccountUsageSnapshotUpdateOne {
+// SetNillableUsageType sets the "usage_type" field if the given value is not nil.
+func (_u *RealAccountUsageSnapshotUpdateOne) SetNillableUsageType(v *string) *RealAccountUsageSnapshotUpdateOne {
 	if v != nil {
-		_u.SetQuotaDimension(*v)
+		_u.SetUsageType(*v)
 	}
 	return _u
 }
@@ -414,9 +414,9 @@ func (_u *RealAccountUsageSnapshotUpdateOne) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *RealAccountUsageSnapshotUpdateOne) check() error {
-	if v, ok := _u.mutation.QuotaDimension(); ok {
-		if err := realaccountusagesnapshot.QuotaDimensionValidator(v); err != nil {
-			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "RealAccountUsageSnapshot.quota_dimension": %w`, err)}
+	if v, ok := _u.mutation.UsageType(); ok {
+		if err := realaccountusagesnapshot.UsageTypeValidator(v); err != nil {
+			return &ValidationError{Name: "usage_type", err: fmt.Errorf(`ent: validator failed for field "RealAccountUsageSnapshot.usage_type": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.Platform(); ok {
@@ -467,8 +467,8 @@ func (_u *RealAccountUsageSnapshotUpdateOne) sqlSave(ctx context.Context) (_node
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldUpdatedAt, field.TypeTime, value)
 	}
-	if value, ok := _u.mutation.QuotaDimension(); ok {
-		_spec.SetField(realaccountusagesnapshot.FieldQuotaDimension, field.TypeString, value)
+	if value, ok := _u.mutation.UsageType(); ok {
+		_spec.SetField(realaccountusagesnapshot.FieldUsageType, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(realaccountusagesnapshot.FieldPlatform, field.TypeString, value)

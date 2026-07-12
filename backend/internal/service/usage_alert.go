@@ -21,12 +21,18 @@ const (
 	UsageAlertPlatformOpenAI    = PlatformOpenAI
 	UsageAlertPlatformAnthropic = PlatformAnthropic
 
-	UsageAlertWindow5h        = "5h"
-	UsageAlertWindow7d        = "7d"
-	UsageAlertMetricUsed      = "used_percent"
-	UsageAlertMetricRemaining = "remaining_percent"
-	UsageAlertOperatorGTE     = ">="
-	UsageAlertOperatorLTE     = "<="
+	UsageAlertWindow5h         = "5h"
+	UsageAlertWindow7d         = "7d"
+	UsageAlertTypeOverall      = "overall"
+	UsageAlertTypeSpark        = "spark"
+	UsageAlertTypeFable        = "fable"
+	UsageAlertRelationPrimary  = "primary"
+	UsageAlertRelationShadow   = "shadow"
+	UsageAlertRelationSubLimit = "sub_limit"
+	UsageAlertMetricUsed       = "used_percent"
+	UsageAlertMetricRemaining  = "remaining_percent"
+	UsageAlertOperatorGTE      = ">="
+	UsageAlertOperatorLTE      = "<="
 
 	UsageAlertWebhookTypeJSONPost = "json_post"
 	UsageAlertWebhookTypeTelegram = "telegram"
@@ -50,7 +56,7 @@ var (
 	ErrUsageAlertInvalidWindow    = errors.New("usage alert window must be 5h or 7d")
 	ErrUsageAlertInvalidMetric    = errors.New("usage alert metric must be used_percent or remaining_percent")
 	ErrUsageAlertInvalidOperator  = errors.New("usage alert operator must be >= or <=")
-	ErrUsageAlertInvalidDimension = errors.New("usage alert quota dimension must be global or spark")
+	ErrUsageAlertInvalidUsageType = errors.New("usage alert usage type is invalid")
 	ErrUsageAlertInvalidWebhook   = errors.New("usage alert webhook type must be json_post or telegram")
 )
 
@@ -70,7 +76,7 @@ type UsageAlertRule struct {
 	Name               string       `json:"name"`
 	Platform           string       `json:"platform"`
 	RealAccountID      *int64       `json:"real_account_id,omitempty"`
-	QuotaDimension     string       `json:"quota_dimension"`
+	UsageType          string       `json:"usage_type"`
 	Window             string       `json:"window"`
 	Metric             string       `json:"metric"`
 	Operator           string       `json:"operator"`
@@ -120,7 +126,7 @@ type UsageAlertState struct {
 	ID              int64      `json:"id"`
 	RealAccountID   int64      `json:"real_account_id"`
 	RuleID          int64      `json:"rule_id"`
-	QuotaDimension  string     `json:"quota_dimension"`
+	UsageType       string     `json:"usage_type"`
 	Window          string     `json:"window"`
 	LastStatus      string     `json:"last_status"`
 	LastTriggeredAt *time.Time `json:"last_triggered_at,omitempty"`
@@ -137,13 +143,15 @@ type UsageAlertWindowSnapshot struct {
 }
 
 type UsageAlertSnapshot struct {
-	AccountID      int64                               `json:"account_id"`
-	RealAccountID  int64                               `json:"real_account_id"`
-	QuotaDimension string                              `json:"quota_dimension"`
-	Platform       string                              `json:"platform"`
-	Source         string                              `json:"source"`
-	Windows        map[string]UsageAlertWindowSnapshot `json:"windows"`
-	SampledAt      time.Time                           `json:"sampled_at"`
+	AccountID       int64                               `json:"account_id"`
+	RealAccountID   int64                               `json:"real_account_id"`
+	UsageType       string                              `json:"usage_type"`
+	UsageRelation   string                              `json:"usage_relation"`
+	ParentUsageType string                              `json:"parent_usage_type,omitempty"`
+	Platform        string                              `json:"platform"`
+	Source          string                              `json:"source"`
+	Windows         map[string]UsageAlertWindowSnapshot `json:"windows"`
+	SampledAt       time.Time                           `json:"sampled_at"`
 }
 
 type UsageAlertTrigger struct {
@@ -162,7 +170,10 @@ type UsageAlertWebhookEvent struct {
 	AccountID        int64      `json:"account_id"`
 	RealAccountID    int64      `json:"real_account_id"`
 	RealAccountName  string     `json:"real_account_name,omitempty"`
-	QuotaDimension   string     `json:"quota_dimension"`
+	UsageType        string     `json:"usage_type"`
+	UsageRelation    string     `json:"usage_relation"`
+	ParentUsageType  string     `json:"parent_usage_type,omitempty"`
+	QuotaDimension   string     `json:"quota_dimension,omitempty"`
 	Platform         string     `json:"platform"`
 	Source           string     `json:"source"`
 	RuleID           int64      `json:"rule_id"`
@@ -188,7 +199,7 @@ type UsageAlertRepository interface {
 	DetachAccount(ctx context.Context, accountID int64) error
 
 	ListRules(ctx context.Context) ([]*UsageAlertRule, error)
-	ListEnabledRules(ctx context.Context, realAccountID int64, quotaDimension string) ([]*UsageAlertRule, error)
+	ListEnabledRules(ctx context.Context, realAccountID int64, usageType string) ([]*UsageAlertRule, error)
 	GetRule(ctx context.Context, id int64) (*UsageAlertRule, error)
 	CreateRule(ctx context.Context, rule *UsageAlertRule) (*UsageAlertRule, error)
 	UpdateRule(ctx context.Context, rule *UsageAlertRule) (*UsageAlertRule, error)
@@ -207,9 +218,9 @@ type UsageAlertRepository interface {
 	DeleteBinding(ctx context.Context, id int64) error
 	EnsureRealAccountForAccount(ctx context.Context, account *Account) (*RealAccount, error)
 
-	GetSnapshot(ctx context.Context, realAccountID int64, quotaDimension string) (*UsageAlertSnapshot, error)
+	GetSnapshot(ctx context.Context, realAccountID int64, usageType string) (*UsageAlertSnapshot, error)
 	UpsertSnapshot(ctx context.Context, snapshot *UsageAlertSnapshot) error
-	GetState(ctx context.Context, realAccountID, ruleID int64, quotaDimension, window string) (*UsageAlertState, error)
+	GetState(ctx context.Context, realAccountID, ruleID int64, usageType, window string) (*UsageAlertState, error)
 	UpsertState(ctx context.Context, state *UsageAlertState) error
 }
 
@@ -323,15 +334,21 @@ func (s *UsageAlertService) ListBindings(ctx context.Context) ([]*UsageAlertBind
 	return s.repo.ListBindings(ctx)
 }
 
-func (s *UsageAlertService) GetSnapshot(ctx context.Context, realAccountID int64, quotaDimension string) (*UsageAlertSnapshot, error) {
+func (s *UsageAlertService) GetSnapshot(ctx context.Context, realAccountID int64, usageType string) (*UsageAlertSnapshot, error) {
 	if realAccountID <= 0 {
 		return nil, fmt.Errorf("real_account_id must be positive")
 	}
-	quotaDimension = normalizeUsageAlertQuotaDimension(quotaDimension)
-	if !isValidUsageAlertQuotaDimension(quotaDimension) {
-		return nil, ErrUsageAlertInvalidDimension
+	usageType = normalizeUsageAlertUsageType(usageType)
+	if !isValidUsageAlertUsageType(usageType) {
+		return nil, ErrUsageAlertInvalidUsageType
 	}
-	return s.repo.GetSnapshot(ctx, realAccountID, quotaDimension)
+	snapshot, err := s.repo.GetSnapshot(ctx, realAccountID, usageType)
+	if err != nil || snapshot == nil {
+		return snapshot, err
+	}
+	snapshot.UsageType = normalizeUsageAlertUsageType(snapshot.UsageType)
+	snapshot.UsageRelation, snapshot.ParentUsageType = usageAlertTypeRelationship(snapshot.UsageType)
+	return snapshot, nil
 }
 
 func (s *UsageAlertService) CreateBinding(ctx context.Context, binding *UsageAlertBinding) (*UsageAlertBinding, error) {
@@ -375,6 +392,8 @@ func (s *UsageAlertService) TestWebhook(ctx context.Context, webhook *UsageAlert
 		AccountID:        0,
 		RealAccountID:    0,
 		RealAccountName:  "Test account",
+		UsageType:        UsageAlertTypeOverall,
+		UsageRelation:    UsageAlertRelationPrimary,
 		QuotaDimension:   QuotaDimensionGlobal,
 		Platform:         UsageAlertPlatformOpenAI,
 		Source:           "manual_test",
@@ -402,65 +421,69 @@ func (s *UsageAlertService) Observe(ctx context.Context, snapshot *UsageAlertSna
 	if strings.TrimSpace(snapshot.Platform) == "" {
 		return
 	}
-	if snapshot.RealAccountID <= 0 || strings.TrimSpace(snapshot.QuotaDimension) == "" {
-		realAccountID, quotaDimension := s.resolveUsageAlertScope(ctx, snapshot.AccountID)
+	if snapshot.RealAccountID <= 0 || strings.TrimSpace(snapshot.UsageType) == "" {
+		realAccountID, accountUsageType := s.resolveUsageAlertScope(ctx, snapshot.AccountID)
 		if snapshot.RealAccountID <= 0 {
 			snapshot.RealAccountID = realAccountID
-			snapshot.QuotaDimension = quotaDimension
-		} else if strings.TrimSpace(snapshot.QuotaDimension) == "" {
-			snapshot.QuotaDimension = quotaDimension
+		}
+		if strings.TrimSpace(snapshot.UsageType) == "" {
+			snapshot.UsageType = accountUsageType
 		}
 	}
-	snapshot.QuotaDimension = normalizeUsageAlertQuotaDimension(snapshot.QuotaDimension)
-	if snapshot.RealAccountID <= 0 || !isValidUsageAlertQuotaDimension(snapshot.QuotaDimension) {
+	snapshot.UsageType = normalizeUsageAlertUsageType(snapshot.UsageType)
+	if snapshot.RealAccountID <= 0 || !isValidUsageAlertUsageType(snapshot.UsageType) {
 		return
 	}
+	snapshot.UsageRelation, snapshot.ParentUsageType = usageAlertTypeRelationship(snapshot.UsageType)
 
 	go s.observeAsync(*snapshot)
 }
 
 func (s *UsageAlertService) resolveUsageAlertScope(ctx context.Context, accountID int64) (int64, string) {
 	if s.accountRepo == nil || accountID <= 0 {
-		return 0, QuotaDimensionGlobal
+		return 0, UsageAlertTypeOverall
 	}
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil || account == nil {
-		return 0, QuotaDimensionGlobal
+		return 0, UsageAlertTypeOverall
 	}
-	quotaDimension := normalizeUsageAlertQuotaDimension(account.QuotaDimensionOrDefault())
+	usageType := UsageAlertTypeOverall
+	if account.QuotaDimensionOrDefault() == QuotaDimensionSpark {
+		usageType = UsageAlertTypeSpark
+	}
 	if account.RealAccountID != nil && *account.RealAccountID > 0 {
-		return *account.RealAccountID, quotaDimension
+		return *account.RealAccountID, usageType
 	}
 	if account.IsShadow() && account.ParentAccountID != nil && *account.ParentAccountID > 0 {
 		parent, parentErr := s.accountRepo.GetByID(ctx, *account.ParentAccountID)
 		if parentErr != nil || parent == nil {
 			slog.Warn("usage_alert_get_shadow_parent_failed", "account_id", accountID, "parent_account_id", *account.ParentAccountID, "error", parentErr)
-			return 0, quotaDimension
+			return 0, usageType
 		}
 		realAccount, ensureErr := s.repo.EnsureRealAccountForAccount(ctx, parent)
 		if ensureErr != nil || realAccount == nil {
 			slog.Warn("usage_alert_ensure_parent_real_account_failed", "account_id", accountID, "parent_account_id", parent.ID, "error", ensureErr)
-			return 0, quotaDimension
+			return 0, usageType
 		}
 		if attachErr := s.repo.AttachAccount(ctx, realAccount.ID, account.ID); attachErr != nil {
 			slog.Warn("usage_alert_attach_shadow_real_account_failed", "account_id", accountID, "real_account_id", realAccount.ID, "error", attachErr)
-			return 0, quotaDimension
+			return 0, usageType
 		}
-		return realAccount.ID, quotaDimension
+		return realAccount.ID, usageType
 	}
 	realAccount, err := s.repo.EnsureRealAccountForAccount(ctx, account)
 	if err != nil || realAccount == nil {
 		slog.Warn("usage_alert_ensure_real_account_failed", "account_id", accountID, "error", err)
-		return 0, quotaDimension
+		return 0, usageType
 	}
-	return realAccount.ID, quotaDimension
+	return realAccount.ID, usageType
 }
 
 func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	previous, err := s.repo.GetSnapshot(ctx, snapshot.RealAccountID, snapshot.QuotaDimension)
+	previous, err := s.repo.GetSnapshot(ctx, snapshot.RealAccountID, snapshot.UsageType)
 	if err != nil {
 		slog.Warn("usage_alert_get_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
 	}
@@ -469,7 +492,7 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) {
 		return
 	}
 
-	rules, err := s.repo.ListEnabledRules(ctx, snapshot.RealAccountID, snapshot.QuotaDimension)
+	rules, err := s.repo.ListEnabledRules(ctx, snapshot.RealAccountID, snapshot.UsageType)
 	if err != nil {
 		slog.Warn("usage_alert_list_rules_failed", "real_account_id", snapshot.RealAccountID, "error", err)
 		return
@@ -511,7 +534,7 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 		if !ok {
 			continue
 		}
-		state, _ := s.repo.GetState(ctx, current.RealAccountID, rule.ID, current.QuotaDimension, rule.Window)
+		state, _ := s.repo.GetState(ctx, current.RealAccountID, rule.ID, current.UsageType, rule.Window)
 		value := metricValue(window, rule.Metric)
 		if !resetConstraintSatisfied(window, rule.MinResetAfterHours, now) {
 			if usageAlertStateWasTriggered(state) {
@@ -577,9 +600,9 @@ func (s *UsageAlertService) populateUsageAlertRuleScope(ctx context.Context, rul
 		return fmt.Errorf("real account not found")
 	}
 	rule.Platform = realAccount.Platform
-	rule.QuotaDimension = normalizeUsageAlertQuotaDimension(rule.QuotaDimension)
-	if realAccount.Platform == UsageAlertPlatformAnthropic && rule.QuotaDimension != QuotaDimensionGlobal {
-		return fmt.Errorf("anthropic usage alerts only support the global quota dimension")
+	rule.UsageType = normalizeUsageAlertUsageType(rule.UsageType)
+	if !usageAlertTypeSupportsRule(realAccount.Platform, rule.UsageType, rule.Window) {
+		return fmt.Errorf("usage type %q does not support %s %s alerts", rule.UsageType, realAccount.Platform, rule.Window)
 	}
 	rule.RealAccount = realAccount
 	return nil
@@ -596,7 +619,7 @@ func (s *UsageAlertService) updateRuleState(ctx context.Context, realAccountID i
 	state := &UsageAlertState{
 		RealAccountID:   realAccountID,
 		RuleID:          rule.ID,
-		QuotaDimension:  rule.QuotaDimension,
+		UsageType:       rule.UsageType,
 		Window:          rule.Window,
 		LastStatus:      status,
 		LastTriggeredAt: triggeredAt,
@@ -604,7 +627,7 @@ func (s *UsageAlertService) updateRuleState(ctx context.Context, realAccountID i
 		LastResetAt:     window.ResetAt,
 	}
 	if err := s.repo.UpsertState(ctx, state); err != nil {
-		slog.Warn("usage_alert_upsert_state_failed", "real_account_id", realAccountID, "quota_dimension", rule.QuotaDimension, "rule_id", rule.ID, "error", err)
+		slog.Warn("usage_alert_upsert_state_failed", "real_account_id", realAccountID, "usage_type", rule.UsageType, "rule_id", rule.ID, "error", err)
 	}
 }
 
@@ -736,7 +759,7 @@ func validateUsageAlertRule(rule *UsageAlertRule) error {
 	}
 	rule.Name = strings.TrimSpace(rule.Name)
 	rule.Platform = strings.TrimSpace(rule.Platform)
-	rule.QuotaDimension = normalizeUsageAlertQuotaDimension(rule.QuotaDimension)
+	rule.UsageType = normalizeUsageAlertUsageType(rule.UsageType)
 	rule.Window = strings.TrimSpace(rule.Window)
 	rule.Metric = strings.TrimSpace(rule.Metric)
 	rule.Operator = strings.TrimSpace(rule.Operator)
@@ -746,8 +769,8 @@ func validateUsageAlertRule(rule *UsageAlertRule) error {
 	if rule.Platform != "" && rule.Platform != UsageAlertPlatformAll && rule.Platform != UsageAlertPlatformOpenAI && rule.Platform != UsageAlertPlatformAnthropic {
 		return ErrUsageAlertInvalidPlatform
 	}
-	if !isValidUsageAlertQuotaDimension(rule.QuotaDimension) {
-		return ErrUsageAlertInvalidDimension
+	if !isValidUsageAlertUsageType(rule.UsageType) {
+		return ErrUsageAlertInvalidUsageType
 	}
 	if rule.Window != UsageAlertWindow5h && rule.Window != UsageAlertWindow7d {
 		return ErrUsageAlertInvalidWindow
@@ -799,7 +822,7 @@ func buildUsageAlertRuleDefaultName(rule *UsageAlertRule) string {
 	parts := []string{
 		accountName,
 		usageAlertPlatformDisplayName(rule.Platform, "en"),
-		usageAlertQuotaDimensionDisplayName(rule.QuotaDimension, "en"),
+		usageAlertUsageTypeDisplayName(rule.UsageType, "en"),
 		usageAlertWindowDisplayName(rule.Window, "en"),
 		usageAlertMetricDisplayName(rule.Metric, "en"),
 		fmt.Sprintf("%s %s%%", rule.Operator, formatUsageAlertRuleNumber(rule.Threshold)),
@@ -1004,11 +1027,11 @@ func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent, cfg UsageAler
 			timeLabel = "重置通知时间"
 		}
 		return fmt.Sprintf(
-			"%s\n账户：%s\n平台：%s\n额度维度：%s\n规则：%s\n窗口：%s\n已用：%.1f%%\n剩余：%.1f%%\n阈值：%s %s %.1f%%\n重置时间：%s\n%s：%s",
+			"%s\n账户：%s\n平台：%s\n用量类型：%s\n规则：%s\n窗口：%s\n已用：%.1f%%\n剩余：%.1f%%\n阈值：%s %s %.1f%%\n重置时间：%s\n%s：%s",
 			title,
 			accountName,
 			usageAlertPlatformDisplayName(event.Platform, "zh"),
-			usageAlertQuotaDimensionDisplayName(event.QuotaDimension, "zh"),
+			usageAlertUsageTypeDisplayName(event.UsageType, "zh"),
 			event.RuleName,
 			usageAlertWindowDisplayName(event.Window, "zh"),
 			event.UsedPercent,
@@ -1031,11 +1054,11 @@ func formatUsageAlertTelegramMessage(event UsageAlertWebhookEvent, cfg UsageAler
 		timeLabel = "Reset notified"
 	}
 	return fmt.Sprintf(
-		"%s\nAccount: %s\nPlatform: %s\nQuota: %s\nRule: %s\nWindow: %s\nUsed: %.1f%%\nRemaining: %.1f%%\nThreshold: %s %s %.1f%%\nReset: %s\n%s: %s",
+		"%s\nAccount: %s\nPlatform: %s\nUsage type: %s\nRule: %s\nWindow: %s\nUsed: %.1f%%\nRemaining: %.1f%%\nThreshold: %s %s %.1f%%\nReset: %s\n%s: %s",
 		title,
 		accountName,
 		usageAlertPlatformDisplayName(event.Platform, "en"),
-		usageAlertQuotaDimensionDisplayName(event.QuotaDimension, "en"),
+		usageAlertUsageTypeDisplayName(event.UsageType, "en"),
 		event.RuleName,
 		usageAlertWindowDisplayName(event.Window, "en"),
 		event.UsedPercent,
@@ -1085,27 +1108,69 @@ func usageAlertPlatformDisplayName(platform, language string) string {
 	}
 }
 
-func normalizeUsageAlertQuotaDimension(quotaDimension string) string {
-	quotaDimension = strings.ToLower(strings.TrimSpace(quotaDimension))
-	if quotaDimension == "" {
-		return QuotaDimensionGlobal
+func normalizeUsageAlertUsageType(usageType string) string {
+	usageType = strings.ToLower(strings.TrimSpace(usageType))
+	if usageType == "" || usageType == QuotaDimensionGlobal {
+		return UsageAlertTypeOverall
 	}
-	return quotaDimension
+	return usageType
 }
 
-func isValidUsageAlertQuotaDimension(quotaDimension string) bool {
-	return quotaDimension == QuotaDimensionGlobal || quotaDimension == QuotaDimensionSpark
+func isValidUsageAlertUsageType(usageType string) bool {
+	if usageType == "" || len(usageType) > 32 {
+		return false
+	}
+	for _, char := range usageType {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' && char != '-' {
+			return false
+		}
+	}
+	return true
 }
 
-func usageAlertQuotaDimensionDisplayName(quotaDimension, language string) string {
-	switch normalizeUsageAlertQuotaDimension(quotaDimension) {
-	case QuotaDimensionSpark:
+func usageAlertTypeSupportsRule(platform, usageType, window string) bool {
+	switch platform {
+	case UsageAlertPlatformOpenAI:
+		return usageType == UsageAlertTypeOverall || usageType == UsageAlertTypeSpark
+	case UsageAlertPlatformAnthropic:
+		if usageType == UsageAlertTypeOverall {
+			return true
+		}
+		return usageType == UsageAlertTypeFable && window == UsageAlertWindow7d
+	default:
+		return false
+	}
+}
+
+func usageAlertLegacyQuotaDimension(usageType string) string {
+	if normalizeUsageAlertUsageType(usageType) == UsageAlertTypeSpark {
+		return QuotaDimensionSpark
+	}
+	return QuotaDimensionGlobal
+}
+
+func usageAlertTypeRelationship(usageType string) (relation, parent string) {
+	switch normalizeUsageAlertUsageType(usageType) {
+	case UsageAlertTypeSpark:
+		return UsageAlertRelationShadow, UsageAlertTypeOverall
+	case UsageAlertTypeFable:
+		return UsageAlertRelationSubLimit, UsageAlertTypeOverall
+	default:
+		return UsageAlertRelationPrimary, ""
+	}
+}
+
+func usageAlertUsageTypeDisplayName(usageType, language string) string {
+	switch normalizeUsageAlertUsageType(usageType) {
+	case UsageAlertTypeSpark:
 		return "Spark"
+	case UsageAlertTypeFable:
+		return "Fable"
 	default:
 		if language == "zh" {
-			return "全局"
+			return "总额度"
 		}
-		return "Global"
+		return "Overall"
 	}
 }
 
@@ -1241,12 +1306,15 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 	}
 	return UsageAlertWebhookEvent{
 		Event:            eventName,
-		EventID:          fmt.Sprintf("%d-%s-%d-%s-%d", snapshot.RealAccountID, snapshot.QuotaDimension, trigger.Rule.ID, trigger.Window, trigger.TriggeredAt.UnixNano()),
+		EventID:          fmt.Sprintf("%d-%s-%d-%s-%d", snapshot.RealAccountID, snapshot.UsageType, trigger.Rule.ID, trigger.Window, trigger.TriggeredAt.UnixNano()),
 		TriggeredAt:      trigger.TriggeredAt,
 		AccountID:        snapshot.AccountID,
 		RealAccountID:    snapshot.RealAccountID,
 		RealAccountName:  realAccountName,
-		QuotaDimension:   snapshot.QuotaDimension,
+		UsageType:        snapshot.UsageType,
+		UsageRelation:    snapshot.UsageRelation,
+		ParentUsageType:  snapshot.ParentUsageType,
+		QuotaDimension:   usageAlertLegacyQuotaDimension(snapshot.UsageType),
 		Platform:         snapshot.Platform,
 		Source:           snapshot.Source,
 		RuleID:           trigger.Rule.ID,
@@ -1263,18 +1331,38 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 	}
 }
 
-func usageAlertSnapshotFromUsageInfo(accountID int64, platform, source string, usage *UsageInfo, sampledAt time.Time) *UsageAlertSnapshot {
+func usageAlertSnapshotsFromUsageInfo(accountID int64, platform, source string, usage *UsageInfo, sampledAt time.Time) []*UsageAlertSnapshot {
 	if accountID <= 0 || usage == nil {
 		return nil
 	}
-	windows := make(map[string]UsageAlertWindowSnapshot, 3)
+	snapshots := make([]*UsageAlertSnapshot, 0, 2)
+	windows := make(map[string]UsageAlertWindowSnapshot, 2)
 	if usage.FiveHour != nil {
 		windows[UsageAlertWindow5h] = usageAlertWindowFromProgress(usage.FiveHour)
 	}
 	if usage.SevenDay != nil {
 		windows[UsageAlertWindow7d] = usageAlertWindowFromProgress(usage.SevenDay)
 	}
-	return usageAlertSnapshotFromWindows(accountID, platform, source, windows, sampledAt)
+	overallType := []string(nil)
+	if platform == UsageAlertPlatformAnthropic {
+		overallType = []string{UsageAlertTypeOverall}
+	}
+	if snapshot := usageAlertSnapshotFromWindows(accountID, platform, source, windows, sampledAt, overallType...); snapshot != nil {
+		snapshots = append(snapshots, snapshot)
+	}
+	if platform == UsageAlertPlatformAnthropic && usage.SevenDayFable != nil {
+		fable := usageAlertWindowFromProgress(usage.SevenDayFable)
+		// Fable is a 7d sub-limit under Overall and shares the parent reset.
+		if usage.SevenDay != nil && usage.SevenDay.ResetsAt != nil {
+			fable.ResetAt = usage.SevenDay.ResetsAt
+		}
+		if snapshot := usageAlertSnapshotFromWindows(accountID, platform, source, map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: fable,
+		}, sampledAt, UsageAlertTypeFable); snapshot != nil {
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+	return snapshots
 }
 
 func usageAlertWindowFromProgress(progress *UsageProgress) UsageAlertWindowSnapshot {
@@ -1307,20 +1395,27 @@ func usageAlertSnapshotFromCodexExtra(accountID int64, source string, extra map[
 	return usageAlertSnapshotFromWindows(accountID, UsageAlertPlatformOpenAI, source, windows, now)
 }
 
-func usageAlertSnapshotFromWindows(accountID int64, platform, source string, windows map[string]UsageAlertWindowSnapshot, sampledAt time.Time) *UsageAlertSnapshot {
+func usageAlertSnapshotFromWindows(accountID int64, platform, source string, windows map[string]UsageAlertWindowSnapshot, sampledAt time.Time, usageTypes ...string) *UsageAlertSnapshot {
 	if accountID <= 0 || len(windows) == 0 {
 		return nil
 	}
 	if sampledAt.IsZero() {
 		sampledAt = time.Now().UTC()
 	}
+	usageType := ""
+	if len(usageTypes) > 0 {
+		usageType = normalizeUsageAlertUsageType(usageTypes[0])
+	}
+	relation, parent := usageAlertTypeRelationship(usageType)
 	return &UsageAlertSnapshot{
-		AccountID:      accountID,
-		Platform:       platform,
-		QuotaDimension: QuotaDimensionGlobal,
-		Source:         source,
-		Windows:        windows,
-		SampledAt:      sampledAt.UTC(),
+		AccountID:       accountID,
+		Platform:        platform,
+		UsageType:       usageType,
+		UsageRelation:   relation,
+		ParentUsageType: parent,
+		Source:          source,
+		Windows:         windows,
+		SampledAt:       sampledAt.UTC(),
 	}
 }
 

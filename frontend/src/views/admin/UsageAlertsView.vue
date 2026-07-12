@@ -88,8 +88,8 @@
                         </td>
                         <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
                           <div v-if="snapshotLoaded[item.id]" class="space-y-1">
-                            <div v-for="entry in snapshotEntries(item)" :key="`${entry.dimension}-${entry.window}`">
-                              {{ quotaDimensionLabel(entry.dimension) }} · {{ entry.window }}: {{ entry.used }}% / {{ entry.remaining }}%
+                            <div v-for="entry in snapshotEntries(item)" :key="`${entry.usageType}-${entry.window}`">
+                              {{ usageTypeLabel(entry.usageType) }} · {{ entry.window }}: {{ entry.used }}% / {{ entry.remaining }}%
                             </div>
                             <div v-if="snapshotEntries(item).length === 0" class="text-gray-400">{{ text.empty }}</div>
                           </div>
@@ -159,15 +159,16 @@
               <label class="block">
                 <span class="input-label">{{ text.window }}</span>
                 <select v-model="ruleForm.window" class="input">
-                  <option value="5h">5h</option>
+                  <option v-if="ruleForm.usageType !== 'fable'" value="5h">5h</option>
                   <option value="7d">7d</option>
                 </select>
               </label>
               <label class="block">
-                <span class="input-label">{{ text.quotaDimension }}</span>
-                <select v-model="ruleForm.quotaDimension" class="input">
-                  <option value="global">{{ text.globalQuota }}</option>
-                  <option v-if="selectedRuleRealAccount?.platform === 'openai'" value="spark">{{ text.sparkQuota }}</option>
+                <span class="input-label">{{ text.usageType }}</span>
+                <select v-model="ruleForm.usageType" class="input">
+                  <option v-for="option in availableRuleUsageTypes" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
                 </select>
               </label>
               <label class="block">
@@ -371,7 +372,7 @@ import usageAlertAPI, {
   type RealAccount,
   type UsageAlertBinding,
   type UsageAlertMetric,
-  type UsageAlertQuotaDimension,
+  type UsageAlertUsageType,
   type UsageAlertPlatform,
   type UsageAlertRule,
   type UsageAlertSnapshot,
@@ -404,9 +405,10 @@ const zhText = {
   notes: '备注',
   accounts: '账号',
   snapshot: '快照',
-  quotaDimension: '额度维度',
-  globalQuota: '全局额度',
-  sparkQuota: 'Spark 额度',
+  usageType: '用量类型',
+  overallUsage: '总额度',
+  sparkUsage: 'Spark 影子额度',
+  fableUsage: 'Fable 分项限制',
   actions: '操作',
   create: '创建',
   update: '更新',
@@ -468,9 +470,10 @@ const enText: typeof zhText = {
   notes: 'Notes',
   accounts: 'Accounts',
   snapshot: 'Snapshot',
-  quotaDimension: 'Quota dimension',
-  globalQuota: 'Global quota',
-  sparkQuota: 'Spark quota',
+  usageType: 'Usage type',
+  overallUsage: 'Overall',
+  sparkUsage: 'Spark shadow quota',
+  fableUsage: 'Fable sub-limit',
   actions: 'Actions',
   create: 'Create',
   update: 'Update',
@@ -549,7 +552,7 @@ const ruleForm = reactive({
   id: null as number | null,
   name: '',
   realAccountID: 0,
-  quotaDimension: 'global' as UsageAlertQuotaDimension,
+  usageType: 'overall' as UsageAlertUsageType,
   window: '7d' as UsageAlertWindow,
   metric: 'remaining_percent' as UsageAlertMetric,
   operator: '<=' as '<=' | '>=',
@@ -588,8 +591,23 @@ const bindingForm = reactive({
 
 const selectedAttachRealAccount = computed(() => realAccounts.value.find((item) => item.id === attachRealAccountID.value) || null)
 const selectedRuleRealAccount = computed(() => realAccounts.value.find((item) => item.id === ruleForm.realAccountID) || null)
-watch(() => selectedRuleRealAccount.value?.platform, (platform) => {
-  if (platform !== 'openai') ruleForm.quotaDimension = 'global'
+const availableRuleUsageTypes = computed(() => {
+  const options = [{ value: 'overall' as UsageAlertUsageType, label: text.value.overallUsage }]
+  if (selectedRuleRealAccount.value?.platform === 'openai') {
+    options.push({ value: 'spark', label: text.value.sparkUsage })
+  }
+  if (selectedRuleRealAccount.value?.platform === 'anthropic') {
+    options.push({ value: 'fable', label: text.value.fableUsage })
+  }
+  return options
+})
+watch(() => selectedRuleRealAccount.value?.platform, () => {
+  if (!availableRuleUsageTypes.value.some((option) => option.value === ruleForm.usageType)) {
+    ruleForm.usageType = 'overall'
+  }
+})
+watch(() => ruleForm.usageType, (usageType) => {
+  if (usageType === 'fable') ruleForm.window = '7d'
 })
 const attachableAccounts = computed(() => {
   const realAccount = selectedAttachRealAccount.value
@@ -628,10 +646,10 @@ async function loadAll() {
 
 async function loadSnapshot(item: RealAccount) {
   try {
-    const dimensions = realAccountQuotaDimensions(item)
-    const rows = await Promise.all(dimensions.map((dimension) => usageAlertAPI.getSnapshot(item.id, dimension)))
-    dimensions.forEach((dimension, index) => {
-      snapshots[snapshotKey(item.id, dimension)] = rows[index]
+    const usageTypes = realAccountUsageTypes(item)
+    const rows = await Promise.all(usageTypes.map((usageType) => usageAlertAPI.getSnapshot(item.id, usageType)))
+    usageTypes.forEach((usageType, index) => {
+      snapshots[snapshotKey(item.id, usageType)] = rows[index]
     })
     snapshotLoaded[item.id] = true
   } catch (error) {
@@ -721,7 +739,7 @@ async function saveRule() {
       name: ruleForm.name,
       real_account_id: ruleForm.realAccountID,
       platform: (selectedRuleRealAccount.value?.platform || 'all') as UsageAlertPlatform,
-      quota_dimension: ruleForm.quotaDimension,
+      usage_type: ruleForm.usageType,
       window: ruleForm.window,
       metric: ruleForm.metric,
       operator: ruleForm.operator,
@@ -750,7 +768,7 @@ function editRule(rule: UsageAlertRule) {
   ruleForm.id = rule.id
   ruleForm.name = rule.name
   ruleForm.realAccountID = rule.real_account_id || 0
-  ruleForm.quotaDimension = rule.quota_dimension || 'global'
+  ruleForm.usageType = rule.usage_type || 'overall'
   ruleForm.window = rule.window
   ruleForm.metric = rule.metric
   ruleForm.operator = rule.operator
@@ -765,7 +783,7 @@ function resetRuleForm() {
   ruleForm.id = null
   ruleForm.name = ''
   ruleForm.realAccountID = 0
-  ruleForm.quotaDimension = 'global'
+  ruleForm.usageType = 'overall'
   ruleForm.window = '7d'
   ruleForm.metric = 'remaining_percent'
   ruleForm.operator = '<='
@@ -935,11 +953,11 @@ async function deleteBinding(id: number) {
 }
 
 function snapshotEntries(realAccount: RealAccount) {
-  return realAccountQuotaDimensions(realAccount).flatMap((dimension) => {
-    const snapshot = snapshots[snapshotKey(realAccount.id, dimension)]
+  return realAccountUsageTypes(realAccount).flatMap((usageType) => {
+    const snapshot = snapshots[snapshotKey(realAccount.id, usageType)]
     if (!snapshot) return []
     return Object.entries(snapshot.windows || {}).map(([window, value]) => ({
-      dimension,
+      usageType,
       window,
       used: formatPercent(value?.used_percent),
       remaining: formatPercent(value?.remaining_percent)
@@ -947,20 +965,23 @@ function snapshotEntries(realAccount: RealAccount) {
   })
 }
 
-function snapshotKey(realAccountID: number, quotaDimension: UsageAlertQuotaDimension) {
-  return `${realAccountID}:${quotaDimension}`
+function snapshotKey(realAccountID: number, usageType: UsageAlertUsageType) {
+  return `${realAccountID}:${usageType}`
 }
 
-function realAccountQuotaDimensions(realAccount: RealAccount): UsageAlertQuotaDimension[] {
-  const dimensions = new Set<UsageAlertQuotaDimension>(['global'])
+function realAccountUsageTypes(realAccount: RealAccount): UsageAlertUsageType[] {
+  const usageTypes = new Set<UsageAlertUsageType>(['overall'])
+  if (realAccount.platform === 'anthropic') usageTypes.add('fable')
   for (const account of realAccount.accounts || []) {
-    dimensions.add(account.quota_dimension || 'global')
+    if (account.quota_dimension === 'spark') usageTypes.add('spark')
   }
-  return [...dimensions]
+  return [...usageTypes]
 }
 
-function quotaDimensionLabel(quotaDimension: UsageAlertQuotaDimension | string) {
-  return quotaDimension === 'spark' ? text.value.sparkQuota : text.value.globalQuota
+function usageTypeLabel(usageType: UsageAlertUsageType | string) {
+  if (usageType === 'spark') return text.value.sparkUsage
+  if (usageType === 'fable') return text.value.fableUsage
+  return text.value.overallUsage
 }
 
 function platformLabel(platform: string) {
@@ -981,7 +1002,7 @@ function ruleDetailItems(rule: UsageAlertRule) {
   return [
     ruleRealAccountLabel(rule),
     platformLabel(rule.real_account?.platform || rule.platform),
-    quotaDimensionLabel(rule.quota_dimension),
+    usageTypeLabel(rule.usage_type),
     rule.window,
     `${metricLabel(rule.metric)} ${rule.operator} ${formatRuleNumber(rule.threshold)}%`,
     `${text.value.stepPercentShort} ${rule.step_percent == null ? '-' : `${formatRuleNumber(rule.step_percent)}%`}`,

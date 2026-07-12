@@ -27,8 +27,8 @@ const (
 	FieldPlatform = "platform"
 	// FieldRealAccountID holds the string denoting the real_account_id field in the database.
 	FieldRealAccountID = "real_account_id"
-	// FieldQuotaDimension holds the string denoting the quota_dimension field in the database.
-	FieldQuotaDimension = "quota_dimension"
+	// FieldUsageType holds the string denoting the usage_type field in the database.
+	FieldUsageType = "quota_dimension"
 	// FieldWindow holds the string denoting the window field in the database.
 	FieldWindow = "window"
 	// FieldMetric holds the string denoting the metric field in the database.
@@ -76,7 +76,7 @@ var Columns = []string{
 	FieldName,
 	FieldPlatform,
 	FieldRealAccountID,
-	FieldQuotaDimension,
+	FieldUsageType,
 	FieldWindow,
 	FieldMetric,
 	FieldOperator,
@@ -117,10 +117,10 @@ var (
 	DefaultPlatform string
 	// PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	PlatformValidator func(string) error
-	// DefaultQuotaDimension holds the default value on creation for the "quota_dimension" field.
-	DefaultQuotaDimension string
-	// QuotaDimensionValidator is a validator for the "quota_dimension" field. It is called by the builders before save.
-	QuotaDimensionValidator func(string) error
+	// DefaultUsageType holds the default value on creation for the "usage_type" field.
+	DefaultUsageType string
+	// UsageTypeValidator is a validator for the "usage_type" field. It is called by the builders before save.
+	UsageTypeValidator func(string) error
 	// WindowValidator is a validator for the "window" field. It is called by the builders before save.
 	WindowValidator func(string) error
 	// MetricValidator is a validator for the "metric" field. It is called by the builders before save.
@@ -173,9 +173,9 @@ func ByRealAccountID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRealAccountID, opts...).ToFunc()
 }
 
-// ByQuotaDimension orders the results by the quota_dimension field.
-func ByQuotaDimension(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldQuotaDimension, opts...).ToFunc()
+// ByUsageType orders the results by the usage_type field.
+func ByUsageType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUsageType, opts...).ToFunc()
 }
 
 // ByWindow orders the results by the window field.

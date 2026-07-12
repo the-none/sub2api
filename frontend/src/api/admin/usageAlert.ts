@@ -5,7 +5,9 @@ export type UsageAlertWindow = '5h' | '7d'
 export type UsageAlertMetric = 'used_percent' | 'remaining_percent'
 export type UsageAlertOperator = '>=' | '<='
 export type UsageAlertWebhookType = 'json_post' | 'telegram'
-export type UsageAlertQuotaDimension = 'global' | 'spark'
+export type UsageAlertUsageType = 'overall' | 'spark' | 'fable'
+export type UsageAlertUsageRelation = 'primary' | 'shadow' | 'sub_limit'
+export type AccountQuotaDimension = 'global' | 'spark'
 
 export interface RealAccountLinkedAccount {
   id: number
@@ -15,7 +17,7 @@ export interface RealAccountLinkedAccount {
   status: string
   real_account_id?: number | null
   parent_account_id?: number | null
-  quota_dimension: UsageAlertQuotaDimension
+  quota_dimension: AccountQuotaDimension
 }
 
 export interface RealAccount {
@@ -38,7 +40,9 @@ export interface UsageAlertWindowSnapshot {
 export interface UsageAlertSnapshot {
   account_id: number
   real_account_id: number
-  quota_dimension: UsageAlertQuotaDimension
+  usage_type: UsageAlertUsageType
+  usage_relation: UsageAlertUsageRelation
+  parent_usage_type?: UsageAlertUsageType | null
   platform: Exclude<UsageAlertPlatform, 'all'>
   source: string
   windows: Partial<Record<UsageAlertWindow, UsageAlertWindowSnapshot>>
@@ -51,7 +55,7 @@ export interface UsageAlertRule {
   platform: UsageAlertPlatform
   real_account_id?: number | null
   real_account?: RealAccount | null
-  quota_dimension: UsageAlertQuotaDimension
+  usage_type: UsageAlertUsageType
   window: UsageAlertWindow
   metric: UsageAlertMetric
   operator: UsageAlertOperator
@@ -126,9 +130,9 @@ export async function detachAccount(realAccountId: number, accountId: number): P
   return data
 }
 
-export async function getSnapshot(realAccountId: number, quotaDimension: UsageAlertQuotaDimension = 'global'): Promise<UsageAlertSnapshot | null> {
+export async function getSnapshot(realAccountId: number, usageType: UsageAlertUsageType = 'overall'): Promise<UsageAlertSnapshot | null> {
   const { data } = await apiClient.get<UsageAlertSnapshot | null>(`${base}/real-accounts/${realAccountId}/snapshot`, {
-    params: { quota_dimension: quotaDimension }
+    params: { usage_type: usageType }
   })
   return data
 }

@@ -1313,6 +1313,7 @@ func (s *RateLimitService) persistAnthropicFableWindowLimit(ctx context.Context,
 	// Fable 请求不再调度到该账号，若不在此处采样，7d F 进度条会冻结在
 	// 限流前的旧值直到窗口重置。
 	s.samplePassiveUsageFromHeaders(ctx, account, headers)
+	s.observeClaudeUsageHeaders(ctx, account, headers, nil)
 	if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, anthropicFableRateLimitKey, limit.resetAt, limit.reason); err != nil {
 		slog.Warn("anthropic_fable_window_rate_limit_set_failed",
 			"account_id", account.ID,
@@ -1605,6 +1606,10 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Account, headers http.Header) {
 	status := headers.Get("anthropic-ratelimit-unified-5h-status")
 	if status == "" {
+		// Weekly counters are useful even when an upstream response omits the 5h
+		// status header.
+		s.samplePassiveUsageFromHeaders(ctx, account, headers)
+		s.observeClaudeUsageHeaders(ctx, account, headers, nil)
 		return
 	}
 
@@ -1649,15 +1654,11 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 		slog.Info("account_session_window_initialized", "account_id", account.ID, "window_start", start, "window_end", end, "status", status)
 	}
 
-	// 窗口重置时清除旧的 utilization 和被动采样数据，避免残留上个窗口的数据
+	// 5h 窗口重置只清除 5h 数据。7d 与 Fable 7d_oi 是独立计数器，
+	// 即使当前响应没有携带对应头也必须保留。
 	if windowEnd != nil && needInitWindow {
 		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
-			"session_window_utilization":      nil,
-			"passive_usage_7d_utilization":    nil,
-			"passive_usage_7d_reset":          nil,
-			"passive_usage_7d_oi_utilization": nil,
-			"passive_usage_7d_oi_reset":       nil,
-			"passive_usage_sampled_at":        nil,
+			"session_window_utilization": nil,
 		})
 	}
 
@@ -1665,7 +1666,6 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 		slog.Warn("session_window_update_failed", "account_id", account.ID, "error", err)
 	}
 
-	// 被动采样：从响应头收集 5h + 7d + 7d_oi utilization，合并为一次 DB 写入
 	s.samplePassiveUsageFromHeaders(ctx, account, headers)
 	s.observeClaudeUsageHeaders(ctx, account, headers, windowEnd)
 
@@ -1754,8 +1754,35 @@ func (s *RateLimitService) observeClaudeUsageHeaders(ctx context.Context, accoun
 			ResetAt:          parseAnthropicUnixHeaderTime(headers.Get("anthropic-ratelimit-unified-7d-reset")),
 		}
 	}
-	snapshot := usageAlertSnapshotFromWindows(account.ID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeHeaders, windows, time.Now())
-	s.usageAlertService.Observe(ctx, snapshot)
+	now := time.Now()
+	s.usageAlertService.Observe(ctx, usageAlertSnapshotFromWindows(
+		account.ID,
+		UsageAlertPlatformAnthropic,
+		UsageAlertSourceClaudeHeaders,
+		windows,
+		now,
+		UsageAlertTypeOverall,
+	))
+	if used, ok := parseAnthropicUtilizationPercent(headers.Get("anthropic-ratelimit-unified-7d_oi-utilization")); ok {
+		resetAt := parseAnthropicUnixHeaderTime(headers.Get("anthropic-ratelimit-unified-7d-reset"))
+		if resetAt == nil {
+			resetAt = parseAnthropicUnixHeaderTime(headers.Get("anthropic-ratelimit-unified-7d_oi-reset"))
+		}
+		s.usageAlertService.Observe(ctx, usageAlertSnapshotFromWindows(
+			account.ID,
+			UsageAlertPlatformAnthropic,
+			UsageAlertSourceClaudeHeaders,
+			map[string]UsageAlertWindowSnapshot{
+				UsageAlertWindow7d: {
+					UsedPercent:      used,
+					RemainingPercent: usageAlertRemainingPercent(used),
+					ResetAt:          resetAt,
+				},
+			},
+			now,
+			UsageAlertTypeFable,
+		))
+	}
 }
 
 func parseAnthropicUtilizationPercent(raw string) (float64, bool) {

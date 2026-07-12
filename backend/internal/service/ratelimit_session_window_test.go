@@ -398,8 +398,8 @@ func TestUpdateSessionWindow_SamplesFable7dOiHeaders(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionWindow_ClearsFable7dOiOnWindowReset(t *testing.T) {
-	// 5h 窗口重置时应连同清除 7d_oi 被动采样数据，与 7d 行为一致。
+func TestUpdateSessionWindow_PreservesWeeklyUsageOnFiveHourReset(t *testing.T) {
+	// 5h 窗口重置不能清除独立的 7d 与 Fable 7d_oi 计数器。
 	resetUnix := time.Now().Add(3 * time.Hour).Unix()
 
 	repo := &sessionWindowMockRepo{}
@@ -416,15 +416,15 @@ func TestUpdateSessionWindow_ClearsFable7dOiOnWindowReset(t *testing.T) {
 		t.Fatalf("expected 1 UpdateExtra (clear) call, got %d", len(repo.updateExtraCalls))
 	}
 	clearUpdates := repo.updateExtraCalls[0].Updates
-	for _, key := range []string{"passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"} {
-		if val, present := clearUpdates[key]; !present || val != nil {
-			t.Errorf("expected %s cleared to nil on window reset, got present=%v val=%v", key, present, val)
+	for _, key := range []string{"passive_usage_7d_utilization", "passive_usage_7d_reset", "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"} {
+		if val, present := clearUpdates[key]; present {
+			t.Errorf("expected %s to be preserved on 5h reset, got val=%v", key, val)
 		}
 	}
 }
 
 func TestUpdateSessionWindow_NoStatusHeader(t *testing.T) {
-	// Should return immediately if no status header.
+	// Empty headers do not update the session window.
 	repo := &sessionWindowMockRepo{}
 	svc := newRateLimitServiceForTest(repo)
 
@@ -434,5 +434,25 @@ func TestUpdateSessionWindow_NoStatusHeader(t *testing.T) {
 
 	if len(repo.sessionWindowCalls) != 0 {
 		t.Errorf("expected no calls when status header absent, got %d", len(repo.sessionWindowCalls))
+	}
+}
+
+func TestUpdateSessionWindow_SamplesFableWithoutFiveHourStatus(t *testing.T) {
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "0.42")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-reset", fmt.Sprintf("%d", time.Now().Add(48*time.Hour).Unix()))
+
+	svc.UpdateSessionWindow(context.Background(), &Account{ID: 92}, headers)
+
+	if len(repo.sessionWindowCalls) != 0 {
+		t.Fatalf("expected no session update, got %d", len(repo.sessionWindowCalls))
+	}
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected one passive sample, got %d", len(repo.updateExtraCalls))
+	}
+	if got := repo.updateExtraCalls[0].Updates["passive_usage_7d_oi_utilization"]; got != 0.42 {
+		t.Fatalf("expected Fable utilization 0.42, got %v", got)
 	}
 }

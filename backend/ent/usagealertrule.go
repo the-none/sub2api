@@ -30,8 +30,8 @@ type UsageAlertRule struct {
 	Platform string `json:"platform,omitempty"`
 	// RealAccountID holds the value of the "real_account_id" field.
 	RealAccountID *int64 `json:"real_account_id,omitempty"`
-	// QuotaDimension holds the value of the "quota_dimension" field.
-	QuotaDimension string `json:"quota_dimension,omitempty"`
+	// UsageType holds the value of the "usage_type" field.
+	UsageType string `json:"usage_type,omitempty"`
 	// Window holds the value of the "window" field.
 	Window string `json:"window,omitempty"`
 	// Metric holds the value of the "metric" field.
@@ -96,7 +96,7 @@ func (*UsageAlertRule) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case usagealertrule.FieldID, usagealertrule.FieldRealAccountID, usagealertrule.FieldCooldownMinutes:
 			values[i] = new(sql.NullInt64)
-		case usagealertrule.FieldName, usagealertrule.FieldPlatform, usagealertrule.FieldQuotaDimension, usagealertrule.FieldWindow, usagealertrule.FieldMetric, usagealertrule.FieldOperator:
+		case usagealertrule.FieldName, usagealertrule.FieldPlatform, usagealertrule.FieldUsageType, usagealertrule.FieldWindow, usagealertrule.FieldMetric, usagealertrule.FieldOperator:
 			values[i] = new(sql.NullString)
 		case usagealertrule.FieldCreatedAt, usagealertrule.FieldUpdatedAt, usagealertrule.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -159,11 +159,11 @@ func (_m *UsageAlertRule) assignValues(columns []string, values []any) error {
 				_m.RealAccountID = new(int64)
 				*_m.RealAccountID = value.Int64
 			}
-		case usagealertrule.FieldQuotaDimension:
+		case usagealertrule.FieldUsageType:
 			if value, ok := values[i].(*sql.NullString); !ok {
-				return fmt.Errorf("unexpected type %T for field quota_dimension", values[i])
+				return fmt.Errorf("unexpected type %T for field usage_type", values[i])
 			} else if value.Valid {
-				_m.QuotaDimension = value.String
+				_m.UsageType = value.String
 			}
 		case usagealertrule.FieldWindow:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -283,8 +283,8 @@ func (_m *UsageAlertRule) String() string {
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")
-	builder.WriteString("quota_dimension=")
-	builder.WriteString(_m.QuotaDimension)
+	builder.WriteString("usage_type=")
+	builder.WriteString(_m.UsageType)
 	builder.WriteString(", ")
 	builder.WriteString("window=")
 	builder.WriteString(_m.Window)

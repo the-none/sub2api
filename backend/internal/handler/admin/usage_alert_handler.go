@@ -55,7 +55,8 @@ type usageAlertRuleRequest struct {
 	Name               string   `json:"name"`
 	RealAccountID      *int64   `json:"real_account_id"`
 	Platform           string   `json:"platform"`
-	QuotaDimension     string   `json:"quota_dimension"`
+	UsageType          string   `json:"usage_type"`
+	QuotaDimension     string   `json:"quota_dimension"` // legacy request alias
 	Window             string   `json:"window" binding:"required"`
 	Metric             string   `json:"metric" binding:"required"`
 	Operator           string   `json:"operator" binding:"required"`
@@ -64,6 +65,13 @@ type usageAlertRuleRequest struct {
 	StepPercent        *float64 `json:"step_percent"`
 	CooldownMinutes    *int     `json:"cooldown_minutes"`
 	Enabled            *bool    `json:"enabled"`
+}
+
+func (r usageAlertRuleRequest) resolvedUsageType() string {
+	if r.UsageType != "" {
+		return r.UsageType
+	}
+	return r.QuotaDimension
 }
 
 type usageAlertWebhookRequest struct {
@@ -286,7 +294,11 @@ func (h *UsageAlertHandler) GetSnapshot(c *gin.Context) {
 	if !ok {
 		return
 	}
-	snapshot, err := h.service.GetSnapshot(c.Request.Context(), id, c.Query("quota_dimension"))
+	usageType := c.Query("usage_type")
+	if usageType == "" {
+		usageType = c.Query("quota_dimension")
+	}
+	snapshot, err := h.service.GetSnapshot(c.Request.Context(), id, usageType)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -313,7 +325,7 @@ func (h *UsageAlertHandler) CreateRule(c *gin.Context) {
 		Name:               req.Name,
 		RealAccountID:      req.RealAccountID,
 		Platform:           req.Platform,
-		QuotaDimension:     req.QuotaDimension,
+		UsageType:          req.resolvedUsageType(),
 		Window:             req.Window,
 		Metric:             req.Metric,
 		Operator:           req.Operator,
@@ -345,7 +357,7 @@ func (h *UsageAlertHandler) UpdateRule(c *gin.Context) {
 		Name:               req.Name,
 		RealAccountID:      req.RealAccountID,
 		Platform:           req.Platform,
-		QuotaDimension:     req.QuotaDimension,
+		UsageType:          req.resolvedUsageType(),
 		Window:             req.Window,
 		Metric:             req.Metric,
 		Operator:           req.Operator,

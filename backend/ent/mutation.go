@@ -37237,7 +37237,7 @@ type RealAccountUsageSnapshotMutation struct {
 	id                  *int64
 	created_at          *time.Time
 	updated_at          *time.Time
-	quota_dimension     *string
+	usage_type          *string
 	platform            *string
 	source              *string
 	snapshot_json       *map[string]interface{}
@@ -37456,40 +37456,40 @@ func (m *RealAccountUsageSnapshotMutation) ResetRealAccountID() {
 	m.real_account = nil
 }
 
-// SetQuotaDimension sets the "quota_dimension" field.
-func (m *RealAccountUsageSnapshotMutation) SetQuotaDimension(s string) {
-	m.quota_dimension = &s
+// SetUsageType sets the "usage_type" field.
+func (m *RealAccountUsageSnapshotMutation) SetUsageType(s string) {
+	m.usage_type = &s
 }
 
-// QuotaDimension returns the value of the "quota_dimension" field in the mutation.
-func (m *RealAccountUsageSnapshotMutation) QuotaDimension() (r string, exists bool) {
-	v := m.quota_dimension
+// UsageType returns the value of the "usage_type" field in the mutation.
+func (m *RealAccountUsageSnapshotMutation) UsageType() (r string, exists bool) {
+	v := m.usage_type
 	if v == nil {
 		return
 	}
 	return *v, true
 }
 
-// OldQuotaDimension returns the old "quota_dimension" field's value of the RealAccountUsageSnapshot entity.
+// OldUsageType returns the old "usage_type" field's value of the RealAccountUsageSnapshot entity.
 // If the RealAccountUsageSnapshot object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *RealAccountUsageSnapshotMutation) OldQuotaDimension(ctx context.Context) (v string, err error) {
+func (m *RealAccountUsageSnapshotMutation) OldUsageType(ctx context.Context) (v string, err error) {
 	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldQuotaDimension is only allowed on UpdateOne operations")
+		return v, errors.New("OldUsageType is only allowed on UpdateOne operations")
 	}
 	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldQuotaDimension requires an ID field in the mutation")
+		return v, errors.New("OldUsageType requires an ID field in the mutation")
 	}
 	oldValue, err := m.oldValue(ctx)
 	if err != nil {
-		return v, fmt.Errorf("querying old value for OldQuotaDimension: %w", err)
+		return v, fmt.Errorf("querying old value for OldUsageType: %w", err)
 	}
-	return oldValue.QuotaDimension, nil
+	return oldValue.UsageType, nil
 }
 
-// ResetQuotaDimension resets all changes to the "quota_dimension" field.
-func (m *RealAccountUsageSnapshotMutation) ResetQuotaDimension() {
-	m.quota_dimension = nil
+// ResetUsageType resets all changes to the "usage_type" field.
+func (m *RealAccountUsageSnapshotMutation) ResetUsageType() {
+	m.usage_type = nil
 }
 
 // SetPlatform sets the "platform" field.
@@ -37707,8 +37707,8 @@ func (m *RealAccountUsageSnapshotMutation) Fields() []string {
 	if m.real_account != nil {
 		fields = append(fields, realaccountusagesnapshot.FieldRealAccountID)
 	}
-	if m.quota_dimension != nil {
-		fields = append(fields, realaccountusagesnapshot.FieldQuotaDimension)
+	if m.usage_type != nil {
+		fields = append(fields, realaccountusagesnapshot.FieldUsageType)
 	}
 	if m.platform != nil {
 		fields = append(fields, realaccountusagesnapshot.FieldPlatform)
@@ -37736,8 +37736,8 @@ func (m *RealAccountUsageSnapshotMutation) Field(name string) (ent.Value, bool) 
 		return m.UpdatedAt()
 	case realaccountusagesnapshot.FieldRealAccountID:
 		return m.RealAccountID()
-	case realaccountusagesnapshot.FieldQuotaDimension:
-		return m.QuotaDimension()
+	case realaccountusagesnapshot.FieldUsageType:
+		return m.UsageType()
 	case realaccountusagesnapshot.FieldPlatform:
 		return m.Platform()
 	case realaccountusagesnapshot.FieldSource:
@@ -37761,8 +37761,8 @@ func (m *RealAccountUsageSnapshotMutation) OldField(ctx context.Context, name st
 		return m.OldUpdatedAt(ctx)
 	case realaccountusagesnapshot.FieldRealAccountID:
 		return m.OldRealAccountID(ctx)
-	case realaccountusagesnapshot.FieldQuotaDimension:
-		return m.OldQuotaDimension(ctx)
+	case realaccountusagesnapshot.FieldUsageType:
+		return m.OldUsageType(ctx)
 	case realaccountusagesnapshot.FieldPlatform:
 		return m.OldPlatform(ctx)
 	case realaccountusagesnapshot.FieldSource:
@@ -37801,12 +37801,12 @@ func (m *RealAccountUsageSnapshotMutation) SetField(name string, value ent.Value
 		}
 		m.SetRealAccountID(v)
 		return nil
-	case realaccountusagesnapshot.FieldQuotaDimension:
+	case realaccountusagesnapshot.FieldUsageType:
 		v, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
-		m.SetQuotaDimension(v)
+		m.SetUsageType(v)
 		return nil
 	case realaccountusagesnapshot.FieldPlatform:
 		v, ok := value.(string)
@@ -37897,8 +37897,8 @@ func (m *RealAccountUsageSnapshotMutation) ResetField(name string) error {
 	case realaccountusagesnapshot.FieldRealAccountID:
 		m.ResetRealAccountID()
 		return nil
-	case realaccountusagesnapshot.FieldQuotaDimension:
-		m.ResetQuotaDimension()
+	case realaccountusagesnapshot.FieldUsageType:
+		m.ResetUsageType()
 		return nil
 	case realaccountusagesnapshot.FieldPlatform:
 		m.ResetPlatform()
@@ -43253,7 +43253,7 @@ type UsageAlertRuleMutation struct {
 	deleted_at               *time.Time
 	name                     *string
 	platform                 *string
-	quota_dimension          *string
+	usage_type               *string
 	window                   *string
 	metric                   *string
 	operator                 *string
@@ -43617,40 +43617,40 @@ func (m *UsageAlertRuleMutation) ResetRealAccountID() {
 	delete(m.clearedFields, usagealertrule.FieldRealAccountID)
 }
 
-// SetQuotaDimension sets the "quota_dimension" field.
-func (m *UsageAlertRuleMutation) SetQuotaDimension(s string) {
-	m.quota_dimension = &s
+// SetUsageType sets the "usage_type" field.
+func (m *UsageAlertRuleMutation) SetUsageType(s string) {
+	m.usage_type = &s
 }
 
-// QuotaDimension returns the value of the "quota_dimension" field in the mutation.
-func (m *UsageAlertRuleMutation) QuotaDimension() (r string, exists bool) {
-	v := m.quota_dimension
+// UsageType returns the value of the "usage_type" field in the mutation.
+func (m *UsageAlertRuleMutation) UsageType() (r string, exists bool) {
+	v := m.usage_type
 	if v == nil {
 		return
 	}
 	return *v, true
 }
 
-// OldQuotaDimension returns the old "quota_dimension" field's value of the UsageAlertRule entity.
+// OldUsageType returns the old "usage_type" field's value of the UsageAlertRule entity.
 // If the UsageAlertRule object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *UsageAlertRuleMutation) OldQuotaDimension(ctx context.Context) (v string, err error) {
+func (m *UsageAlertRuleMutation) OldUsageType(ctx context.Context) (v string, err error) {
 	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldQuotaDimension is only allowed on UpdateOne operations")
+		return v, errors.New("OldUsageType is only allowed on UpdateOne operations")
 	}
 	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldQuotaDimension requires an ID field in the mutation")
+		return v, errors.New("OldUsageType requires an ID field in the mutation")
 	}
 	oldValue, err := m.oldValue(ctx)
 	if err != nil {
-		return v, fmt.Errorf("querying old value for OldQuotaDimension: %w", err)
+		return v, fmt.Errorf("querying old value for OldUsageType: %w", err)
 	}
-	return oldValue.QuotaDimension, nil
+	return oldValue.UsageType, nil
 }
 
-// ResetQuotaDimension resets all changes to the "quota_dimension" field.
-func (m *UsageAlertRuleMutation) ResetQuotaDimension() {
-	m.quota_dimension = nil
+// ResetUsageType resets all changes to the "usage_type" field.
+func (m *UsageAlertRuleMutation) ResetUsageType() {
+	m.usage_type = nil
 }
 
 // SetWindow sets the "window" field.
@@ -44183,8 +44183,8 @@ func (m *UsageAlertRuleMutation) Fields() []string {
 	if m.real_account != nil {
 		fields = append(fields, usagealertrule.FieldRealAccountID)
 	}
-	if m.quota_dimension != nil {
-		fields = append(fields, usagealertrule.FieldQuotaDimension)
+	if m.usage_type != nil {
+		fields = append(fields, usagealertrule.FieldUsageType)
 	}
 	if m.window != nil {
 		fields = append(fields, usagealertrule.FieldWindow)
@@ -44230,8 +44230,8 @@ func (m *UsageAlertRuleMutation) Field(name string) (ent.Value, bool) {
 		return m.Platform()
 	case usagealertrule.FieldRealAccountID:
 		return m.RealAccountID()
-	case usagealertrule.FieldQuotaDimension:
-		return m.QuotaDimension()
+	case usagealertrule.FieldUsageType:
+		return m.UsageType()
 	case usagealertrule.FieldWindow:
 		return m.Window()
 	case usagealertrule.FieldMetric:
@@ -44269,8 +44269,8 @@ func (m *UsageAlertRuleMutation) OldField(ctx context.Context, name string) (ent
 		return m.OldPlatform(ctx)
 	case usagealertrule.FieldRealAccountID:
 		return m.OldRealAccountID(ctx)
-	case usagealertrule.FieldQuotaDimension:
-		return m.OldQuotaDimension(ctx)
+	case usagealertrule.FieldUsageType:
+		return m.OldUsageType(ctx)
 	case usagealertrule.FieldWindow:
 		return m.OldWindow(ctx)
 	case usagealertrule.FieldMetric:
@@ -44338,12 +44338,12 @@ func (m *UsageAlertRuleMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRealAccountID(v)
 		return nil
-	case usagealertrule.FieldQuotaDimension:
+	case usagealertrule.FieldUsageType:
 		v, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
-		m.SetQuotaDimension(v)
+		m.SetUsageType(v)
 		return nil
 	case usagealertrule.FieldWindow:
 		v, ok := value.(string)
@@ -44546,8 +44546,8 @@ func (m *UsageAlertRuleMutation) ResetField(name string) error {
 	case usagealertrule.FieldRealAccountID:
 		m.ResetRealAccountID()
 		return nil
-	case usagealertrule.FieldQuotaDimension:
-		m.ResetQuotaDimension()
+	case usagealertrule.FieldUsageType:
+		m.ResetUsageType()
 		return nil
 	case usagealertrule.FieldWindow:
 		m.ResetWindow()
@@ -44687,7 +44687,7 @@ type UsageAlertStateMutation struct {
 	id                  *int64
 	created_at          *time.Time
 	updated_at          *time.Time
-	quota_dimension     *string
+	usage_type          *string
 	window              *string
 	last_status         *string
 	last_triggered_at   *time.Time
@@ -44946,40 +44946,40 @@ func (m *UsageAlertStateMutation) ResetRuleID() {
 	m.rule = nil
 }
 
-// SetQuotaDimension sets the "quota_dimension" field.
-func (m *UsageAlertStateMutation) SetQuotaDimension(s string) {
-	m.quota_dimension = &s
+// SetUsageType sets the "usage_type" field.
+func (m *UsageAlertStateMutation) SetUsageType(s string) {
+	m.usage_type = &s
 }
 
-// QuotaDimension returns the value of the "quota_dimension" field in the mutation.
-func (m *UsageAlertStateMutation) QuotaDimension() (r string, exists bool) {
-	v := m.quota_dimension
+// UsageType returns the value of the "usage_type" field in the mutation.
+func (m *UsageAlertStateMutation) UsageType() (r string, exists bool) {
+	v := m.usage_type
 	if v == nil {
 		return
 	}
 	return *v, true
 }
 
-// OldQuotaDimension returns the old "quota_dimension" field's value of the UsageAlertState entity.
+// OldUsageType returns the old "usage_type" field's value of the UsageAlertState entity.
 // If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *UsageAlertStateMutation) OldQuotaDimension(ctx context.Context) (v string, err error) {
+func (m *UsageAlertStateMutation) OldUsageType(ctx context.Context) (v string, err error) {
 	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldQuotaDimension is only allowed on UpdateOne operations")
+		return v, errors.New("OldUsageType is only allowed on UpdateOne operations")
 	}
 	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldQuotaDimension requires an ID field in the mutation")
+		return v, errors.New("OldUsageType requires an ID field in the mutation")
 	}
 	oldValue, err := m.oldValue(ctx)
 	if err != nil {
-		return v, fmt.Errorf("querying old value for OldQuotaDimension: %w", err)
+		return v, fmt.Errorf("querying old value for OldUsageType: %w", err)
 	}
-	return oldValue.QuotaDimension, nil
+	return oldValue.UsageType, nil
 }
 
-// ResetQuotaDimension resets all changes to the "quota_dimension" field.
-func (m *UsageAlertStateMutation) ResetQuotaDimension() {
-	m.quota_dimension = nil
+// ResetUsageType resets all changes to the "usage_type" field.
+func (m *UsageAlertStateMutation) ResetUsageType() {
+	m.usage_type = nil
 }
 
 // SetWindow sets the "window" field.
@@ -45323,8 +45323,8 @@ func (m *UsageAlertStateMutation) Fields() []string {
 	if m.rule != nil {
 		fields = append(fields, usagealertstate.FieldRuleID)
 	}
-	if m.quota_dimension != nil {
-		fields = append(fields, usagealertstate.FieldQuotaDimension)
+	if m.usage_type != nil {
+		fields = append(fields, usagealertstate.FieldUsageType)
 	}
 	if m.window != nil {
 		fields = append(fields, usagealertstate.FieldWindow)
@@ -45357,8 +45357,8 @@ func (m *UsageAlertStateMutation) Field(name string) (ent.Value, bool) {
 		return m.RealAccountID()
 	case usagealertstate.FieldRuleID:
 		return m.RuleID()
-	case usagealertstate.FieldQuotaDimension:
-		return m.QuotaDimension()
+	case usagealertstate.FieldUsageType:
+		return m.UsageType()
 	case usagealertstate.FieldWindow:
 		return m.Window()
 	case usagealertstate.FieldLastStatus:
@@ -45386,8 +45386,8 @@ func (m *UsageAlertStateMutation) OldField(ctx context.Context, name string) (en
 		return m.OldRealAccountID(ctx)
 	case usagealertstate.FieldRuleID:
 		return m.OldRuleID(ctx)
-	case usagealertstate.FieldQuotaDimension:
-		return m.OldQuotaDimension(ctx)
+	case usagealertstate.FieldUsageType:
+		return m.OldUsageType(ctx)
 	case usagealertstate.FieldWindow:
 		return m.OldWindow(ctx)
 	case usagealertstate.FieldLastStatus:
@@ -45435,12 +45435,12 @@ func (m *UsageAlertStateMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRuleID(v)
 		return nil
-	case usagealertstate.FieldQuotaDimension:
+	case usagealertstate.FieldUsageType:
 		v, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
-		m.SetQuotaDimension(v)
+		m.SetUsageType(v)
 		return nil
 	case usagealertstate.FieldWindow:
 		v, ok := value.(string)
@@ -45574,8 +45574,8 @@ func (m *UsageAlertStateMutation) ResetField(name string) error {
 	case usagealertstate.FieldRuleID:
 		m.ResetRuleID()
 		return nil
-	case usagealertstate.FieldQuotaDimension:
-		m.ResetQuotaDimension()
+	case usagealertstate.FieldUsageType:
+		m.ResetUsageType()
 		return nil
 	case usagealertstate.FieldWindow:
 		m.ResetWindow()

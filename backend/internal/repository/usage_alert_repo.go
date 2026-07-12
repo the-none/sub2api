@@ -237,12 +237,12 @@ func (r *usageAlertRepository) ListRules(ctx context.Context) ([]*service.UsageA
 	return out, nil
 }
 
-func (r *usageAlertRepository) ListEnabledRules(ctx context.Context, realAccountID int64, quotaDimension string) ([]*service.UsageAlertRule, error) {
+func (r *usageAlertRepository) ListEnabledRules(ctx context.Context, realAccountID int64, usageType string) ([]*service.UsageAlertRule, error) {
 	rows, err := r.client.UsageAlertRule.Query().
 		Where(
 			dbusagealertrule.EnabledEQ(true),
 			dbusagealertrule.RealAccountIDEQ(realAccountID),
-			dbusagealertrule.QuotaDimensionEQ(quotaDimension),
+			dbusagealertrule.UsageTypeEQ(usageType),
 		).
 		Order(dbent.Asc(dbusagealertrule.FieldID)).
 		All(ctx)
@@ -271,7 +271,7 @@ func (r *usageAlertRepository) CreateRule(ctx context.Context, rule *service.Usa
 	builder := r.client.UsageAlertRule.Create().
 		SetName(rule.Name).
 		SetPlatform(rule.Platform).
-		SetQuotaDimension(rule.QuotaDimension).
+		SetUsageType(rule.UsageType).
 		SetWindow(rule.Window).
 		SetMetric(rule.Metric).
 		SetOperator(rule.Operator).
@@ -298,7 +298,7 @@ func (r *usageAlertRepository) UpdateRule(ctx context.Context, rule *service.Usa
 	builder := r.client.UsageAlertRule.UpdateOneID(rule.ID).
 		SetName(rule.Name).
 		SetPlatform(rule.Platform).
-		SetQuotaDimension(rule.QuotaDimension).
+		SetUsageType(rule.UsageType).
 		SetWindow(rule.Window).
 		SetMetric(rule.Metric).
 		SetOperator(rule.Operator).
@@ -487,11 +487,11 @@ func (r *usageAlertRepository) DeleteBinding(ctx context.Context, id int64) erro
 	return r.client.UsageAlertBinding.DeleteOneID(id).Exec(ctx)
 }
 
-func (r *usageAlertRepository) GetSnapshot(ctx context.Context, realAccountID int64, quotaDimension string) (*service.UsageAlertSnapshot, error) {
+func (r *usageAlertRepository) GetSnapshot(ctx context.Context, realAccountID int64, usageType string) (*service.UsageAlertSnapshot, error) {
 	row, err := r.client.RealAccountUsageSnapshot.Query().
 		Where(
 			dbrealaccountusagesnapshot.RealAccountIDEQ(realAccountID),
-			dbrealaccountusagesnapshot.QuotaDimensionEQ(quotaDimension),
+			dbrealaccountusagesnapshot.UsageTypeEQ(usageType),
 		).
 		Only(ctx)
 	if err != nil {
@@ -507,8 +507,8 @@ func (r *usageAlertRepository) GetSnapshot(ctx context.Context, realAccountID in
 	if snapshot.RealAccountID <= 0 {
 		snapshot.RealAccountID = row.RealAccountID
 	}
-	if snapshot.QuotaDimension == "" {
-		snapshot.QuotaDimension = row.QuotaDimension
+	if snapshot.UsageType == "" {
+		snapshot.UsageType = row.UsageType
 	}
 	return snapshot, nil
 }
@@ -531,16 +531,16 @@ func (r *usageAlertRepository) UpsertSnapshot(ctx context.Context, snapshot *ser
 			snapshot_json = EXCLUDED.snapshot_json,
 			sampled_at = EXCLUDED.sampled_at,
 			updated_at = NOW()
-		`, snapshot.RealAccountID, snapshot.QuotaDimension, snapshot.Platform, snapshot.Source, string(raw), snapshot.SampledAt)
+		`, snapshot.RealAccountID, snapshot.UsageType, snapshot.Platform, snapshot.Source, string(raw), snapshot.SampledAt)
 	return err
 }
 
-func (r *usageAlertRepository) GetState(ctx context.Context, realAccountID, ruleID int64, quotaDimension, window string) (*service.UsageAlertState, error) {
+func (r *usageAlertRepository) GetState(ctx context.Context, realAccountID, ruleID int64, usageType, window string) (*service.UsageAlertState, error) {
 	row, err := r.client.UsageAlertState.Query().
 		Where(
 			dbusagealertstate.RealAccountIDEQ(realAccountID),
 			dbusagealertstate.RuleIDEQ(ruleID),
-			dbusagealertstate.QuotaDimensionEQ(quotaDimension),
+			dbusagealertstate.UsageTypeEQ(usageType),
 			dbusagealertstate.WindowEQ(window),
 		).
 		Only(ctx)
@@ -579,7 +579,7 @@ func (r *usageAlertRepository) UpsertState(ctx context.Context, state *service.U
 			last_value = EXCLUDED.last_value,
 			last_reset_at = EXCLUDED.last_reset_at,
 			updated_at = NOW()
-		`, state.RealAccountID, state.RuleID, state.QuotaDimension, state.Window, state.LastStatus, triggeredAt, lastValue, resetAt)
+		`, state.RealAccountID, state.RuleID, state.UsageType, state.Window, state.LastStatus, triggeredAt, lastValue, resetAt)
 	return err
 }
 
@@ -614,7 +614,7 @@ func usageAlertRuleEntityToService(row *dbent.UsageAlertRule) *service.UsageAler
 		Name:               row.Name,
 		Platform:           row.Platform,
 		RealAccountID:      row.RealAccountID,
-		QuotaDimension:     row.QuotaDimension,
+		UsageType:          row.UsageType,
 		Window:             row.Window,
 		Metric:             row.Metric,
 		Operator:           row.Operator,
@@ -680,7 +680,7 @@ func usageAlertStateEntityToService(row *dbent.UsageAlertState) *service.UsageAl
 		ID:              row.ID,
 		RealAccountID:   row.RealAccountID,
 		RuleID:          row.RuleID,
-		QuotaDimension:  row.QuotaDimension,
+		UsageType:       row.UsageType,
 		Window:          row.Window,
 		LastStatus:      row.LastStatus,
 		LastTriggeredAt: row.LastTriggeredAt,

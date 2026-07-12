@@ -52,3 +52,8 @@ func TestUsageAlertRealAccountResponseUsesLinkedAccountJSONShape(t *testing.T) {
 	require.NotContains(t, account, "credentials")
 	require.NotContains(t, account, "Credentials")
 }
+
+func TestUsageAlertRuleRequestAcceptsLegacyQuotaDimension(t *testing.T) {
+	require.Equal(t, "global", (usageAlertRuleRequest{QuotaDimension: "global"}).resolvedUsageType())
+	require.Equal(t, "fable", (usageAlertRuleRequest{UsageType: "fable", QuotaDimension: "global"}).resolvedUsageType())
+}

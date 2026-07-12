@@ -450,6 +450,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		if usage.SevenDayFable == nil {
 			usage.SevenDayFable = buildPassiveUsageWindow(account.Extra, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset")
 		}
+		s.observeUsageAlert(ctx, account.ID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeUsageAPI, usage)
 
 		s.tryClearRecoverableAccountError(ctx, account)
 		return usage, nil
@@ -566,7 +567,6 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 			slog.Warn("sync_active_to_passive_session_window_end_failed", "account_id", accountID, "error", err)
 		}
 	}
-	s.observeUsageAlert(ctx, accountID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeUsageAPI, usage)
 }
 
 func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, error) {
@@ -762,7 +762,9 @@ func (s *AccountUsageService) observeUsageAlert(ctx context.Context, accountID i
 	if s == nil || s.usageAlertService == nil {
 		return
 	}
-	s.usageAlertService.Observe(ctx, usageAlertSnapshotFromUsageInfo(accountID, platform, source, usage, time.Now()))
+	for _, snapshot := range usageAlertSnapshotsFromUsageInfo(accountID, platform, source, usage, time.Now()) {
+		s.usageAlertService.Observe(ctx, snapshot)
+	}
 }
 
 func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, updates map[string]any) {

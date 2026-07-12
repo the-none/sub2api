@@ -1667,12 +1667,12 @@ func init() {
 	realaccountusagesnapshot.DefaultUpdatedAt = realaccountusagesnapshotDescUpdatedAt.Default.(func() time.Time)
 	// realaccountusagesnapshot.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	realaccountusagesnapshot.UpdateDefaultUpdatedAt = realaccountusagesnapshotDescUpdatedAt.UpdateDefault.(func() time.Time)
-	// realaccountusagesnapshotDescQuotaDimension is the schema descriptor for quota_dimension field.
-	realaccountusagesnapshotDescQuotaDimension := realaccountusagesnapshotFields[1].Descriptor()
-	// realaccountusagesnapshot.DefaultQuotaDimension holds the default value on creation for the quota_dimension field.
-	realaccountusagesnapshot.DefaultQuotaDimension = realaccountusagesnapshotDescQuotaDimension.Default.(string)
-	// realaccountusagesnapshot.QuotaDimensionValidator is a validator for the "quota_dimension" field. It is called by the builders before save.
-	realaccountusagesnapshot.QuotaDimensionValidator = realaccountusagesnapshotDescQuotaDimension.Validators[0].(func(string) error)
+	// realaccountusagesnapshotDescUsageType is the schema descriptor for usage_type field.
+	realaccountusagesnapshotDescUsageType := realaccountusagesnapshotFields[1].Descriptor()
+	// realaccountusagesnapshot.DefaultUsageType holds the default value on creation for the usage_type field.
+	realaccountusagesnapshot.DefaultUsageType = realaccountusagesnapshotDescUsageType.Default.(string)
+	// realaccountusagesnapshot.UsageTypeValidator is a validator for the "usage_type" field. It is called by the builders before save.
+	realaccountusagesnapshot.UsageTypeValidator = realaccountusagesnapshotDescUsageType.Validators[0].(func(string) error)
 	// realaccountusagesnapshotDescPlatform is the schema descriptor for platform field.
 	realaccountusagesnapshotDescPlatform := realaccountusagesnapshotFields[2].Descriptor()
 	// realaccountusagesnapshot.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
@@ -1981,12 +1981,12 @@ func init() {
 	usagealertrule.DefaultPlatform = usagealertruleDescPlatform.Default.(string)
 	// usagealertrule.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	usagealertrule.PlatformValidator = usagealertruleDescPlatform.Validators[0].(func(string) error)
-	// usagealertruleDescQuotaDimension is the schema descriptor for quota_dimension field.
-	usagealertruleDescQuotaDimension := usagealertruleFields[3].Descriptor()
-	// usagealertrule.DefaultQuotaDimension holds the default value on creation for the quota_dimension field.
-	usagealertrule.DefaultQuotaDimension = usagealertruleDescQuotaDimension.Default.(string)
-	// usagealertrule.QuotaDimensionValidator is a validator for the "quota_dimension" field. It is called by the builders before save.
-	usagealertrule.QuotaDimensionValidator = usagealertruleDescQuotaDimension.Validators[0].(func(string) error)
+	// usagealertruleDescUsageType is the schema descriptor for usage_type field.
+	usagealertruleDescUsageType := usagealertruleFields[3].Descriptor()
+	// usagealertrule.DefaultUsageType holds the default value on creation for the usage_type field.
+	usagealertrule.DefaultUsageType = usagealertruleDescUsageType.Default.(string)
+	// usagealertrule.UsageTypeValidator is a validator for the "usage_type" field. It is called by the builders before save.
+	usagealertrule.UsageTypeValidator = usagealertruleDescUsageType.Validators[0].(func(string) error)
 	// usagealertruleDescWindow is the schema descriptor for window field.
 	usagealertruleDescWindow := usagealertruleFields[4].Descriptor()
 	// usagealertrule.WindowValidator is a validator for the "window" field. It is called by the builders before save.
@@ -2066,12 +2066,12 @@ func init() {
 	usagealertstate.DefaultUpdatedAt = usagealertstateDescUpdatedAt.Default.(func() time.Time)
 	// usagealertstate.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	usagealertstate.UpdateDefaultUpdatedAt = usagealertstateDescUpdatedAt.UpdateDefault.(func() time.Time)
-	// usagealertstateDescQuotaDimension is the schema descriptor for quota_dimension field.
-	usagealertstateDescQuotaDimension := usagealertstateFields[2].Descriptor()
-	// usagealertstate.DefaultQuotaDimension holds the default value on creation for the quota_dimension field.
-	usagealertstate.DefaultQuotaDimension = usagealertstateDescQuotaDimension.Default.(string)
-	// usagealertstate.QuotaDimensionValidator is a validator for the "quota_dimension" field. It is called by the builders before save.
-	usagealertstate.QuotaDimensionValidator = usagealertstateDescQuotaDimension.Validators[0].(func(string) error)
+	// usagealertstateDescUsageType is the schema descriptor for usage_type field.
+	usagealertstateDescUsageType := usagealertstateFields[2].Descriptor()
+	// usagealertstate.DefaultUsageType holds the default value on creation for the usage_type field.
+	usagealertstate.DefaultUsageType = usagealertstateDescUsageType.Default.(string)
+	// usagealertstate.UsageTypeValidator is a validator for the "usage_type" field. It is called by the builders before save.
+	usagealertstate.UsageTypeValidator = usagealertstateDescUsageType.Validators[0].(func(string) error)
 	// usagealertstateDescWindow is the schema descriptor for window field.
 	usagealertstateDescWindow := usagealertstateFields[3].Descriptor()
 	// usagealertstate.WindowValidator is a validator for the "window" field. It is called by the builders before save.
