@@ -528,10 +528,28 @@ func (r *usageAlertRepository) UpsertSnapshot(ctx context.Context, snapshot *ser
 			ON CONFLICT (real_account_id, quota_dimension) DO UPDATE SET
 			platform = EXCLUDED.platform,
 			source = EXCLUDED.source,
-			snapshot_json = EXCLUDED.snapshot_json,
-			sampled_at = EXCLUDED.sampled_at,
-			updated_at = NOW()
-			WHERE real_account_usage_snapshots.sampled_at <= EXCLUDED.sampled_at
+				snapshot_json = EXCLUDED.snapshot_json,
+				sampled_at = EXCLUDED.sampled_at,
+				updated_at = NOW()
+				WHERE NOT EXISTS (
+					SELECT 1
+					FROM jsonb_each(COALESCE(EXCLUDED.snapshot_json->'windows', '{}'::jsonb)) AS incoming_window
+					WHERE incoming_window.value ? 'reset_at'
+						AND real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key ? 'reset_at'
+						AND (incoming_window.value->>'reset_at')::timestamptz
+							< (real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key->>'reset_at')::timestamptz
+				)
+				AND (
+					real_account_usage_snapshots.sampled_at <= EXCLUDED.sampled_at
+					OR EXISTS (
+						SELECT 1
+						FROM jsonb_each(COALESCE(EXCLUDED.snapshot_json->'windows', '{}'::jsonb)) AS incoming_window
+						WHERE incoming_window.value ? 'reset_at'
+							AND real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key ? 'reset_at'
+							AND (incoming_window.value->>'reset_at')::timestamptz
+								> (real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key->>'reset_at')::timestamptz
+					)
+				)
 		`, snapshot.RealAccountID, snapshot.UsageType, snapshot.Platform, snapshot.Source, string(raw), snapshot.SampledAt)
 	if err != nil {
 		return false, err

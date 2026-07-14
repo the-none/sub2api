@@ -408,6 +408,106 @@ func TestObserveAsyncDoesNotEvaluateRejectedStaleSnapshot(t *testing.T) {
 	require.Zero(t, repo.listRuleCalls)
 }
 
+func TestPrepareUsageAlertSnapshotRejectsLateSampleFromOlderResetWindow(t *testing.T) {
+	oldReset := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	newReset := oldReset.Add(7 * 24 * time.Hour)
+	previous := &UsageAlertSnapshot{
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 5, RemainingPercent: 95, ResetAt: &newReset},
+		},
+	}
+	current := UsageAlertSnapshot{
+		SampledAt: oldReset.Add(time.Hour),
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 95, RemainingPercent: 5, ResetAt: &oldReset},
+		},
+	}
+
+	_, _, accepted := prepareUsageAlertSnapshot(previous, current)
+
+	require.False(t, accepted)
+}
+
+func TestPrepareUsageAlertSnapshotKeepsFreshWindowAndPreservesNewerLinkedWindow(t *testing.T) {
+	oldWeeklyReset := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	newWeeklyReset := oldWeeklyReset.Add(7 * 24 * time.Hour)
+	fiveHourReset := oldWeeklyReset.Add(5 * time.Hour)
+	previousWeekly := UsageAlertWindowSnapshot{UsedPercent: 5, RemainingPercent: 95, ResetAt: &newWeeklyReset}
+	previous := &UsageAlertSnapshot{
+		Windows: map[string]UsageAlertWindowSnapshot{UsageAlertWindow7d: previousWeekly},
+	}
+	currentFiveHour := UsageAlertWindowSnapshot{UsedPercent: 25, RemainingPercent: 75, ResetAt: &fiveHourReset}
+	current := UsageAlertSnapshot{
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow5h: currentFiveHour,
+			UsageAlertWindow7d: {UsedPercent: 95, RemainingPercent: 5, ResetAt: &oldWeeklyReset},
+		},
+	}
+
+	evaluation, persisted, accepted := prepareUsageAlertSnapshot(previous, current)
+
+	require.True(t, accepted)
+	require.Equal(t, map[string]UsageAlertWindowSnapshot{UsageAlertWindow5h: currentFiveHour}, evaluation.Windows)
+	require.Equal(t, currentFiveHour, persisted.Windows[UsageAlertWindow5h])
+	require.Equal(t, previousWeekly, persisted.Windows[UsageAlertWindow7d])
+}
+
+func TestPrepareUsageAlertSnapshotRejectsUnknownGenerationAfterKnownReset(t *testing.T) {
+	resetAt := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
+	previous := &UsageAlertSnapshot{
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 5, RemainingPercent: 95, ResetAt: &resetAt},
+		},
+	}
+	current := UsageAlertSnapshot{
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 95, RemainingPercent: 5},
+		},
+	}
+
+	_, _, accepted := prepareUsageAlertSnapshot(previous, current)
+
+	require.False(t, accepted)
+}
+
+type usageAlertGenerationStateRepoStub struct {
+	UsageAlertRepository
+	state            *UsageAlertState
+	upsertStateCalls int
+}
+
+func (s *usageAlertGenerationStateRepoStub) GetState(_ context.Context, _, _ int64, _, _ string) (*UsageAlertState, error) {
+	return s.state, nil
+}
+
+func (s *usageAlertGenerationStateRepoStub) UpsertState(_ context.Context, _ *UsageAlertState) error {
+	s.upsertStateCalls++
+	return nil
+}
+
+func TestEvaluateRulesRejectsWindowOlderThanPersistedStateReset(t *testing.T) {
+	oldReset := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	newReset := oldReset.Add(7 * 24 * time.Hour)
+	repo := &usageAlertGenerationStateRepoStub{
+		state: &UsageAlertState{LastStatus: UsageAlertStatusNormal, LastResetAt: &newReset},
+	}
+	svc := NewUsageAlertService(repo, nil)
+	rule := validUsageAlertRuleForTest()
+	rule.ID = 7
+	current := &UsageAlertSnapshot{
+		RealAccountID: 1,
+		UsageType:     UsageAlertTypeOverall,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 95, RemainingPercent: 5, ResetAt: &oldReset},
+		},
+	}
+
+	triggers := svc.evaluateRules(context.Background(), nil, current, []*UsageAlertRule{rule})
+
+	require.Empty(t, triggers)
+	require.Zero(t, repo.upsertStateCalls)
+}
+
 func validUsageAlertRuleForTest() *UsageAlertRule {
 	realAccountID := int64(1)
 	return &UsageAlertRule{

@@ -488,7 +488,11 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) {
 	if err != nil {
 		slog.Warn("usage_alert_get_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
 	}
-	accepted, err := s.repo.UpsertSnapshot(ctx, &snapshot)
+	evaluationSnapshot, persistedSnapshot, hasFreshWindows := prepareUsageAlertSnapshot(previous, snapshot)
+	if !hasFreshWindows {
+		return
+	}
+	accepted, err := s.repo.UpsertSnapshot(ctx, &persistedSnapshot)
 	if err != nil {
 		slog.Warn("usage_alert_upsert_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
 		return
@@ -506,7 +510,7 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) {
 		return
 	}
 
-	triggers := s.evaluateRules(ctx, previous, &snapshot, rules)
+	triggers := s.evaluateRules(ctx, previous, &evaluationSnapshot, rules)
 	if len(triggers) == 0 {
 		return
 	}
@@ -521,11 +525,53 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) {
 	}
 	realAccount, _ := s.repo.GetRealAccount(ctx, snapshot.RealAccountID)
 	for _, trigger := range triggers {
-		event := buildUsageAlertWebhookEvent(&snapshot, realAccount, trigger)
+		event := buildUsageAlertWebhookEvent(&evaluationSnapshot, realAccount, trigger)
 		for _, webhook := range webhooks {
 			go s.deliverWebhook(*webhook, event)
 		}
 	}
+}
+
+// prepareUsageAlertSnapshot separates windows that are safe to evaluate from
+// the merged snapshot persisted for later comparisons. A sample collected later
+// must not move a linked real account back to an older quota window.
+func prepareUsageAlertSnapshot(previous *UsageAlertSnapshot, current UsageAlertSnapshot) (UsageAlertSnapshot, UsageAlertSnapshot, bool) {
+	freshWindows := make(map[string]UsageAlertWindowSnapshot, len(current.Windows))
+	persistedWindows := make(map[string]UsageAlertWindowSnapshot, len(current.Windows))
+	if previous != nil {
+		for window, value := range previous.Windows {
+			persistedWindows[window] = value
+		}
+	}
+
+	for window, value := range current.Windows {
+		if previous != nil {
+			if previousValue, ok := previous.Windows[window]; ok && usageAlertWindowGenerationIsOlder(previousValue, value) {
+				continue
+			}
+		}
+		freshWindows[window] = value
+		persistedWindows[window] = value
+	}
+	if len(freshWindows) == 0 {
+		return UsageAlertSnapshot{}, UsageAlertSnapshot{}, false
+	}
+
+	evaluation := current
+	evaluation.Windows = freshWindows
+	persisted := current
+	persisted.Windows = persistedWindows
+	return evaluation, persisted, true
+}
+
+func usageAlertWindowGenerationIsOlder(previous, current UsageAlertWindowSnapshot) bool {
+	if previous.ResetAt == nil {
+		return false
+	}
+	if current.ResetAt == nil {
+		return true
+	}
+	return current.ResetAt.Before(*previous.ResetAt)
 }
 
 func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current *UsageAlertSnapshot, rules []*UsageAlertRule) []UsageAlertTrigger {
@@ -540,6 +586,12 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 			continue
 		}
 		state, _ := s.repo.GetState(ctx, current.RealAccountID, rule.ID, current.UsageType, rule.Window)
+		if state != nil && usageAlertWindowGenerationIsOlder(
+			UsageAlertWindowSnapshot{ResetAt: state.LastResetAt},
+			window,
+		) {
+			continue
+		}
 		value := metricValue(window, rule.Metric)
 		if !resetConstraintSatisfied(window, rule.MinResetAfterHours, now) {
 			if usageAlertStateWasTriggered(state) {

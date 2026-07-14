@@ -24,7 +24,7 @@ func TestUpsertUsageAlertSnapshotRejectsOlderSamples(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = db.Close() })
 
-			mock.ExpectExec(`(?s)INSERT INTO real_account_usage_snapshots.*WHERE real_account_usage_snapshots.sampled_at <= EXCLUDED.sampled_at`).
+			mock.ExpectExec(`(?s)INSERT INTO real_account_usage_snapshots.*WHERE NOT EXISTS.*incoming_window.value.*reset_at.*real_account_usage_snapshots.sampled_at <= EXCLUDED.sampled_at.*OR EXISTS`).
 				WillReturnResult(sqlmock.NewResult(0, tc.rowsAffected))
 
 			repo := &usageAlertRepository{sql: db}
