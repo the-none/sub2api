@@ -62,7 +62,7 @@ func TestGetPassiveUsageDoesNotReplayCachedSampleIntoUsageAlerts(t *testing.T) {
 	usageService := NewAccountUsageService(
 		accountRepo,
 		&passiveUsageLogRepoStub{},
-		nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil,
 		NewUsageCache(),
 		nil, nil,
 	)

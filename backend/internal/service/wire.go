@@ -140,8 +140,9 @@ func ProvideGrokQuotaService(
 	proxyRepo ProxyRepository,
 	tokenProvider *GrokTokenProvider,
 	httpUpstream HTTPUpstream,
+	usageLogRepo UsageLogRepository,
 ) *GrokQuotaService {
-	return NewGrokQuotaService(accountRepo, proxyRepo, tokenProvider, httpUpstream)
+	return NewGrokQuotaService(accountRepo, proxyRepo, tokenProvider, httpUpstream, usageLogRepo)
 }
 
 // ProvideGeminiTokenProvider creates GeminiTokenProvider with OAuthRefreshAPI injection
@@ -310,13 +311,14 @@ func ProvideAccountUsageService(
 	geminiQuotaService *GeminiQuotaService,
 	antigravityQuotaFetcher *AntigravityQuotaFetcher,
 	grokQuotaFetcher *GrokQuotaFetcher,
+	grokQuotaService *GrokQuotaService,
 	openAIQuotaService *OpenAIQuotaService,
 	cache *UsageCache,
 	identityCache IdentityCache,
 	tlsFPProfileService *TLSFingerprintProfileService,
 	usageAlertService *UsageAlertService,
 ) *AccountUsageService {
-	svc := NewAccountUsageService(accountRepo, usageLogRepo, usageFetcher, geminiQuotaService, antigravityQuotaFetcher, grokQuotaFetcher, openAIQuotaService, cache, identityCache, tlsFPProfileService)
+	svc := NewAccountUsageService(accountRepo, usageLogRepo, usageFetcher, geminiQuotaService, antigravityQuotaFetcher, grokQuotaFetcher, grokQuotaService, openAIQuotaService, cache, identityCache, tlsFPProfileService)
 	svc.SetUsageAlertService(usageAlertService)
 	return svc
 }
