@@ -502,7 +502,7 @@ func (s *AccountUsageService) GetPassiveUsage(ctx context.Context, accountID int
 
 	// 添加窗口统计
 	s.addWindowStats(ctx, account, info)
-	s.observeUsageAlert(ctx, account.ID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeHeaders, info)
+	// 被动查询只回放已持久化的样本；原始响应头采样时已经执行过告警观察。
 
 	return info, nil
 }

@@ -365,6 +365,49 @@ func TestResolveUsageAlertScopeSharesRealAccountButSeparatesSparkQuota(t *testin
 	require.Equal(t, int64(20), alertRepo.attachedAccountID)
 }
 
+type rejectedUsageAlertSnapshotRepoStub struct {
+	UsageAlertRepository
+	previous      *UsageAlertSnapshot
+	upsertCalls   int
+	listRuleCalls int
+}
+
+func (s *rejectedUsageAlertSnapshotRepoStub) GetSnapshot(_ context.Context, _ int64, _ string) (*UsageAlertSnapshot, error) {
+	return s.previous, nil
+}
+
+func (s *rejectedUsageAlertSnapshotRepoStub) UpsertSnapshot(_ context.Context, _ *UsageAlertSnapshot) (bool, error) {
+	s.upsertCalls++
+	return false, nil
+}
+
+func (s *rejectedUsageAlertSnapshotRepoStub) ListEnabledRules(_ context.Context, _ int64, _ string) ([]*UsageAlertRule, error) {
+	s.listRuleCalls++
+	return nil, nil
+}
+
+func TestObserveAsyncDoesNotEvaluateRejectedStaleSnapshot(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &rejectedUsageAlertSnapshotRepoStub{
+		previous: &UsageAlertSnapshot{SampledAt: now},
+	}
+	svc := NewUsageAlertService(repo, nil)
+
+	svc.observeAsync(UsageAlertSnapshot{
+		AccountID:     2,
+		RealAccountID: 10,
+		UsageType:     UsageAlertTypeOverall,
+		Platform:      UsageAlertPlatformAnthropic,
+		SampledAt:     now.Add(-time.Minute),
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 95, RemainingPercent: 5},
+		},
+	})
+
+	require.Equal(t, 1, repo.upsertCalls)
+	require.Zero(t, repo.listRuleCalls)
+}
+
 func validUsageAlertRuleForTest() *UsageAlertRule {
 	realAccountID := int64(1)
 	return &UsageAlertRule{

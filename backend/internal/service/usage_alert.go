@@ -219,7 +219,8 @@ type UsageAlertRepository interface {
 	EnsureRealAccountForAccount(ctx context.Context, account *Account) (*RealAccount, error)
 
 	GetSnapshot(ctx context.Context, realAccountID int64, usageType string) (*UsageAlertSnapshot, error)
-	UpsertSnapshot(ctx context.Context, snapshot *UsageAlertSnapshot) error
+	// UpsertSnapshot returns false when a newer snapshot already exists.
+	UpsertSnapshot(ctx context.Context, snapshot *UsageAlertSnapshot) (bool, error)
 	GetState(ctx context.Context, realAccountID, ruleID int64, usageType, window string) (*UsageAlertState, error)
 	UpsertState(ctx context.Context, state *UsageAlertState) error
 }
@@ -487,8 +488,12 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) {
 	if err != nil {
 		slog.Warn("usage_alert_get_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
 	}
-	if err := s.repo.UpsertSnapshot(ctx, &snapshot); err != nil {
+	accepted, err := s.repo.UpsertSnapshot(ctx, &snapshot)
+	if err != nil {
 		slog.Warn("usage_alert_upsert_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
+		return
+	}
+	if !accepted {
 		return
 	}
 

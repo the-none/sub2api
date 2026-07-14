@@ -513,15 +513,15 @@ func (r *usageAlertRepository) GetSnapshot(ctx context.Context, realAccountID in
 	return snapshot, nil
 }
 
-func (r *usageAlertRepository) UpsertSnapshot(ctx context.Context, snapshot *service.UsageAlertSnapshot) error {
+func (r *usageAlertRepository) UpsertSnapshot(ctx context.Context, snapshot *service.UsageAlertSnapshot) (bool, error) {
 	if r.sql == nil {
-		return fmt.Errorf("usage alert repository SQL executor not configured")
+		return false, fmt.Errorf("usage alert repository SQL executor not configured")
 	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
-		return err
+		return false, err
 	}
-	_, err = r.sql.ExecContext(ctx, `
+	result, err := r.sql.ExecContext(ctx, `
 		INSERT INTO real_account_usage_snapshots (
 				real_account_id, quota_dimension, platform, source, snapshot_json, sampled_at, created_at, updated_at
 			) VALUES ($1, $2, $3, $4, $5::jsonb, $6, NOW(), NOW())
@@ -531,8 +531,16 @@ func (r *usageAlertRepository) UpsertSnapshot(ctx context.Context, snapshot *ser
 			snapshot_json = EXCLUDED.snapshot_json,
 			sampled_at = EXCLUDED.sampled_at,
 			updated_at = NOW()
+			WHERE real_account_usage_snapshots.sampled_at <= EXCLUDED.sampled_at
 		`, snapshot.RealAccountID, snapshot.UsageType, snapshot.Platform, snapshot.Source, string(raw), snapshot.SampledAt)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
 }
 
 func (r *usageAlertRepository) GetState(ctx context.Context, realAccountID, ruleID int64, usageType, window string) (*service.UsageAlertState, error) {
