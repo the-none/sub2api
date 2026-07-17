@@ -112,6 +112,46 @@ func TestResetCreditRetryOnlyRepeatsReconciliation(t *testing.T) {
 	require.Equal(t, int32(1), upstreamCalls.Load(), "reconciliation retry must never consume another reset credit")
 }
 
+func TestQueryUsageSnapshotSkipsResetCreditDetailsRequest(t *testing.T) {
+	account := &Account{
+		ID:       102,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "org-snapshot",
+		},
+	}
+	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	tokenProvider := NewOpenAITokenProvider(repo, &stubQuotaTokenCache{tokens: map[string]string{
+		OpenAITokenCacheKey(account): "fake-token",
+	}}, nil)
+
+	var usageCalls atomic.Int32
+	var creditCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		switch r.URL.Path {
+		case "/backend-api/wham/usage":
+			usageCalls.Add(1)
+			_, _ = w.Write([]byte(`{"rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":42,"limit_window_seconds":604800,"reset_after_seconds":3600}}}`))
+		case "/backend-api/wham/rate-limit-reset-credits":
+			creditCalls.Add(1)
+			_, _ = w.Write([]byte(`{"available_count":1}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	usage, err := svc.QueryUsageSnapshot(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, usage.RateLimit)
+	require.Equal(t, int32(1), usageCalls.Load())
+	require.Zero(t, creditCalls.Load())
+}
+
 func TestParseOpenAIRateLimitResetCreditDetails_PreservesAvailableCreditOrder(t *testing.T) {
 	body := []byte(`{
 		"availableCount":"2",

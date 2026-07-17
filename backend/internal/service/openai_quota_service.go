@@ -162,6 +162,17 @@ func (s *OpenAIQuotaService) SetResetReconciler(reconciler OpenAIQuotaResetRecon
 // OAuth account. Returns infraerrors so the handler layer can map them to
 // stable error codes / HTTP statuses.
 func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*OpenAIQuotaUsage, error) {
+	return s.queryUsage(ctx, accountID, true)
+}
+
+// QueryUsageSnapshot fetches only the authoritative quota windows. It skips
+// the secondary reset-credit detail request so WS usage sampling can run at a
+// bounded interval without doubling upstream traffic.
+func (s *OpenAIQuotaService) QueryUsageSnapshot(ctx context.Context, accountID int64) (*OpenAIQuotaUsage, error) {
+	return s.queryUsage(ctx, accountID, false)
+}
+
+func (s *OpenAIQuotaService) queryUsage(ctx context.Context, accountID int64, includeResetCreditDetails bool) (*OpenAIQuotaUsage, error) {
 	accessToken, chatGPTAccountID, proxyURL, fedRAMP, err := s.prepareUpstreamCall(ctx, accountID)
 	if err != nil {
 		return nil, err
@@ -207,8 +218,11 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 	}
 
 	payload.FetchedAt = time.Now().Unix()
-	details := s.queryResetCreditDetails(callCtx, client, accessToken, chatGPTAccountID, fedRAMP, accountID)
-	if details != nil {
+	if includeResetCreditDetails {
+		details := s.queryResetCreditDetails(callCtx, client, accessToken, chatGPTAccountID, fedRAMP, accountID)
+		if details == nil {
+			return &payload, nil
+		}
 		hasDetailCount := details.AvailableCount != nil
 		if payload.RateLimitResetCredits == nil {
 			payload.RateLimitResetCredits = &OpenAIRateLimitResetCredits{}
@@ -593,6 +607,64 @@ func generateRedeemRequestID() (string, error) {
 	b[8] = (b[8] & 0x3f) | 0x80
 	hexStr := hex.EncodeToString(b)
 	return fmt.Sprintf("%s-%s-%s-%s-%s", hexStr[0:8], hexStr[8:12], hexStr[12:16], hexStr[16:20], hexStr[20:]), nil
+}
+
+// buildCodexOverallWindowExtraUpdates converts the authoritative /wham/usage
+// overall quota body into the same codex_* snapshot used by HTTP response
+// headers and the scheduler.
+func buildCodexOverallWindowExtraUpdates(usage *OpenAIQuotaUsage, now time.Time) map[string]any {
+	if usage == nil || usage.RateLimit == nil {
+		return nil
+	}
+	snapshot := openAIRateLimitToCodexSnapshot(usage.RateLimit, now)
+	if snapshot == nil || snapshot.Normalize() == nil {
+		return nil
+	}
+	return buildCodexUsageExtraUpdates(snapshot, now)
+}
+
+func openAIRateLimitToCodexSnapshot(rateLimit *OpenAIRateLimit, now time.Time) *OpenAICodexUsageSnapshot {
+	if rateLimit == nil {
+		return nil
+	}
+	snapshot := &OpenAICodexUsageSnapshot{}
+	if window := rateLimit.PrimaryWindow; window != nil {
+		used := window.UsedPercent
+		resetAfter := openAIRateLimitWindowResetAfterSeconds(window, now)
+		windowMinutes := int(window.LimitWindowSeconds / 60)
+		snapshot.PrimaryUsedPercent = &used
+		snapshot.PrimaryResetAfterSeconds = &resetAfter
+		snapshot.PrimaryWindowMinutes = &windowMinutes
+	}
+	if window := rateLimit.SecondaryWindow; window != nil {
+		used := window.UsedPercent
+		resetAfter := openAIRateLimitWindowResetAfterSeconds(window, now)
+		windowMinutes := int(window.LimitWindowSeconds / 60)
+		snapshot.SecondaryUsedPercent = &used
+		snapshot.SecondaryResetAfterSeconds = &resetAfter
+		snapshot.SecondaryWindowMinutes = &windowMinutes
+	}
+	return snapshot
+}
+
+func openAIRateLimitWindowResetAfterSeconds(window *OpenAIRateLimitWindow, now time.Time) int {
+	if window == nil {
+		return 0
+	}
+	if window.ResetAfterSeconds > 0 {
+		return int(window.ResetAfterSeconds)
+	}
+	if window.ResetAt <= 0 {
+		return 0
+	}
+	seconds := int(time.Until(time.Unix(window.ResetAt, 0)).Seconds())
+	if !now.IsZero() {
+		seconds = int(time.Unix(window.ResetAt, 0).Sub(now).Seconds())
+	}
+	if seconds < 0 {
+		return 0
+	}
+	return seconds
 }
 
 // buildCodexSparkWindowExtraUpdates extracts Codex Spark usage windows from the

@@ -604,6 +604,11 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 		return
 	}
 	s.handleOpenAIAccountUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody)
+	// A reused WS lease only has the original handshake headers. Force an
+	// authoritative quota refresh so the terminal 100% sample reaches alerts.
+	if s.usageRefresher != nil {
+		s.usageRefresher.RefreshOpenAICodexUsageSnapshot(account.ID, true)
+	}
 }
 
 func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (string, bool) {

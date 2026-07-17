@@ -843,3 +843,20 @@ func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotFromHeaders(ctx context.C
 		s.updateCodexUsageSnapshot(ctx, accountID, snapshot)
 	}
 }
+
+// UpdateCodexUsageSnapshotFromResult distinguishes per-request HTTP headers
+// from connection-scoped WS handshake headers. Reused WS turns must use an
+// authoritative periodic quota query instead of repeatedly refreshing the
+// timestamp on a stale handshake snapshot.
+func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotFromResult(ctx context.Context, accountID int64, result *OpenAIForwardResult) {
+	if s == nil || accountID <= 0 || result == nil {
+		return
+	}
+	if result.OpenAIWSMode {
+		if s.usageRefresher != nil {
+			s.usageRefresher.RefreshOpenAICodexUsageSnapshot(accountID, false)
+		}
+		return
+	}
+	s.UpdateCodexUsageSnapshotFromHeaders(ctx, accountID, result.ResponseHeaders)
+}

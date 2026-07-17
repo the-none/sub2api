@@ -341,6 +341,10 @@ type accountWriteThrottle struct {
 	lastByID    map[int64]time.Time
 }
 
+type OpenAICodexUsageSnapshotRefresher interface {
+	RefreshOpenAICodexUsageSnapshot(accountID int64, force bool)
+}
+
 func newAccountWriteThrottle(minInterval time.Duration) *accountWriteThrottle {
 	return &accountWriteThrottle{
 		minInterval: minInterval,
@@ -407,6 +411,7 @@ type OpenAIGatewayService struct {
 	settingService        *SettingService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 	usageAlertService     *UsageAlertService
+	usageRefresher        OpenAICodexUsageSnapshotRefresher
 
 	openaiWSPoolOnce              sync.Once
 	openaiWSStateStoreOnce        sync.Once
@@ -510,6 +515,10 @@ func NewOpenAIGatewayService(
 
 func (s *OpenAIGatewayService) SetUsageAlertService(alertService *UsageAlertService) {
 	s.usageAlertService = alertService
+}
+
+func (s *OpenAIGatewayService) SetUsageSnapshotRefresher(refresher OpenAICodexUsageSnapshotRefresher) {
+	s.usageRefresher = refresher
 }
 
 // ResolveChannelMapping 解析渠道级模型映射（代理到 ChannelService）

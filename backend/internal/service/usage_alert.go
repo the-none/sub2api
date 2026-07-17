@@ -45,11 +45,12 @@ const (
 
 	usageAlertRuleNameMaxLength = 100
 
-	UsageAlertSourceOpenAICodexHeaders = "openai_codex_headers"
-	UsageAlertSourceOpenAICodexProbe   = "openai_codex_probe"
-	UsageAlertSourceOpenAIQuotaReset   = "openai_quota_reset"
-	UsageAlertSourceClaudeHeaders      = "claude_headers"
-	UsageAlertSourceClaudeUsageAPI     = "claude_usage_api"
+	UsageAlertSourceOpenAICodexHeaders  = "openai_codex_headers"
+	UsageAlertSourceOpenAICodexProbe    = "openai_codex_probe"
+	UsageAlertSourceOpenAICodexUsageAPI = "openai_codex_usage_api"
+	UsageAlertSourceOpenAIQuotaReset    = "openai_quota_reset"
+	UsageAlertSourceClaudeHeaders       = "claude_headers"
+	UsageAlertSourceClaudeUsageAPI      = "claude_usage_api"
 )
 
 var (
@@ -673,6 +674,13 @@ func (s *UsageAlertService) updateRuleState(ctx context.Context, realAccountID i
 		status = UsageAlertStatusTriggered
 		now := time.Now().UTC()
 		triggeredAt = &now
+		// Step rules persist the fixed threshold level that was reached, not
+		// the incidental sampled value. Otherwise a first sample at 21.3%
+		// shifts all later 20% steps to 41.3/61.3/81.3 and can make 100%
+		// permanently unreachable.
+		if level, ok := usageAlertStepLevel(rule, value); ok {
+			value = level
+		}
 	}
 	state := &UsageAlertState{
 		RealAccountID:   realAccountID,
@@ -1338,19 +1346,58 @@ func usageAlertStepAllowsTrigger(state *UsageAlertState, rule *UsageAlertRule, c
 	if step <= 0 {
 		return false
 	}
+	currentLevel, currentLevelOK := usageAlertStepLevel(rule, currentValue)
+	if !currentLevelOK {
+		return false
+	}
 	if state == nil || state.LastStatus != UsageAlertStatusTriggered {
 		return true
 	}
-	if !stateAllowsRepeat(state, rule, now) {
-		return false
-	}
 	if state.LastValue == nil {
-		return true
+		return stateAllowsRepeat(state, rule, now)
 	}
+	lastLevel, lastLevelOK := usageAlertStepLevel(rule, *state.LastValue)
+	if !lastLevelOK {
+		return stateAllowsRepeat(state, rule, now)
+	}
+	var advanced bool
 	if rule.Operator == UsageAlertOperatorLTE {
-		return currentValue <= *state.LastValue-step
+		advanced = currentLevel < lastLevel
+	} else {
+		advanced = currentLevel > lastLevel
 	}
-	return currentValue >= *state.LastValue+step
+	return advanced && stateAllowsRepeat(state, rule, now)
+}
+
+// usageAlertStepLevel maps a sample to a fixed level anchored at the rule's
+// threshold. For used >= 20 with step 20 the levels are exactly
+// 20/40/60/80/100; for remaining <= 80 they are 80/60/40/20/0.
+func usageAlertStepLevel(rule *UsageAlertRule, value float64) (float64, bool) {
+	step := usageAlertRuleStepPercent(rule)
+	if rule == nil || step <= 0 {
+		return 0, false
+	}
+	const epsilon = 1e-9
+	if rule.Operator == UsageAlertOperatorLTE {
+		if value > rule.Threshold+epsilon {
+			return 0, false
+		}
+		steps := math.Floor((rule.Threshold-value)/step + epsilon)
+		level := rule.Threshold - steps*step
+		if level < 0 {
+			level = 0
+		}
+		return level, true
+	}
+	if value < rule.Threshold-epsilon {
+		return 0, false
+	}
+	steps := math.Floor((value-rule.Threshold)/step + epsilon)
+	level := rule.Threshold + steps*step
+	if level > 100 {
+		level = 100
+	}
+	return level, true
 }
 
 func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *RealAccount, trigger UsageAlertTrigger) UsageAlertWebhookEvent {

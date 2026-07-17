@@ -302,6 +302,7 @@ type AccountUsageService struct {
 	usageAlertService       *UsageAlertService
 	quotaResetScheduler     OpenAIQuotaResetReconciler
 	openAICodexProbeFn      func(context.Context, *Account) (*openAICodexProbeOutcome, error)
+	openAIQuotaSnapshotFn   func(context.Context, int64) (*OpenAIQuotaUsage, error)
 	agentIdentityTaskMu     sync.Mutex
 	agentIdentityWS         agentIdentityWSConnectionInvalidator
 }
@@ -341,6 +342,54 @@ func (s *AccountUsageService) SetUsageAlertService(alertService *UsageAlertServi
 
 func (s *AccountUsageService) SetOpenAIQuotaResetScheduler(reconciler OpenAIQuotaResetReconciler) {
 	s.quotaResetScheduler = reconciler
+}
+
+// RefreshOpenAICodexUsageSnapshot schedules an authoritative /wham/usage
+// refresh for WS traffic. A reused WebSocket only exposes the headers from its
+// original handshake, so treating those headers as a per-turn sample freezes
+// usage alerts at the connection's initial percentage.
+func (s *AccountUsageService) RefreshOpenAICodexUsageSnapshot(accountID int64, force bool) {
+	if s == nil || s.accountRepo == nil || accountID <= 0 {
+		return
+	}
+	fetchSnapshot := s.openAIQuotaSnapshotFn
+	if fetchSnapshot == nil {
+		if s.openAIQuotaService == nil {
+			return
+		}
+		fetchSnapshot = s.openAIQuotaService.QueryUsageSnapshot
+	}
+	now := time.Now()
+	if !s.shouldProbeOpenAICodexSnapshot(accountID, now, force) {
+		return
+	}
+
+	go func() {
+		probeCtx, cancel := context.WithTimeout(context.Background(), openaiQuotaUpstreamTimeout)
+		defer cancel()
+		quota, err := fetchSnapshot(probeCtx, accountID)
+		if err != nil {
+			slog.Warn("openai_codex_ws_usage_refresh_failed", "account_id", accountID, "error", err)
+			return
+		}
+		updates := buildCodexOverallWindowExtraUpdates(quota, time.Now())
+		if len(updates) == 0 {
+			slog.Warn("openai_codex_ws_usage_refresh_missing_windows", "account_id", accountID)
+			return
+		}
+		if err := s.accountRepo.UpdateExtra(probeCtx, accountID, updates); err != nil {
+			slog.Warn("openai_codex_ws_usage_refresh_persist_failed", "account_id", accountID, "error", err)
+			return
+		}
+		if s.usageAlertService != nil {
+			s.usageAlertService.Observe(probeCtx, usageAlertSnapshotFromCodexExtra(
+				accountID,
+				UsageAlertSourceOpenAICodexUsageAPI,
+				updates,
+				time.Now(),
+			))
+		}
+	}()
 }
 
 // GetUsage 获取账号使用量

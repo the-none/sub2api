@@ -170,6 +170,9 @@ func ProvideAccountUsageService(
 	service.SetUsageAlertService(usageAlertService)
 	service.SetOpenAIQuotaResetScheduler(rateLimitService)
 	service.agentIdentityWS = openAIGatewayService
+	if openAIGatewayService != nil {
+		openAIGatewayService.SetUsageSnapshotRefresher(service)
+	}
 	if openAIQuotaService != nil {
 		openAIQuotaService.SetResetReconciler(service)
 	}

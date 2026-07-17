@@ -1444,12 +1444,22 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 	if snapshot == nil {
 		return
 	}
-	updates := buildCodexUsageExtraUpdates(snapshot, time.Now())
+	now := time.Now()
+	updates := buildCodexUsageExtraUpdates(snapshot, now)
 	if len(updates) == 0 {
 		return
 	}
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
+		return
+	}
+	if s.usageAlertService != nil {
+		s.usageAlertService.Observe(ctx, usageAlertSnapshotFromCodexExtra(
+			account.ID,
+			UsageAlertSourceOpenAICodexHeaders,
+			updates,
+			now,
+		))
 	}
 }
 

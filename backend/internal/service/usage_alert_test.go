@@ -134,6 +134,7 @@ func TestUsageAlertStepAllowsTriggerRequiresCooldownAndStep(t *testing.T) {
 	lastTriggeredAt := now.Add(-30 * time.Minute)
 	rule := &UsageAlertRule{
 		Operator:        UsageAlertOperatorLTE,
+		Threshold:       20,
 		StepPercent:     &step,
 		CooldownMinutes: 60,
 	}
@@ -148,8 +149,8 @@ func TestUsageAlertStepAllowsTriggerRequiresCooldownAndStep(t *testing.T) {
 
 	lastTriggeredAt = now.Add(-2 * time.Hour)
 	state.LastTriggeredAt = &lastTriggeredAt
-	require.False(t, usageAlertStepAllowsTrigger(state, rule, 14, now))
-	require.True(t, usageAlertStepAllowsTrigger(state, rule, 13, now))
+	require.False(t, usageAlertStepAllowsTrigger(state, rule, 19, now))
+	require.True(t, usageAlertStepAllowsTrigger(state, rule, 14, now))
 }
 
 func TestUsageAlertStepAllowsTriggerSupportsIncreasingMetric(t *testing.T) {
@@ -159,6 +160,7 @@ func TestUsageAlertStepAllowsTriggerSupportsIncreasingMetric(t *testing.T) {
 	lastTriggeredAt := now.Add(-2 * time.Hour)
 	rule := &UsageAlertRule{
 		Operator:        UsageAlertOperatorGTE,
+		Threshold:       80,
 		StepPercent:     &step,
 		CooldownMinutes: 60,
 	}
@@ -170,6 +172,117 @@ func TestUsageAlertStepAllowsTriggerSupportsIncreasingMetric(t *testing.T) {
 
 	require.False(t, usageAlertStepAllowsTrigger(state, rule, 84, now))
 	require.True(t, usageAlertStepAllowsTrigger(state, rule, 85, now))
+}
+
+func TestUsageAlertStepLevelUsesFixedThresholds(t *testing.T) {
+	step := 20.0
+	rule := &UsageAlertRule{
+		Operator:        UsageAlertOperatorGTE,
+		Threshold:       20,
+		StepPercent:     &step,
+		CooldownMinutes: 240,
+	}
+
+	tests := []struct {
+		value float64
+		level float64
+	}{
+		{value: 20.1, level: 20},
+		{value: 40, level: 40},
+		{value: 67.5, level: 60},
+		{value: 80.2, level: 80},
+		{value: 100, level: 100},
+	}
+	for _, tt := range tests {
+		level, ok := usageAlertStepLevel(rule, tt.value)
+		require.True(t, ok)
+		require.Equal(t, tt.level, level)
+	}
+
+	now := time.Date(2026, 7, 17, 20, 0, 0, 0, time.UTC)
+	lastTriggeredAt := now.Add(-5 * time.Hour)
+	firstSample := 20.1
+	state := &UsageAlertState{
+		LastStatus:      UsageAlertStatusTriggered,
+		LastTriggeredAt: &lastTriggeredAt,
+		LastValue:       &firstSample,
+	}
+	require.True(t, usageAlertStepAllowsTrigger(state, rule, 40, now), "a 20.1%% first sample must not shift the next level to 40.1%%")
+}
+
+func TestEvaluateRulesPersistsFixedStepLevelInsteadOfSampleValue(t *testing.T) {
+	step := 20.0
+	realAccountID := int64(1)
+	rule := &UsageAlertRule{
+		ID:              9,
+		RealAccountID:   &realAccountID,
+		UsageType:       UsageAlertTypeOverall,
+		Window:          UsageAlertWindow7d,
+		Metric:          UsageAlertMetricUsed,
+		Operator:        UsageAlertOperatorGTE,
+		Threshold:       20,
+		StepPercent:     &step,
+		CooldownMinutes: 240,
+		Enabled:         true,
+	}
+	repo := &usageAlertGenerationStateRepoStub{}
+	svc := NewUsageAlertService(repo, nil)
+	current := &UsageAlertSnapshot{
+		RealAccountID: realAccountID,
+		UsageType:     UsageAlertTypeOverall,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 43.7, RemainingPercent: 56.3},
+		},
+	}
+
+	triggers := svc.evaluateRules(context.Background(), nil, current, []*UsageAlertRule{rule})
+
+	require.Len(t, triggers, 1)
+	require.NotNil(t, repo.lastUpsertedState)
+	require.Equal(t, 40.0, *repo.lastUpsertedState.LastValue)
+	require.Equal(t, 43.7, triggers[0].Value, "webhook event should retain the actual sampled value")
+}
+
+func TestUsageAlertStepTimelineEmitsTwentyThroughOneHundredAcrossSeventeenHours(t *testing.T) {
+	step := 20.0
+	rule := &UsageAlertRule{
+		Operator:        UsageAlertOperatorGTE,
+		Threshold:       20,
+		StepPercent:     &step,
+		CooldownMinutes: 240,
+	}
+	start := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
+	samples := []struct {
+		after time.Duration
+		value float64
+	}{
+		{after: 0, value: 20.2},
+		{after: 2 * time.Hour, value: 39.8},
+		{after: 4*time.Hour + time.Minute, value: 40.1},
+		{after: 8*time.Hour + 2*time.Minute, value: 60.4},
+		{after: 12*time.Hour + 3*time.Minute, value: 80.6},
+		{after: 17 * time.Hour, value: 100},
+	}
+
+	var state *UsageAlertState
+	triggeredLevels := make([]float64, 0, 5)
+	for _, sample := range samples {
+		now := start.Add(sample.after)
+		if !usageAlertStepAllowsTrigger(state, rule, sample.value, now) {
+			continue
+		}
+		level, ok := usageAlertStepLevel(rule, sample.value)
+		require.True(t, ok)
+		triggeredAt := now
+		state = &UsageAlertState{
+			LastStatus:      UsageAlertStatusTriggered,
+			LastTriggeredAt: &triggeredAt,
+			LastValue:       &level,
+		}
+		triggeredLevels = append(triggeredLevels, level)
+	}
+
+	require.Equal(t, []float64{20, 40, 60, 80, 100}, triggeredLevels)
 }
 
 func TestDeliverJSONPostWebhook(t *testing.T) {
@@ -472,16 +585,18 @@ func TestPrepareUsageAlertSnapshotRejectsUnknownGenerationAfterKnownReset(t *tes
 
 type usageAlertGenerationStateRepoStub struct {
 	UsageAlertRepository
-	state            *UsageAlertState
-	upsertStateCalls int
+	state             *UsageAlertState
+	lastUpsertedState *UsageAlertState
+	upsertStateCalls  int
 }
 
 func (s *usageAlertGenerationStateRepoStub) GetState(_ context.Context, _, _ int64, _, _ string) (*UsageAlertState, error) {
 	return s.state, nil
 }
 
-func (s *usageAlertGenerationStateRepoStub) UpsertState(_ context.Context, _ *UsageAlertState) error {
+func (s *usageAlertGenerationStateRepoStub) UpsertState(_ context.Context, state *UsageAlertState) error {
 	s.upsertStateCalls++
+	s.lastUpsertedState = state
 	return nil
 }
 
