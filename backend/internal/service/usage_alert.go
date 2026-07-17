@@ -47,6 +47,7 @@ const (
 
 	UsageAlertSourceOpenAICodexHeaders = "openai_codex_headers"
 	UsageAlertSourceOpenAICodexProbe   = "openai_codex_probe"
+	UsageAlertSourceOpenAIQuotaReset   = "openai_quota_reset"
 	UsageAlertSourceClaudeHeaders      = "claude_headers"
 	UsageAlertSourceClaudeUsageAPI     = "claude_usage_api"
 )

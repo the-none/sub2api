@@ -2,12 +2,115 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type openAIQuotaResetReconcilerRecorder struct {
+	accountIDs []int64
+	err        error
+}
+
+type openAIQuotaResetRetryRecorder struct {
+	calls     atomic.Int32
+	recovered chan struct{}
+}
+
+func (r *openAIQuotaResetRetryRecorder) ReconcileOpenAIQuotaReset(_ context.Context, _ int64) error {
+	if r.calls.Add(1) == 1 {
+		return errors.New("probe not ready")
+	}
+	close(r.recovered)
+	return nil
+}
+
+func (r *openAIQuotaResetReconcilerRecorder) ReconcileOpenAIQuotaReset(_ context.Context, accountID int64) error {
+	r.accountIDs = append(r.accountIDs, accountID)
+	return r.err
+}
+
+func TestResetCreditReconcilesLocalStateWithoutRetryingRedeemedCredit(t *testing.T) {
+	account := &Account{
+		ID:       100,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "org-parent123",
+		},
+	}
+	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	tokenCache := &stubQuotaTokenCache{tokens: map[string]string{
+		OpenAITokenCacheKey(account): "fake-token",
+	}}
+	tokenProvider := NewOpenAITokenProvider(repo, tokenCache, nil)
+
+	var upstreamCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"ok","windows_reset":2}`))
+	}))
+	defer srv.Close()
+
+	reconciler := &openAIQuotaResetReconcilerRecorder{err: errors.New("local cache temporarily unavailable")}
+	svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	svc.resetReconcileDelays = nil
+	svc.SetResetReconciler(reconciler)
+
+	result, err := svc.ResetCredit(context.Background(), account.ID)
+	require.NoError(t, err, "a post-redemption local error must not invite consuming another credit")
+	require.Equal(t, 2, result.WindowsReset)
+	require.Equal(t, 1, upstreamCalls)
+	require.Equal(t, []int64{account.ID}, reconciler.accountIDs)
+}
+
+func TestResetCreditRetryOnlyRepeatsReconciliation(t *testing.T) {
+	account := &Account{
+		ID:       101,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "org-parent456",
+		},
+	}
+	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	tokenCache := &stubQuotaTokenCache{tokens: map[string]string{
+		OpenAITokenCacheKey(account): "fake-token",
+	}}
+	tokenProvider := NewOpenAITokenProvider(repo, tokenCache, nil)
+
+	var upstreamCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"ok","windows_reset":2}`))
+	}))
+	defer srv.Close()
+
+	reconciler := &openAIQuotaResetRetryRecorder{recovered: make(chan struct{})}
+	svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	svc.resetReconcileDelays = []time.Duration{time.Millisecond}
+	svc.SetResetReconciler(reconciler)
+
+	result, err := svc.ResetCredit(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.WindowsReset)
+	select {
+	case <-reconciler.recovered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for local reconciliation retry")
+	}
+	require.Equal(t, int32(2), reconciler.calls.Load())
+	require.Equal(t, int32(1), upstreamCalls.Load(), "reconciliation retry must never consume another reset credit")
+}
 
 func TestParseOpenAIRateLimitResetCreditDetails_PreservesAvailableCreditOrder(t *testing.T) {
 	body := []byte(`{

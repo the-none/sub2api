@@ -117,8 +117,20 @@ type OpenAIQuotaService struct {
 	proxyRepo            ProxyRepository
 	tokenProvider        *OpenAITokenProvider
 	privacyClientFactory PrivacyClientFactory
+	resetReconciler      OpenAIQuotaResetReconciler
+	resetReconcileMu     sync.Mutex
+	resetReconcileActive map[int64]struct{}
+	resetReconcileDelays []time.Duration
 	agentIdentityTaskMu  sync.Mutex
 	agentIdentityWS      agentIdentityWSConnectionInvalidator
+}
+
+// OpenAIQuotaResetReconciler clears the local scheduling state that was derived
+// from the exhausted upstream quota. The upstream credit redemption is
+// irreversible, so reconciliation errors are logged rather than returned to the
+// caller (returning an error would invite a retry that consumes another credit).
+type OpenAIQuotaResetReconciler interface {
+	ReconcileOpenAIQuotaReset(ctx context.Context, accountID int64) error
 }
 
 // NewOpenAIQuotaService constructs a quota service. token provider is required —
@@ -135,7 +147,15 @@ func NewOpenAIQuotaService(
 		proxyRepo:            proxyRepo,
 		tokenProvider:        tokenProvider,
 		privacyClientFactory: privacyClientFactory,
+		resetReconcileDelays: []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second},
 	}
+}
+
+func (s *OpenAIQuotaService) SetResetReconciler(reconciler OpenAIQuotaResetReconciler) {
+	if s == nil {
+		return
+	}
+	s.resetReconciler = reconciler
 }
 
 // QueryUsage fetches the latest rate-limit/usage snapshot for the given OpenAI
@@ -316,7 +336,68 @@ func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (
 		"code", payload.Code,
 		"windows_reset", payload.WindowsReset,
 	)
+	if s.resetReconciler != nil {
+		if reconcileErr := s.resetReconciler.ReconcileOpenAIQuotaReset(ctx, accountID); reconcileErr != nil {
+			slog.Error("openai_quota_reset_local_reconcile_failed",
+				"account_id", accountID,
+				"error", reconcileErr,
+			)
+			s.scheduleResetReconciliation(accountID)
+		}
+	}
 	return &payload, nil
+}
+
+// scheduleResetReconciliation retries only the local reconciliation. It never
+// calls the irreversible reset-credit endpoint again. A cancelled admin request
+// or briefly stale upstream probe therefore cannot strand the account in the
+// scheduler's local blocked state after the credit was already consumed.
+func (s *OpenAIQuotaService) scheduleResetReconciliation(accountID int64) {
+	if s == nil || s.resetReconciler == nil || accountID <= 0 || len(s.resetReconcileDelays) == 0 {
+		return
+	}
+
+	s.resetReconcileMu.Lock()
+	if s.resetReconcileActive == nil {
+		s.resetReconcileActive = make(map[int64]struct{})
+	}
+	if _, exists := s.resetReconcileActive[accountID]; exists {
+		s.resetReconcileMu.Unlock()
+		return
+	}
+	s.resetReconcileActive[accountID] = struct{}{}
+	delays := append([]time.Duration(nil), s.resetReconcileDelays...)
+	reconciler := s.resetReconciler
+	s.resetReconcileMu.Unlock()
+
+	go func() {
+		defer func() {
+			s.resetReconcileMu.Lock()
+			delete(s.resetReconcileActive, accountID)
+			s.resetReconcileMu.Unlock()
+		}()
+
+		for attempt, delay := range delays {
+			timer := time.NewTimer(delay)
+			<-timer.C
+
+			retryCtx, cancel := context.WithTimeout(context.Background(), openaiQuotaUpstreamTimeout)
+			err := reconciler.ReconcileOpenAIQuotaReset(retryCtx, accountID)
+			cancel()
+			if err == nil {
+				slog.Info("openai_quota_reset_local_reconcile_recovered",
+					"account_id", accountID,
+					"attempt", attempt+1,
+				)
+				return
+			}
+			slog.Warn("openai_quota_reset_local_reconcile_retry_failed",
+				"account_id", accountID,
+				"attempt", attempt+1,
+				"error", err,
+			)
+		}
+	}()
 }
 
 // prepareUpstreamCall loads the account, validates it, obtains a fresh access

@@ -27,6 +27,9 @@ type rateLimitClearRepoStub struct {
 	clearAntigravityErr       error
 	clearModelRateLimitErr    error
 	clearTempUnschedulableErr error
+	updateExtraCalls          int
+	updateExtraUpdates        map[string]any
+	updateExtraErr            error
 }
 
 func (r *rateLimitClearRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
@@ -60,6 +63,15 @@ func (r *rateLimitClearRepoStub) ClearModelRateLimits(ctx context.Context, id in
 func (r *rateLimitClearRepoStub) ClearTempUnschedulable(ctx context.Context, id int64) error {
 	r.clearTempUnschedCalls++
 	return r.clearTempUnschedulableErr
+}
+
+func (r *rateLimitClearRepoStub) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	r.updateExtraCalls++
+	r.updateExtraUpdates = make(map[string]any, len(updates))
+	for key, value := range updates {
+		r.updateExtraUpdates[key] = value
+	}
+	return r.updateExtraErr
 }
 
 type tempUnschedCacheRecorder struct {
@@ -198,6 +210,22 @@ func TestRateLimitService_ClearRateLimit_WithoutTempUnschedCache(t *testing.T) {
 	require.Equal(t, 1, repo.clearAntigravityCalls)
 	require.Equal(t, 1, repo.clearModelRateLimitCalls)
 	require.Equal(t, 1, repo.clearTempUnschedCalls)
+}
+
+func TestRateLimitService_ReconcileOpenAIQuotaResetOnlyClearsSchedulerBlocks(t *testing.T) {
+	repo := &rateLimitClearRepoStub{}
+	cache := &tempUnschedCacheRecorder{}
+	blocker := &runtimeBlockRecorder{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+	svc.SetAccountRuntimeBlocker(blocker)
+
+	err := svc.ReconcileOpenAIQuotaReset(context.Background(), 51)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.clearRateLimitCalls)
+	require.Equal(t, 1, repo.clearTempUnschedCalls)
+	require.Equal(t, []int64{51}, cache.deletedIDs)
+	require.Equal(t, []int64{51}, blocker.clearedIDs)
+	require.Equal(t, 0, repo.updateExtraCalls, "scheduler cleanup must not fabricate a quota snapshot")
 }
 
 func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ClearsErrorAndRateLimitRelatedState(t *testing.T) {

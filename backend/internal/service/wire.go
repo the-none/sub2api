@@ -152,6 +152,7 @@ func ProvideAccountUsageService(
 	tlsFPProfileService *TLSFingerprintProfileService,
 	usageAlertService *UsageAlertService,
 	openAIGatewayService *OpenAIGatewayService,
+	rateLimitService *RateLimitService,
 ) *AccountUsageService {
 	service := NewAccountUsageService(
 		accountRepo,
@@ -167,7 +168,11 @@ func ProvideAccountUsageService(
 		tlsFPProfileService,
 	)
 	service.SetUsageAlertService(usageAlertService)
+	service.SetOpenAIQuotaResetScheduler(rateLimitService)
 	service.agentIdentityWS = openAIGatewayService
+	if openAIQuotaService != nil {
+		openAIQuotaService.SetResetReconciler(service)
+	}
 	return service
 }
 

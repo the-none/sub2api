@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -1834,6 +1835,38 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 	s.ResetOpenAI403Counter(ctx, accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
+}
+
+// ReconcileOpenAIQuotaReset clears every local scheduler block created by the
+// exhausted quota. The caller must first persist an authoritative successful
+// upstream probe snapshot; this method deliberately does not infer or overwrite
+// quota percentages.
+func (s *RateLimitService) ReconcileOpenAIQuotaReset(ctx context.Context, accountID int64) error {
+	if s == nil || s.accountRepo == nil || accountID <= 0 {
+		return fmt.Errorf("openai quota reset reconciler is not configured")
+	}
+	var reconcileErr error
+	// Run the independent cleanup steps even if one backend is temporarily
+	// unavailable. In particular, an unrelated model-limit/cache cleanup error
+	// must not leave the in-process scheduler fast-path blocked after the
+	// upstream credit has already been consumed.
+	if err := s.accountRepo.ClearRateLimit(ctx, accountID); err != nil {
+		reconcileErr = errors.Join(reconcileErr, fmt.Errorf("clear account rate limit: %w", err))
+	}
+	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
+		reconcileErr = errors.Join(reconcileErr, fmt.Errorf("clear model rate limits: %w", err))
+	}
+	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
+		reconcileErr = errors.Join(reconcileErr, fmt.Errorf("clear temporary unschedulable state: %w", err))
+	}
+	if s.tempUnschedCache != nil {
+		if err := s.tempUnschedCache.DeleteTempUnsched(ctx, accountID); err != nil {
+			reconcileErr = errors.Join(reconcileErr, fmt.Errorf("clear temporary unschedulable cache: %w", err))
+		}
+	}
+	s.ResetOpenAI403Counter(ctx, accountID)
+	s.notifyAccountSchedulingBlockCleared(accountID)
+	return reconcileErr
 }
 
 func (s *RateLimitService) ResetOpenAI403Counter(ctx context.Context, accountID int64) {

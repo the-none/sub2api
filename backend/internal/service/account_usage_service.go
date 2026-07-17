@@ -300,6 +300,8 @@ type AccountUsageService struct {
 	identityCache           IdentityCache
 	tlsFPProfileService     *TLSFingerprintProfileService
 	usageAlertService       *UsageAlertService
+	quotaResetScheduler     OpenAIQuotaResetReconciler
+	openAICodexProbeFn      func(context.Context, *Account) (*openAICodexProbeOutcome, error)
 	agentIdentityTaskMu     sync.Mutex
 	agentIdentityWS         agentIdentityWSConnectionInvalidator
 }
@@ -335,6 +337,10 @@ func NewAccountUsageService(
 
 func (s *AccountUsageService) SetUsageAlertService(alertService *UsageAlertService) {
 	s.usageAlertService = alertService
+}
+
+func (s *AccountUsageService) SetOpenAIQuotaResetScheduler(reconciler OpenAIQuotaResetReconciler) {
+	s.quotaResetScheduler = reconciler
 }
 
 // GetUsage 获取账号使用量
@@ -588,6 +594,13 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	if account == nil {
 		return usage, nil
 	}
+	// All OpenAI usage paths converge here. Observe exactly once after the
+	// snapshot and local window stats have been assembled; observing inside the
+	// probe as well creates two racing evaluations of the same sample and can
+	// deliver duplicate warning webhooks.
+	defer func() {
+		s.observeUsageAlert(ctx, account.ID, UsageAlertPlatformOpenAI, UsageAlertSourceOpenAICodexProbe, usage)
+	}()
 
 	applyExtraToUsage(usage, account.Extra, now)
 
@@ -610,8 +623,9 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 				}
 			}
 		} else {
-			if updates, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && len(updates) > 0 {
-				mergeAccountExtra(account, updates)
+			if outcome, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && outcome != nil && len(outcome.Updates) > 0 {
+				mergeAccountExtra(account, outcome.Updates)
+				s.persistOpenAICodexProbeSnapshot(account.ID, outcome.Updates)
 				if usage.UpdatedAt == nil {
 					usage.UpdatedAt = &now
 				}
@@ -638,7 +652,6 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
 	}
 
-	s.observeUsageAlert(ctx, account.ID, UsageAlertPlatformOpenAI, UsageAlertSourceOpenAICodexProbe, usage)
 	return usage, nil
 }
 
@@ -699,7 +712,74 @@ func (s *AccountUsageService) shouldProbeOpenAICodexSnapshot(accountID int64, no
 	return true
 }
 
-func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, account *Account) (map[string]any, error) {
+type openAICodexProbeOutcome struct {
+	StatusCode int
+	Updates    map[string]any
+}
+
+func (o *openAICodexProbeOutcome) confirmsQuotaResetRecovery() bool {
+	if o == nil || o.StatusCode < http.StatusOK || o.StatusCode >= http.StatusMultipleChoices {
+		return false
+	}
+	if len(o.Updates) == 0 {
+		return false
+	}
+	_, has5h := o.Updates["codex_5h_used_percent"]
+	_, has7d := o.Updates["codex_7d_used_percent"]
+	return has5h || has7d
+}
+
+// ReconcileOpenAIQuotaReset performs the authoritative post-redemption path:
+// a direct /responses probe must succeed, its real x-codex snapshot must be
+// persisted synchronously, and only then may local scheduler blocks be cleared.
+// The method is idempotent and never consumes another reset credit, so callers
+// may safely retry it after transient probe, database, or cache failures.
+func (s *AccountUsageService) ReconcileOpenAIQuotaReset(ctx context.Context, accountID int64) error {
+	if s == nil || s.accountRepo == nil || accountID <= 0 {
+		return fmt.Errorf("openai quota reset usage reconciler is not configured")
+	}
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return fmt.Errorf("load account for quota reset probe: %w", err)
+	}
+	if account == nil || !account.IsOpenAIOAuth() || account.IsShadow() {
+		return fmt.Errorf("account is not an eligible OpenAI OAuth quota-reset target")
+	}
+
+	outcome, err := s.probeOpenAICodexSnapshot(ctx, account)
+	if err != nil {
+		return fmt.Errorf("confirm upstream quota reset: %w", err)
+	}
+	if !outcome.confirmsQuotaResetRecovery() {
+		status := 0
+		if outcome != nil {
+			status = outcome.StatusCode
+		}
+		return fmt.Errorf("upstream quota reset is not confirmed by a successful probe with usage headers (status %d)", status)
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, accountID, outcome.Updates); err != nil {
+		return fmt.Errorf("persist confirmed quota reset snapshot: %w", err)
+	}
+	mergeAccountExtra(account, outcome.Updates)
+
+	if s.quotaResetScheduler == nil {
+		return fmt.Errorf("openai quota reset scheduler reconciler is not configured")
+	}
+	if err := s.quotaResetScheduler.ReconcileOpenAIQuotaReset(ctx, accountID); err != nil {
+		return fmt.Errorf("clear scheduler state after confirmed quota reset: %w", err)
+	}
+
+	now := time.Now()
+	usage := &UsageInfo{UpdatedAt: &now}
+	applyExtraToUsage(usage, account.Extra, now)
+	s.observeUsageAlert(ctx, accountID, UsageAlertPlatformOpenAI, UsageAlertSourceOpenAIQuotaReset, usage)
+	return nil
+}
+
+func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, account *Account) (*openAICodexProbeOutcome, error) {
+	if s != nil && s.openAICodexProbeFn != nil {
+		return s.openAICodexProbeFn(ctx, account)
+	}
 	if account == nil || !account.IsOAuth() {
 		return nil, nil
 	}
@@ -775,14 +855,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if err != nil {
 		return nil, err
 	}
-	if len(updates) > 0 {
-		s.persistOpenAICodexProbeSnapshot(account.ID, updates)
-		if s.usageAlertService != nil {
-			s.usageAlertService.Observe(ctx, usageAlertSnapshotFromCodexExtra(account.ID, UsageAlertSourceOpenAICodexProbe, updates, time.Now()))
-		}
-		return updates, nil
-	}
-	return nil, nil
+	return &openAICodexProbeOutcome{StatusCode: resp.StatusCode, Updates: updates}, nil
 }
 
 func (s *AccountUsageService) observeUsageAlert(ctx context.Context, accountID int64, platform, source string, usage *UsageInfo) {
