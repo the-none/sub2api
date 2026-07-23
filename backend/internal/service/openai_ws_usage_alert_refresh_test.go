@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -79,6 +80,49 @@ func TestAccountUsageService_WSUsageRefreshIsThrottledAndForceable(t *testing.T)
 	case <-updatesCh:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for forced terminal quota refresh")
+	}
+	require.Equal(t, int32(2), fetchCalls.Load())
+}
+
+func TestAccountUsageService_WSUsageRefreshRetriesAfterFailure(t *testing.T) {
+	updatesCh := make(chan map[string]any, 1)
+	firstAttempt := make(chan struct{}, 1)
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	var fetchCalls atomic.Int32
+	svc := &AccountUsageService{
+		accountRepo: repo,
+		cache:       NewUsageCache(),
+		openAIQuotaSnapshotFn: func(context.Context, int64) (*OpenAIQuotaUsage, error) {
+			if fetchCalls.Add(1) == 1 {
+				firstAttempt <- struct{}{}
+				return nil, errors.New("temporary upstream failure")
+			}
+			return &OpenAIQuotaUsage{RateLimit: &OpenAIRateLimit{
+				PrimaryWindow: &OpenAIRateLimitWindow{
+					UsedPercent:        42,
+					LimitWindowSeconds: 7 * 24 * 60 * 60,
+					ResetAfterSeconds:  24 * 60 * 60,
+				},
+			}}, nil
+		},
+	}
+
+	svc.RefreshOpenAICodexUsageSnapshot(84, false)
+	select {
+	case <-firstAttempt:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for failed quota refresh")
+	}
+	require.Eventually(t, func() bool {
+		_, inFlight := svc.cache.openAIProbeFlight.Load(int64(84))
+		return !inFlight
+	}, time.Second, 10*time.Millisecond)
+
+	svc.RefreshOpenAICodexUsageSnapshot(84, false)
+	select {
+	case <-updatesCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for quota refresh retry")
 	}
 	require.Equal(t, int32(2), fetchCalls.Load())
 }

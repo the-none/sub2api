@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -174,6 +176,26 @@ func TestUsageAlertStepAllowsTriggerSupportsIncreasingMetric(t *testing.T) {
 	require.True(t, usageAlertStepAllowsTrigger(state, rule, 85, now))
 }
 
+func TestUsageAlertStepAllowsTriggerWithZeroCooldown(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	step := 20.0
+	lastValue := 20.0
+	lastTriggeredAt := now
+	rule := &UsageAlertRule{
+		Operator:        UsageAlertOperatorGTE,
+		Threshold:       20,
+		StepPercent:     &step,
+		CooldownMinutes: 0,
+	}
+	state := &UsageAlertState{
+		LastStatus:      UsageAlertStatusTriggered,
+		LastTriggeredAt: &lastTriggeredAt,
+		LastValue:       &lastValue,
+	}
+
+	require.True(t, usageAlertStepAllowsTrigger(state, rule, 40, now))
+}
+
 func TestUsageAlertStepLevelUsesFixedThresholds(t *testing.T) {
 	step := 20.0
 	rule := &UsageAlertRule{
@@ -210,7 +232,7 @@ func TestUsageAlertStepLevelUsesFixedThresholds(t *testing.T) {
 	require.True(t, usageAlertStepAllowsTrigger(state, rule, 40, now), "a 20.1%% first sample must not shift the next level to 40.1%%")
 }
 
-func TestEvaluateRulesPersistsFixedStepLevelInsteadOfSampleValue(t *testing.T) {
+func TestCommitUsageAlertTriggerPersistsFixedStepLevelInsteadOfSampleValue(t *testing.T) {
 	step := 20.0
 	realAccountID := int64(1)
 	rule := &UsageAlertRule{
@@ -238,6 +260,8 @@ func TestEvaluateRulesPersistsFixedStepLevelInsteadOfSampleValue(t *testing.T) {
 	triggers := svc.evaluateRules(context.Background(), nil, current, []*UsageAlertRule{rule})
 
 	require.Len(t, triggers, 1)
+	require.Nil(t, repo.lastUpsertedState, "evaluation must not advance state before webhook delivery")
+	svc.commitUsageAlertTrigger(triggers[0], realAccountID)
 	require.NotNil(t, repo.lastUpsertedState)
 	require.Equal(t, 40.0, *repo.lastUpsertedState.LastValue)
 	require.Equal(t, 43.7, triggers[0].Value, "webhook event should retain the actual sampled value")
@@ -313,6 +337,199 @@ func TestDeliverJSONPostWebhook(t *testing.T) {
 	}, event)
 	require.NoError(t, err)
 	require.Equal(t, "evt-test", got.EventID)
+}
+
+type usageAlertDeliveryRepoStub struct {
+	UsageAlertRepository
+	mu       sync.Mutex
+	snapshot *UsageAlertSnapshot
+	state    *UsageAlertState
+	rule     *UsageAlertRule
+	webhook  *UsageAlertWebhook
+}
+
+func (s *usageAlertDeliveryRepoStub) GetSnapshot(_ context.Context, _ int64, _ string) (*UsageAlertSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.snapshot, nil
+}
+
+func (s *usageAlertDeliveryRepoStub) UpsertSnapshot(_ context.Context, snapshot *UsageAlertSnapshot) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snapshot != nil && snapshot.SampledAt.Before(s.snapshot.SampledAt) {
+		return false, nil
+	}
+	s.snapshot = snapshot
+	return true, nil
+}
+
+func (s *usageAlertDeliveryRepoStub) ListEnabledRules(_ context.Context, _ int64, _ string) ([]*UsageAlertRule, error) {
+	return []*UsageAlertRule{s.rule}, nil
+}
+
+func (s *usageAlertDeliveryRepoStub) ListEnabledWebhooksForRealAccount(_ context.Context, _ int64) ([]*UsageAlertWebhook, error) {
+	return []*UsageAlertWebhook{s.webhook}, nil
+}
+
+func (s *usageAlertDeliveryRepoStub) GetRealAccount(_ context.Context, id int64) (*RealAccount, error) {
+	return &RealAccount{ID: id, Name: "OpenAI Main", Platform: UsageAlertPlatformOpenAI}, nil
+}
+
+func (s *usageAlertDeliveryRepoStub) GetState(_ context.Context, _, _ int64, _, _ string) (*UsageAlertState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state, nil
+}
+
+func (s *usageAlertDeliveryRepoStub) UpsertState(_ context.Context, state *UsageAlertState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = state
+	return nil
+}
+
+func (s *usageAlertDeliveryRepoStub) currentState() *UsageAlertState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state
+}
+
+func TestObserveAsyncRetriesUncommittedTriggerAfterWebhookFailure(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			http.Error(w, "temporary failure", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	realAccountID := int64(1)
+	step := 20.0
+	repo := &usageAlertDeliveryRepoStub{
+		rule: &UsageAlertRule{
+			ID:              9,
+			RealAccountID:   &realAccountID,
+			UsageType:       UsageAlertTypeOverall,
+			Window:          UsageAlertWindow7d,
+			Metric:          UsageAlertMetricUsed,
+			Operator:        UsageAlertOperatorGTE,
+			Threshold:       20,
+			StepPercent:     &step,
+			CooldownMinutes: 60,
+			Enabled:         true,
+		},
+		webhook: &UsageAlertWebhook{
+			Name:       "json",
+			Type:       UsageAlertWebhookTypeJSONPost,
+			URL:        server.URL,
+			Enabled:    true,
+			RetryCount: 0,
+		},
+	}
+	svc := NewUsageAlertService(repo, nil)
+	svc.httpClient = server.Client()
+	sampledAt := time.Now().UTC()
+	snapshot := UsageAlertSnapshot{
+		AccountID:     2,
+		RealAccountID: realAccountID,
+		UsageType:     UsageAlertTypeOverall,
+		Platform:      UsageAlertPlatformOpenAI,
+		SampledAt:     sampledAt,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 20, RemainingPercent: 80},
+		},
+	}
+
+	svc.observeAsync(snapshot)
+	require.Nil(t, repo.currentState(), "failed delivery must leave the trigger eligible for retry")
+
+	snapshot.SampledAt = sampledAt.Add(time.Minute)
+	svc.observeAsync(snapshot)
+
+	require.Equal(t, int32(2), requests.Load())
+	require.Equal(t, UsageAlertStatusTriggered, repo.currentState().LastStatus)
+}
+
+func TestObserveAsyncSerializesSamplesForSameUsageScope(t *testing.T) {
+	var requests atomic.Int32
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	realAccountID := int64(1)
+	step := 20.0
+	repo := &usageAlertDeliveryRepoStub{
+		rule: &UsageAlertRule{
+			ID:              9,
+			RealAccountID:   &realAccountID,
+			UsageType:       UsageAlertTypeOverall,
+			Window:          UsageAlertWindow7d,
+			Metric:          UsageAlertMetricUsed,
+			Operator:        UsageAlertOperatorGTE,
+			Threshold:       20,
+			StepPercent:     &step,
+			CooldownMinutes: 0,
+			Enabled:         true,
+		},
+		webhook: &UsageAlertWebhook{
+			Name:       "json",
+			Type:       UsageAlertWebhookTypeJSONPost,
+			URL:        server.URL,
+			Enabled:    true,
+			RetryCount: 0,
+		},
+	}
+	svc := NewUsageAlertService(repo, nil)
+	svc.httpClient = server.Client()
+	sampledAt := time.Now().UTC()
+	snapshot := func(used float64, at time.Time) UsageAlertSnapshot {
+		return UsageAlertSnapshot{
+			AccountID:     2,
+			RealAccountID: realAccountID,
+			UsageType:     UsageAlertTypeOverall,
+			Platform:      UsageAlertPlatformOpenAI,
+			SampledAt:     at,
+			Windows: map[string]UsageAlertWindowSnapshot{
+				UsageAlertWindow7d: {UsedPercent: used, RemainingPercent: 100 - used},
+			},
+		}
+	}
+
+	var evaluations sync.WaitGroup
+	evaluations.Add(2)
+	go func() {
+		defer evaluations.Done()
+		svc.observeAsync(snapshot(20, sampledAt))
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		close(releaseFirst)
+		t.Fatal("timed out waiting for first webhook delivery")
+	}
+	go func() {
+		defer evaluations.Done()
+		svc.observeAsync(snapshot(40, sampledAt.Add(time.Minute)))
+	}()
+
+	require.Never(t, func() bool {
+		return requests.Load() > 1
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	close(releaseFirst)
+	evaluations.Wait()
+
+	require.Equal(t, int32(2), requests.Load())
+	require.Equal(t, 40.0, *repo.currentState().LastValue)
 }
 
 func TestRedactUsageAlertSecret(t *testing.T) {
