@@ -621,7 +621,7 @@ func (r *usageAlertRepository) ClaimWebhookDelivery(
 	eventID string,
 	realAccountID, ruleID, webhookID int64,
 	claimToken string,
-	staleBefore time.Time,
+	lease time.Duration,
 ) (service.UsageAlertDeliveryClaim, error) {
 	if r.sql == nil {
 		return service.UsageAlertDeliveryBusy, fmt.Errorf("usage alert repository SQL executor not configured")
@@ -635,9 +635,9 @@ func (r *usageAlertRepository) ClaimWebhookDelivery(
 			claimed_at = NOW(),
 			updated_at = NOW()
 		WHERE usage_alert_deliveries.status = 'pending'
-			AND usage_alert_deliveries.claimed_at < $6
+			AND usage_alert_deliveries.claimed_at < NOW() - ($6 * INTERVAL '1 second')
 		RETURNING claim_token
-	`, eventID, realAccountID, ruleID, webhookID, claimToken, staleBefore)
+	`, eventID, realAccountID, ruleID, webhookID, claimToken, lease.Seconds())
 	if err != nil {
 		return service.UsageAlertDeliveryBusy, err
 	}
@@ -716,6 +716,17 @@ func (r *usageAlertRepository) ReleaseWebhookDelivery(ctx context.Context, event
 		DELETE FROM usage_alert_deliveries
 		WHERE event_id = $1 AND webhook_id = $2 AND status = 'pending' AND claim_token = $3
 	`, eventID, webhookID, claimToken)
+	return err
+}
+
+func (r *usageAlertRepository) CleanupWebhookDeliveries(ctx context.Context, deliveredBefore time.Time) error {
+	if r.sql == nil {
+		return fmt.Errorf("usage alert repository SQL executor not configured")
+	}
+	_, err := r.sql.ExecContext(ctx, `
+		DELETE FROM usage_alert_deliveries
+		WHERE status = 'delivered' AND delivered_at < $1
+	`, deliveredBefore)
 	return err
 }
 

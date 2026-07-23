@@ -58,7 +58,10 @@ func TestOpenAIGatewayService_SparkRequestSchedulesAuthoritativeUsageRefresh(t *
 
 func TestAccountUsageService_WSUsageRefreshIsThrottledAndForceable(t *testing.T) {
 	updatesCh := make(chan map[string]any, 2)
-	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	repo := &snapshotUpdateAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{ID: 82}}},
+		updateExtraCalls:      updatesCh,
+	}
 	var fetchCalls atomic.Int32
 	svc := &AccountUsageService{
 		accountRepo: repo,
@@ -105,7 +108,10 @@ func TestAccountUsageService_WSUsageRefreshIsThrottledAndForceable(t *testing.T)
 func TestAccountUsageService_WSUsageRefreshRetriesAfterFailure(t *testing.T) {
 	updatesCh := make(chan map[string]any, 1)
 	firstAttempt := make(chan struct{}, 1)
-	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	repo := &snapshotUpdateAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{ID: 84}}},
+		updateExtraCalls:      updatesCh,
+	}
 	var fetchCalls atomic.Int32
 	svc := &AccountUsageService{
 		accountRepo: repo,
@@ -147,7 +153,10 @@ func TestAccountUsageService_WSUsageRefreshRetriesAfterFailure(t *testing.T) {
 
 func TestAccountUsageService_ForceDuringFlightSchedulesFollowupProbe(t *testing.T) {
 	updatesCh := make(chan map[string]any, 2)
-	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	repo := &snapshotUpdateAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{ID: 85}}},
+		updateExtraCalls:      updatesCh,
+	}
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	var fetchCalls atomic.Int32
@@ -236,6 +245,35 @@ func TestAccountUsageService_SparkRefreshPersistsBengalfoxWindows(t *testing.T) 
 		require.Equal(t, 55.0, updates["codex_7d_used_percent"])
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for Spark usage snapshot")
+	}
+}
+
+func TestAccountUsageService_RefreshFailsClosedWhenAccountLookupFails(t *testing.T) {
+	updatesCh := make(chan map[string]any, 1)
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	svc := &AccountUsageService{
+		accountRepo: repo,
+		cache:       NewUsageCache(),
+		openAIQuotaSnapshotFn: func(context.Context, int64) (*OpenAIQuotaUsage, error) {
+			return &OpenAIQuotaUsage{RateLimit: &OpenAIRateLimit{
+				PrimaryWindow: &OpenAIRateLimitWindow{
+					UsedPercent:        42,
+					LimitWindowSeconds: 7 * 24 * 60 * 60,
+				},
+			}}, nil
+		},
+	}
+
+	svc.RefreshOpenAICodexUsageSnapshot(88, false)
+
+	require.Eventually(t, func() bool {
+		_, inFlight := svc.cache.openAIProbeFlight.Load(int64(88))
+		return !inFlight
+	}, 2*time.Second, 10*time.Millisecond)
+	select {
+	case <-updatesCh:
+		t.Fatal("unknown account dimension must not persist an overall snapshot")
+	default:
 	}
 }
 

@@ -380,11 +380,12 @@ func (s *AccountUsageService) RefreshOpenAICodexUsageSnapshot(accountID int64, f
 			return
 		}
 		account, err := s.accountRepo.GetByID(probeCtx, accountID)
-		if err != nil {
+		if err != nil || account == nil {
 			slog.Warn("openai_codex_ws_usage_refresh_account_failed", "account_id", accountID, "error", err)
+			return
 		}
 		updates := buildCodexOverallWindowExtraUpdates(quota, time.Now())
-		if account != nil && account.IsShadow() {
+		if account.IsShadow() {
 			updates = buildCodexSparkWindowExtraUpdates(quota, time.Now())
 		}
 		if len(updates) == 0 {

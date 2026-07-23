@@ -48,6 +48,8 @@ const (
 
 	usageAlertRuleNameMaxLength = 100
 	usageAlertDeliveryLease     = 3 * time.Minute
+	usageAlertDeliveryRetention = 90 * 24 * time.Hour
+	usageAlertCleanupInterval   = 24 * time.Hour
 	usageAlertRetryMinDelay     = 30 * time.Second
 	usageAlertRetryMaxDelay     = 5 * time.Minute
 
@@ -240,7 +242,9 @@ type UsageAlertRepository interface {
 	UpsertSnapshot(ctx context.Context, snapshot *UsageAlertSnapshot) (bool, error)
 	GetState(ctx context.Context, realAccountID, ruleID int64, usageType, window string) (*UsageAlertState, error)
 	UpsertState(ctx context.Context, state *UsageAlertState) error
-	ClaimWebhookDelivery(ctx context.Context, eventID string, realAccountID, ruleID, webhookID int64, claimToken string, staleBefore time.Time) (UsageAlertDeliveryClaim, error)
+	// Delivery is at-least-once across lease recovery. Consumers should use
+	// event_id as their idempotency key.
+	ClaimWebhookDelivery(ctx context.Context, eventID string, realAccountID, ruleID, webhookID int64, claimToken string, lease time.Duration) (UsageAlertDeliveryClaim, error)
 	CompleteWebhookDelivery(ctx context.Context, eventID string, webhookID int64, claimToken string) error
 	ReleaseWebhookDelivery(ctx context.Context, eventID string, webhookID int64, claimToken string) error
 }
@@ -251,13 +255,23 @@ type UsageAlertService struct {
 	httpClient      *http.Client
 	evaluationLocks sync.Map
 	workers         sync.Map
+	cleanupMu       sync.Mutex
+	cleanupRunning  bool
+	lastCleanupAt   time.Time
 }
 
 type usageAlertObservationWorker struct {
-	mu         sync.Mutex
-	running    bool
-	pending    *UsageAlertSnapshot
-	retryDelay time.Duration
+	mu           sync.Mutex
+	running      bool
+	waiting      bool
+	pending      *UsageAlertSnapshot
+	retryPending *UsageAlertSnapshot
+	retryDelay   time.Duration
+	wake         chan struct{}
+}
+
+type usageAlertDeliveryCleaner interface {
+	CleanupWebhookDeliveries(ctx context.Context, deliveredBefore time.Time) error
 }
 
 func NewUsageAlertService(repo UsageAlertRepository, accountRepo AccountRepository) *UsageAlertService {
@@ -471,7 +485,7 @@ func (s *UsageAlertService) Observe(ctx context.Context, snapshot *UsageAlertSna
 
 func (s *UsageAlertService) enqueueObservation(snapshot UsageAlertSnapshot) {
 	key := fmt.Sprintf("%d:%s", snapshot.RealAccountID, normalizeUsageAlertUsageType(snapshot.UsageType))
-	actual, _ := s.workers.LoadOrStore(key, &usageAlertObservationWorker{})
+	actual, _ := s.workers.LoadOrStore(key, &usageAlertObservationWorker{wake: make(chan struct{}, 1)})
 	worker, ok := actual.(*usageAlertObservationWorker)
 	if !ok {
 		return
@@ -481,6 +495,10 @@ func (s *UsageAlertService) enqueueObservation(snapshot UsageAlertSnapshot) {
 	snapshotCopy := snapshot
 	worker.pending = &snapshotCopy
 	if worker.running {
+		select {
+		case worker.wake <- struct{}{}:
+		default:
+		}
 		worker.mu.Unlock()
 		return
 	}
@@ -493,10 +511,16 @@ func (s *UsageAlertService) enqueueObservation(snapshot UsageAlertSnapshot) {
 func (s *UsageAlertService) runObservationWorker(worker *usageAlertObservationWorker) {
 	for {
 		worker.mu.Lock()
-		pending := worker.pending
-		worker.pending = nil
+		pending := worker.retryPending
+		if pending != nil {
+			worker.retryPending = nil
+		} else {
+			pending = worker.pending
+			worker.pending = nil
+		}
 		if pending == nil {
 			worker.running = false
+			worker.waiting = false
 			worker.mu.Unlock()
 			return
 		}
@@ -505,29 +529,38 @@ func (s *UsageAlertService) runObservationWorker(worker *usageAlertObservationWo
 		worker.mu.Lock()
 		if !retry {
 			worker.retryDelay = 0
-			worker.mu.Unlock()
-			continue
-		}
-		if worker.pending != nil {
-			// A fresher observation arrived while this one was being
-			// processed. Evaluate it immediately instead of sleeping on the
-			// stale retry.
-			worker.retryDelay = 0
+			select {
+			case <-worker.wake:
+			default:
+			}
 			worker.mu.Unlock()
 			continue
 		}
 		retrySnapshot := *pending
-		worker.pending = &retrySnapshot
+		worker.retryPending = &retrySnapshot
 		if worker.retryDelay <= 0 {
 			worker.retryDelay = usageAlertRetryMinDelay
 		} else {
 			worker.retryDelay = min(worker.retryDelay*2, usageAlertRetryMaxDelay)
 		}
 		delay := worker.retryDelay
+		worker.waiting = true
 		worker.mu.Unlock()
 
 		timer := time.NewTimer(delay)
-		<-timer.C
+		select {
+		case <-timer.C:
+		case <-worker.wake:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		}
+		worker.mu.Lock()
+		worker.waiting = false
+		worker.mu.Unlock()
 	}
 }
 
@@ -644,6 +677,7 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) bool {
 }
 
 func (s *UsageAlertService) deliverUsageAlertEvent(ctx context.Context, realAccountID, ruleID int64, webhooks []*UsageAlertWebhook, event UsageAlertWebhookEvent) bool {
+	s.maybeCleanupWebhookDeliveries()
 	for _, webhook := range webhooks {
 		if webhook == nil {
 			continue
@@ -654,7 +688,7 @@ func (s *UsageAlertService) deliverUsageAlertEvent(ctx context.Context, realAcco
 			return false
 		}
 		claimCtx, cancelClaim := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		claim, err := s.repo.ClaimWebhookDelivery(claimCtx, event.EventID, realAccountID, ruleID, webhook.ID, claimToken, time.Now().UTC().Add(-usageAlertDeliveryLease))
+		claim, err := s.repo.ClaimWebhookDelivery(claimCtx, event.EventID, realAccountID, ruleID, webhook.ID, claimToken, usageAlertDeliveryLease)
 		cancelClaim()
 		if err != nil {
 			slog.Warn("usage_alert_webhook_claim_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "error", err)
@@ -689,6 +723,36 @@ func (s *UsageAlertService) deliverUsageAlertEvent(ctx context.Context, realAcco
 		}
 	}
 	return true
+}
+
+func (s *UsageAlertService) maybeCleanupWebhookDeliveries() {
+	cleaner, ok := s.repo.(usageAlertDeliveryCleaner)
+	if !ok {
+		return
+	}
+	now := time.Now().UTC()
+	s.cleanupMu.Lock()
+	if s.cleanupRunning || (!s.lastCleanupAt.IsZero() && now.Sub(s.lastCleanupAt) < usageAlertCleanupInterval) {
+		s.cleanupMu.Unlock()
+		return
+	}
+	s.cleanupRunning = true
+	s.cleanupMu.Unlock()
+
+	go func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := cleaner.CleanupWebhookDeliveries(cleanupCtx, now.Add(-usageAlertDeliveryRetention))
+		cancel()
+		s.cleanupMu.Lock()
+		s.cleanupRunning = false
+		if err == nil {
+			s.lastCleanupAt = now
+		}
+		s.cleanupMu.Unlock()
+		if err != nil {
+			slog.Warn("usage_alert_delivery_cleanup_failed", "error", err)
+		}
+	}()
 }
 
 func newUsageAlertClaimToken() (string, error) {

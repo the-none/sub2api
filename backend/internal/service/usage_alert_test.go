@@ -397,7 +397,7 @@ func (s *usageAlertDeliveryRepoStub) UpsertState(_ context.Context, state *Usage
 	return nil
 }
 
-func (s *usageAlertDeliveryRepoStub) ClaimWebhookDelivery(_ context.Context, eventID string, _, _, webhookID int64, _ string, _ time.Time) (UsageAlertDeliveryClaim, error) {
+func (s *usageAlertDeliveryRepoStub) ClaimWebhookDelivery(_ context.Context, eventID string, _, _, webhookID int64, _ string, _ time.Duration) (UsageAlertDeliveryClaim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.receipts == nil {
@@ -565,6 +565,92 @@ func TestObserveAsyncRetriesOnlyUndeliveredWebhookWithStableEventID(t *testing.T
 	require.Equal(t, eventIDs[0], eventIDs[1])
 	require.Equal(t, eventIDs[1], eventIDs[2])
 	eventIDsMu.Unlock()
+}
+
+func TestObservePreservesFailedTriggerWhenRecoverySampleWakesBackoff(t *testing.T) {
+	var requests atomic.Int32
+	var eventsMu sync.Mutex
+	var events []UsageAlertWebhookEvent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var event UsageAlertWebhookEvent
+		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+			t.Errorf("decode event: %v", err)
+		}
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+		if requests.Add(1) == 1 {
+			http.Error(w, "temporary failure", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	realAccountID := int64(1)
+	repo := &usageAlertDeliveryRepoStub{
+		rule: &UsageAlertRule{
+			ID:              9,
+			RealAccountID:   &realAccountID,
+			UsageType:       UsageAlertTypeOverall,
+			Window:          UsageAlertWindow7d,
+			Metric:          UsageAlertMetricUsed,
+			Operator:        UsageAlertOperatorGTE,
+			Threshold:       20,
+			CooldownMinutes: 0,
+			Enabled:         true,
+		},
+		webhook: &UsageAlertWebhook{
+			ID:      1,
+			Name:    "json",
+			Type:    UsageAlertWebhookTypeJSONPost,
+			URL:     server.URL,
+			Enabled: true,
+		},
+	}
+	svc := NewUsageAlertService(repo, nil)
+	svc.httpClient = server.Client()
+	sampledAt := time.Now().UTC()
+	snapshot := func(used float64, at time.Time) *UsageAlertSnapshot {
+		return &UsageAlertSnapshot{
+			AccountID:     2,
+			RealAccountID: realAccountID,
+			UsageType:     UsageAlertTypeOverall,
+			Platform:      UsageAlertPlatformOpenAI,
+			SampledAt:     at,
+			Windows: map[string]UsageAlertWindowSnapshot{
+				UsageAlertWindow7d: {UsedPercent: used, RemainingPercent: 100 - used},
+			},
+		}
+	}
+
+	svc.Observe(context.Background(), snapshot(95, sampledAt))
+	require.Eventually(t, func() bool {
+		actual, ok := svc.workers.Load("1:overall")
+		if !ok {
+			return false
+		}
+		worker, ok := actual.(*usageAlertObservationWorker)
+		if !ok {
+			return false
+		}
+		worker.mu.Lock()
+		defer worker.mu.Unlock()
+		return worker.waiting && worker.retryPending != nil
+	}, 2*time.Second, 10*time.Millisecond)
+
+	svc.Observe(context.Background(), snapshot(10, sampledAt.Add(time.Minute)))
+
+	require.Eventually(t, func() bool {
+		state := repo.currentState()
+		return requests.Load() == 3 && state != nil && state.LastStatus == UsageAlertStatusNormal
+	}, 2*time.Second, 10*time.Millisecond)
+	eventsMu.Lock()
+	require.Len(t, events, 3)
+	require.Equal(t, UsageAlertEventTriggered, events[0].Event)
+	require.Equal(t, events[0].EventID, events[1].EventID)
+	require.Equal(t, UsageAlertEventResolved, events[2].Event)
+	eventsMu.Unlock()
 }
 
 func TestUsageAlertRuleZeroCooldownIsEdgeOnlyWithoutStep(t *testing.T) {

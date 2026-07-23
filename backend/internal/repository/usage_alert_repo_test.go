@@ -94,7 +94,7 @@ func TestClaimUsageAlertWebhookDeliveryDistinguishesClaimedDeliveredAndBusy(t *t
 				7,
 				3,
 				"token",
-				time.Now().UTC().Add(-time.Minute),
+				time.Minute,
 			)
 
 			require.NoError(t, err)
@@ -102,6 +102,21 @@ func TestClaimUsageAlertWebhookDeliveryDistinguishesClaimedDeliveredAndBusy(t *t
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
+}
+
+func TestCleanupUsageAlertWebhookDeliveriesUsesRetentionCutoff(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	cutoff := time.Now().UTC().Add(-90 * 24 * time.Hour)
+
+	mock.ExpectExec(`(?s)DELETE FROM usage_alert_deliveries.*status = 'delivered'.*delivered_at < \$1`).
+		WithArgs(cutoff).
+		WillReturnResult(sqlmock.NewResult(0, 4))
+
+	repo := &usageAlertRepository{sql: db}
+	require.NoError(t, repo.CleanupWebhookDeliveries(context.Background(), cutoff))
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestCompleteUsageAlertWebhookDeliveryRequiresOwnedClaim(t *testing.T) {
