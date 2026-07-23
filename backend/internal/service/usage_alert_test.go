@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -257,11 +259,12 @@ func TestCommitUsageAlertTriggerPersistsFixedStepLevelInsteadOfSampleValue(t *te
 		},
 	}
 
-	triggers := svc.evaluateRules(context.Background(), nil, current, []*UsageAlertRule{rule})
+	triggers, err := svc.evaluateRules(context.Background(), nil, current, []*UsageAlertRule{rule})
 
+	require.NoError(t, err)
 	require.Len(t, triggers, 1)
 	require.Nil(t, repo.lastUpsertedState, "evaluation must not advance state before webhook delivery")
-	svc.commitUsageAlertTrigger(triggers[0], realAccountID)
+	require.NoError(t, svc.commitUsageAlertTrigger(triggers[0], realAccountID))
 	require.NotNil(t, repo.lastUpsertedState)
 	require.Equal(t, 40.0, *repo.lastUpsertedState.LastValue)
 	require.Equal(t, 43.7, triggers[0].Value, "webhook event should retain the actual sampled value")
@@ -346,6 +349,8 @@ type usageAlertDeliveryRepoStub struct {
 	state    *UsageAlertState
 	rule     *UsageAlertRule
 	webhook  *UsageAlertWebhook
+	webhooks []*UsageAlertWebhook
+	receipts map[string]bool
 }
 
 func (s *usageAlertDeliveryRepoStub) GetSnapshot(_ context.Context, _ int64, _ string) (*UsageAlertSnapshot, error) {
@@ -369,6 +374,9 @@ func (s *usageAlertDeliveryRepoStub) ListEnabledRules(_ context.Context, _ int64
 }
 
 func (s *usageAlertDeliveryRepoStub) ListEnabledWebhooksForRealAccount(_ context.Context, _ int64) ([]*UsageAlertWebhook, error) {
+	if s.webhooks != nil {
+		return s.webhooks, nil
+	}
 	return []*UsageAlertWebhook{s.webhook}, nil
 }
 
@@ -386,6 +394,33 @@ func (s *usageAlertDeliveryRepoStub) UpsertState(_ context.Context, state *Usage
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state = state
+	return nil
+}
+
+func (s *usageAlertDeliveryRepoStub) ClaimWebhookDelivery(_ context.Context, eventID string, _, _, webhookID int64, _ string, _ time.Time) (UsageAlertDeliveryClaim, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.receipts == nil {
+		s.receipts = make(map[string]bool)
+	}
+	key := fmt.Sprintf("%s:%d", eventID, webhookID)
+	if s.receipts[key] {
+		return UsageAlertDeliveryAlreadyDelivered, nil
+	}
+	return UsageAlertDeliveryClaimed, nil
+}
+
+func (s *usageAlertDeliveryRepoStub) CompleteWebhookDelivery(_ context.Context, eventID string, webhookID int64, _ string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.receipts == nil {
+		s.receipts = make(map[string]bool)
+	}
+	s.receipts[fmt.Sprintf("%s:%d", eventID, webhookID)] = true
+	return nil
+}
+
+func (s *usageAlertDeliveryRepoStub) ReleaseWebhookDelivery(_ context.Context, _ string, _ int64, _ string) error {
 	return nil
 }
 
@@ -443,14 +478,115 @@ func TestObserveAsyncRetriesUncommittedTriggerAfterWebhookFailure(t *testing.T) 
 		},
 	}
 
-	svc.observeAsync(snapshot)
+	retry := svc.observeAsync(snapshot)
+	require.True(t, retry, "failed terminal delivery must remain queued for background retry")
 	require.Nil(t, repo.currentState(), "failed delivery must leave the trigger eligible for retry")
 
 	snapshot.SampledAt = sampledAt.Add(time.Minute)
-	svc.observeAsync(snapshot)
+	require.False(t, svc.observeAsync(snapshot))
 
 	require.Equal(t, int32(2), requests.Load())
 	require.Equal(t, UsageAlertStatusTriggered, repo.currentState().LastStatus)
+}
+
+func TestObserveAsyncRetriesOnlyUndeliveredWebhookWithStableEventID(t *testing.T) {
+	var healthyRequests atomic.Int32
+	var flakyRequests atomic.Int32
+	var eventIDsMu sync.Mutex
+	var eventIDs []string
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		healthyRequests.Add(1)
+		var event UsageAlertWebhookEvent
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&event))
+		eventIDsMu.Lock()
+		eventIDs = append(eventIDs, event.EventID)
+		eventIDsMu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer healthy.Close()
+	flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt := flakyRequests.Add(1)
+		var event UsageAlertWebhookEvent
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&event))
+		eventIDsMu.Lock()
+		eventIDs = append(eventIDs, event.EventID)
+		eventIDsMu.Unlock()
+		if attempt == 1 {
+			http.Error(w, "temporary failure", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer flaky.Close()
+
+	realAccountID := int64(1)
+	repo := &usageAlertDeliveryRepoStub{
+		rule: &UsageAlertRule{
+			ID:              9,
+			RealAccountID:   &realAccountID,
+			UsageType:       UsageAlertTypeOverall,
+			Window:          UsageAlertWindow7d,
+			Metric:          UsageAlertMetricUsed,
+			Operator:        UsageAlertOperatorGTE,
+			Threshold:       20,
+			CooldownMinutes: 0,
+			Enabled:         true,
+		},
+		webhooks: []*UsageAlertWebhook{
+			{ID: 1, Name: "healthy", Type: UsageAlertWebhookTypeJSONPost, URL: healthy.URL, Enabled: true},
+			{ID: 2, Name: "flaky", Type: UsageAlertWebhookTypeJSONPost, URL: flaky.URL, Enabled: true},
+		},
+	}
+	svc := NewUsageAlertService(repo, nil)
+	svc.httpClient = healthy.Client()
+	resetAt := time.Now().UTC().Add(7 * 24 * time.Hour)
+	snapshot := UsageAlertSnapshot{
+		AccountID:     2,
+		RealAccountID: realAccountID,
+		UsageType:     UsageAlertTypeOverall,
+		Platform:      UsageAlertPlatformOpenAI,
+		SampledAt:     time.Now().UTC(),
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 20, RemainingPercent: 80, ResetAt: &resetAt},
+		},
+	}
+
+	svc.observeAsync(snapshot)
+	require.Nil(t, repo.currentState())
+	snapshot.SampledAt = snapshot.SampledAt.Add(time.Minute)
+	snapshot.Windows[UsageAlertWindow7d] = UsageAlertWindowSnapshot{UsedPercent: 25, RemainingPercent: 75, ResetAt: &resetAt}
+	svc.observeAsync(snapshot)
+
+	require.Equal(t, int32(1), healthyRequests.Load(), "a delivered endpoint must not be resent")
+	require.Equal(t, int32(2), flakyRequests.Load())
+	require.Equal(t, UsageAlertStatusTriggered, repo.currentState().LastStatus)
+	eventIDsMu.Lock()
+	require.Len(t, eventIDs, 3)
+	require.Equal(t, eventIDs[0], eventIDs[1])
+	require.Equal(t, eventIDs[1], eventIDs[2])
+	eventIDsMu.Unlock()
+}
+
+func TestUsageAlertRuleZeroCooldownIsEdgeOnlyWithoutStep(t *testing.T) {
+	now := time.Now().UTC()
+	rule := validUsageAlertRuleForTest()
+	rule.CooldownMinutes = 0
+	value := 10.0
+	lastTriggeredAt := now.Add(-time.Hour)
+	state := &UsageAlertState{
+		LastStatus:      UsageAlertStatusTriggered,
+		LastTriggeredAt: &lastTriggeredAt,
+		LastValue:       &value,
+	}
+	previous := &UsageAlertSnapshot{Windows: map[string]UsageAlertWindowSnapshot{
+		UsageAlertWindow7d: {RemainingPercent: 10},
+	}}
+	current := &UsageAlertSnapshot{Windows: map[string]UsageAlertWindowSnapshot{
+		UsageAlertWindow7d: {RemainingPercent: 9},
+	}}
+
+	require.False(t, usageAlertRuleAllowsTrigger(previous, current, rule, state, 9, now))
+	require.True(t, usageAlertRuleAllowsTrigger(previous, current, rule, nil, 9, now), "first observation in a generation must trigger")
 }
 
 func TestObserveAsyncSerializesSamplesForSameUsageScope(t *testing.T) {
@@ -532,6 +668,86 @@ func TestObserveAsyncSerializesSamplesForSameUsageScope(t *testing.T) {
 	require.Equal(t, 40.0, *repo.currentState().LastValue)
 }
 
+func TestObserveCoalescesPendingSamplesPerUsageScope(t *testing.T) {
+	var requests atomic.Int32
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	realAccountID := int64(1)
+	step := 20.0
+	repo := &usageAlertDeliveryRepoStub{
+		rule: &UsageAlertRule{
+			ID:              9,
+			RealAccountID:   &realAccountID,
+			UsageType:       UsageAlertTypeOverall,
+			Window:          UsageAlertWindow7d,
+			Metric:          UsageAlertMetricUsed,
+			Operator:        UsageAlertOperatorGTE,
+			Threshold:       20,
+			StepPercent:     &step,
+			CooldownMinutes: 0,
+			Enabled:         true,
+		},
+		webhook: &UsageAlertWebhook{
+			ID:      1,
+			Name:    "json",
+			Type:    UsageAlertWebhookTypeJSONPost,
+			URL:     server.URL,
+			Enabled: true,
+		},
+	}
+	svc := NewUsageAlertService(repo, nil)
+	svc.httpClient = server.Client()
+	sampledAt := time.Now().UTC()
+	snapshot := func(used float64, at time.Time) *UsageAlertSnapshot {
+		return &UsageAlertSnapshot{
+			AccountID:     2,
+			RealAccountID: realAccountID,
+			UsageType:     UsageAlertTypeOverall,
+			Platform:      UsageAlertPlatformOpenAI,
+			SampledAt:     at,
+			Windows: map[string]UsageAlertWindowSnapshot{
+				UsageAlertWindow7d: {UsedPercent: used, RemainingPercent: 100 - used},
+			},
+		}
+	}
+
+	svc.Observe(context.Background(), snapshot(20, sampledAt))
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		close(releaseFirst)
+		t.Fatal("timed out waiting for first webhook delivery")
+	}
+	for used := 40.0; used <= 100; used += 20 {
+		svc.Observe(context.Background(), snapshot(used, sampledAt.Add(time.Duration(used)*time.Second)))
+	}
+
+	actual, ok := svc.workers.Load("1:overall")
+	require.True(t, ok)
+	worker, ok := actual.(*usageAlertObservationWorker)
+	require.True(t, ok)
+	worker.mu.Lock()
+	require.NotNil(t, worker.pending)
+	require.Equal(t, 100.0, worker.pending.Windows[UsageAlertWindow7d].UsedPercent)
+	worker.mu.Unlock()
+	require.Equal(t, int32(1), requests.Load())
+
+	close(releaseFirst)
+	require.Eventually(t, func() bool {
+		state := repo.currentState()
+		return requests.Load() == 2 && state != nil && state.LastValue != nil && *state.LastValue == 100
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
 func TestRedactUsageAlertSecret(t *testing.T) {
 	got := redactUsageAlertSecret(`Post "https://api.telegram.org/bot123456:abcDEF/sendMessage": timeout`, "123456:abcDEF")
 	require.NotContains(t, got, "123456:abcDEF")
@@ -541,6 +757,8 @@ func TestRedactUsageAlertSecret(t *testing.T) {
 func TestBuildUsageAlertWebhookEventUsesResolvedType(t *testing.T) {
 	rule := validUsageAlertRuleForTest()
 	rule.ID = 7
+	step := 5.0
+	rule.StepPercent = &step
 	triggeredAt := time.Date(2026, 6, 28, 10, 30, 0, 0, time.UTC)
 	snapshot := &UsageAlertSnapshot{
 		AccountID:     11,
@@ -550,21 +768,34 @@ func TestBuildUsageAlertWebhookEventUsesResolvedType(t *testing.T) {
 		Source:        UsageAlertSourceOpenAICodexHeaders,
 	}
 
-	event := buildUsageAlertWebhookEvent(snapshot, &RealAccount{Name: "OpenAI Main"}, UsageAlertTrigger{
+	trigger := UsageAlertTrigger{
 		Rule:        rule,
 		Window:      rule.Window,
 		Value:       90,
 		WindowState: UsageAlertWindowSnapshot{UsedPercent: 10, RemainingPercent: 90},
 		TriggeredAt: triggeredAt,
 		Resolved:    true,
-	})
+		StateAnchor: "triggered:1:20:2",
+	}
+	event := buildUsageAlertWebhookEvent(snapshot, &RealAccount{Name: "OpenAI Main"}, trigger)
 
 	require.Equal(t, UsageAlertEventResolved, event.Event)
 	require.Equal(t, "OpenAI Main", event.RealAccountName)
 	require.Equal(t, UsageAlertTypeSpark, event.UsageType)
 	require.Equal(t, QuotaDimensionSpark, event.QuotaDimension)
-	require.Contains(t, event.EventID, "-spark-")
+	require.True(t, strings.HasPrefix(event.EventID, "ua-"))
 	require.Equal(t, 90.0, event.Value)
+
+	retry := trigger
+	retry.TriggeredAt = triggeredAt.Add(time.Minute)
+	retry.Value = 95
+	retry.WindowState.RemainingPercent = 95
+	retryRule := *rule
+	retryStep := step
+	retryRule.StepPercent = &retryStep
+	retry.Rule = &retryRule
+	retryEvent := buildUsageAlertWebhookEvent(snapshot, &RealAccount{Name: "OpenAI Main"}, retry)
+	require.Equal(t, event.EventID, retryEvent.EventID, "an uncommitted transition must keep the same id across retries")
 }
 
 func TestFormatUsageAlertTelegramMessageUsesLanguageAndTimezone(t *testing.T) {
@@ -803,12 +1034,13 @@ func TestPrepareUsageAlertSnapshotRejectsUnknownGenerationAfterKnownReset(t *tes
 type usageAlertGenerationStateRepoStub struct {
 	UsageAlertRepository
 	state             *UsageAlertState
+	getStateErr       error
 	lastUpsertedState *UsageAlertState
 	upsertStateCalls  int
 }
 
 func (s *usageAlertGenerationStateRepoStub) GetState(_ context.Context, _, _ int64, _, _ string) (*UsageAlertState, error) {
-	return s.state, nil
+	return s.state, s.getStateErr
 }
 
 func (s *usageAlertGenerationStateRepoStub) UpsertState(_ context.Context, state *UsageAlertState) error {
@@ -834,8 +1066,62 @@ func TestEvaluateRulesRejectsWindowOlderThanPersistedStateReset(t *testing.T) {
 		},
 	}
 
-	triggers := svc.evaluateRules(context.Background(), nil, current, []*UsageAlertRule{rule})
+	triggers, err := svc.evaluateRules(context.Background(), nil, current, []*UsageAlertRule{rule})
 
+	require.NoError(t, err)
+	require.Empty(t, triggers)
+	require.Zero(t, repo.upsertStateCalls)
+}
+
+func TestEvaluateRulesTreatsNewResetGenerationAsFresh(t *testing.T) {
+	oldReset := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
+	newReset := oldReset.Add(7 * 24 * time.Hour)
+	lastValue := 10.0
+	lastTriggeredAt := time.Now().UTC()
+	repo := &usageAlertGenerationStateRepoStub{state: &UsageAlertState{
+		LastStatus:      UsageAlertStatusTriggered,
+		LastTriggeredAt: &lastTriggeredAt,
+		LastValue:       &lastValue,
+		LastResetAt:     &oldReset,
+	}}
+	svc := NewUsageAlertService(repo, nil)
+	rule := validUsageAlertRuleForTest()
+	rule.ID = 7
+	rule.CooldownMinutes = 0
+	previous := &UsageAlertSnapshot{Windows: map[string]UsageAlertWindowSnapshot{
+		UsageAlertWindow7d: {RemainingPercent: 10, ResetAt: &oldReset},
+	}}
+	current := &UsageAlertSnapshot{
+		RealAccountID: 1,
+		UsageType:     UsageAlertTypeOverall,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {RemainingPercent: 10, ResetAt: &newReset},
+		},
+	}
+
+	triggers, err := svc.evaluateRules(context.Background(), previous, current, []*UsageAlertRule{rule})
+
+	require.NoError(t, err)
+	require.Len(t, triggers, 1)
+	require.Equal(t, "new-generation", triggers[0].StateAnchor)
+}
+
+func TestEvaluateRulesFailsClosedWhenStateReadFails(t *testing.T) {
+	repo := &usageAlertGenerationStateRepoStub{getStateErr: errors.New("database unavailable")}
+	svc := NewUsageAlertService(repo, nil)
+	rule := validUsageAlertRuleForTest()
+	rule.ID = 7
+	current := &UsageAlertSnapshot{
+		RealAccountID: 1,
+		UsageType:     UsageAlertTypeOverall,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {RemainingPercent: 10},
+		},
+	}
+
+	triggers, err := svc.evaluateRules(context.Background(), nil, current, []*UsageAlertRule{rule})
+
+	require.ErrorContains(t, err, "get state for rule 7")
 	require.Empty(t, triggers)
 	require.Zero(t, repo.upsertStateCalls)
 }

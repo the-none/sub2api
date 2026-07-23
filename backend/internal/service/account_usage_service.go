@@ -125,6 +125,7 @@ type UsageCache struct {
 	antigravityFlight singleflight.Group // 防止同一 Antigravity 账号的并发请求击穿缓存
 	openAIProbeCache  sync.Map           // accountID -> time.Time
 	openAIProbeFlight sync.Map           // accountID -> in-flight marker
+	openAIProbeForced sync.Map           // accountID -> forced refresh requested while in flight
 	grokProbeCache    sync.Map           // accountID -> last billing probe attempt
 }
 
@@ -378,7 +379,14 @@ func (s *AccountUsageService) RefreshOpenAICodexUsageSnapshot(accountID int64, f
 			slog.Warn("openai_codex_ws_usage_refresh_failed", "account_id", accountID, "error", err)
 			return
 		}
+		account, err := s.accountRepo.GetByID(probeCtx, accountID)
+		if err != nil {
+			slog.Warn("openai_codex_ws_usage_refresh_account_failed", "account_id", accountID, "error", err)
+		}
 		updates := buildCodexOverallWindowExtraUpdates(quota, time.Now())
+		if account != nil && account.IsShadow() {
+			updates = buildCodexSparkWindowExtraUpdates(quota, time.Now())
+		}
 		if len(updates) == 0 {
 			slog.Warn("openai_codex_ws_usage_refresh_missing_windows", "account_id", accountID)
 			return
@@ -661,37 +669,41 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	applyExtraToUsage(usage, account.Extra, now)
 
 	if (force || shouldRefreshOpenAICodexSnapshot(account, usage, now)) && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
-		probeSucceeded := false
-		if account.IsShadow() {
-			// Spark shadow accounts fetch usage from /wham/usage (bengalfox channel)
-			// via the shared OpenAIQuotaService, which resolves credentials from the
-			// parent account.  The result is written to the shadow row's own codex_*
-			// Extra keys and immediately reflected in the returned UsageInfo.
-			if s.openAIQuotaService != nil {
-				if quotaUsage, err := s.openAIQuotaService.QueryUsage(ctx, account.ID); err == nil {
-					if updates := buildCodexSparkWindowExtraUpdates(quotaUsage, now); len(updates) > 0 {
-						mergeAccountExtra(account, updates)
-						s.persistOpenAICodexProbeSnapshot(account.ID, updates)
-						if usage.UpdatedAt == nil {
-							usage.UpdatedAt = &now
+		func() {
+			probeSucceeded := false
+			defer func() {
+				s.finishOpenAICodexSnapshotProbe(account.ID, probeSucceeded, time.Now())
+			}()
+			if account.IsShadow() {
+				// Spark shadow accounts fetch usage from /wham/usage (bengalfox channel)
+				// via the shared OpenAIQuotaService, which resolves credentials from the
+				// parent account.  The result is written to the shadow row's own codex_*
+				// Extra keys and immediately reflected in the returned UsageInfo.
+				if s.openAIQuotaService != nil {
+					if quotaUsage, err := s.openAIQuotaService.QueryUsage(ctx, account.ID); err == nil {
+						if updates := buildCodexSparkWindowExtraUpdates(quotaUsage, now); len(updates) > 0 {
+							mergeAccountExtra(account, updates)
+							s.persistOpenAICodexProbeSnapshot(account.ID, updates)
+							if usage.UpdatedAt == nil {
+								usage.UpdatedAt = &now
+							}
+							applyExtraToUsage(usage, account.Extra, now)
+							probeSucceeded = true
 						}
-						applyExtraToUsage(usage, account.Extra, now)
-						probeSucceeded = true
 					}
 				}
-			}
-		} else {
-			if outcome, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && outcome != nil && len(outcome.Updates) > 0 {
-				mergeAccountExtra(account, outcome.Updates)
-				s.persistOpenAICodexProbeSnapshot(account.ID, outcome.Updates)
-				if usage.UpdatedAt == nil {
-					usage.UpdatedAt = &now
+			} else {
+				if outcome, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && outcome != nil && len(outcome.Updates) > 0 {
+					mergeAccountExtra(account, outcome.Updates)
+					s.persistOpenAICodexProbeSnapshot(account.ID, outcome.Updates)
+					if usage.UpdatedAt == nil {
+						usage.UpdatedAt = &now
+					}
+					applyExtraToUsage(usage, account.Extra, now)
+					probeSucceeded = true
 				}
-				applyExtraToUsage(usage, account.Extra, now)
-				probeSucceeded = true
 			}
-		}
-		s.finishOpenAICodexSnapshotProbe(account.ID, probeSucceeded, time.Now())
+		}()
 	}
 
 	if s.usageLogRepo == nil {
@@ -760,10 +772,13 @@ func (s *AccountUsageService) shouldProbeOpenAICodexSnapshot(accountID int64, no
 	if s == nil || s.cache == nil || accountID <= 0 {
 		return true
 	}
+	forceProbe := len(force) > 0 && force[0]
 	if _, loaded := s.cache.openAIProbeFlight.LoadOrStore(accountID, struct{}{}); loaded {
+		if forceProbe {
+			s.cache.openAIProbeForced.Store(accountID, struct{}{})
+		}
 		return false
 	}
-	forceProbe := len(force) > 0 && force[0]
 	if !forceProbe {
 		if cached, ok := s.cache.openAIProbeCache.Load(accountID); ok {
 			if ts, ok := cached.(time.Time); ok && now.Sub(ts) < openAIProbeCacheTTL {
@@ -783,6 +798,9 @@ func (s *AccountUsageService) finishOpenAICodexSnapshotProbe(accountID int64, su
 		s.cache.openAIProbeCache.Store(accountID, completedAt)
 	}
 	s.cache.openAIProbeFlight.Delete(accountID)
+	if _, forced := s.cache.openAIProbeForced.LoadAndDelete(accountID); forced {
+		s.RefreshOpenAICodexUsageSnapshot(accountID, true)
+	}
 }
 
 type openAICodexProbeOutcome struct {

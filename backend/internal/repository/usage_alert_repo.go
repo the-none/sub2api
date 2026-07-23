@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
@@ -440,6 +441,7 @@ func (r *usageAlertRepository) ListEnabledWebhooksForRealAccount(ctx context.Con
 		WithWebhook(func(q *dbent.UsageAlertWebhookQuery) {
 			q.Where(dbusagealertwebhook.EnabledEQ(true))
 		}).
+		Order(dbent.Asc(dbusagealertbinding.FieldWebhookID)).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -605,7 +607,115 @@ func (r *usageAlertRepository) UpsertState(ctx context.Context, state *service.U
 			last_value = EXCLUDED.last_value,
 			last_reset_at = EXCLUDED.last_reset_at,
 			updated_at = NOW()
+			WHERE usage_alert_states.last_reset_at IS NULL
+				OR (
+					EXCLUDED.last_reset_at IS NOT NULL
+					AND usage_alert_states.last_reset_at <= EXCLUDED.last_reset_at
+				)
 		`, state.RealAccountID, state.RuleID, state.UsageType, state.Window, state.LastStatus, triggeredAt, lastValue, resetAt)
+	return err
+}
+
+func (r *usageAlertRepository) ClaimWebhookDelivery(
+	ctx context.Context,
+	eventID string,
+	realAccountID, ruleID, webhookID int64,
+	claimToken string,
+	staleBefore time.Time,
+) (service.UsageAlertDeliveryClaim, error) {
+	if r.sql == nil {
+		return service.UsageAlertDeliveryBusy, fmt.Errorf("usage alert repository SQL executor not configured")
+	}
+	rows, err := r.sql.QueryContext(ctx, `
+		INSERT INTO usage_alert_deliveries (
+			event_id, real_account_id, rule_id, webhook_id, status, claim_token, claimed_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, 'pending', $5, NOW(), NOW(), NOW())
+		ON CONFLICT (event_id, webhook_id) DO UPDATE SET
+			claim_token = EXCLUDED.claim_token,
+			claimed_at = NOW(),
+			updated_at = NOW()
+		WHERE usage_alert_deliveries.status = 'pending'
+			AND usage_alert_deliveries.claimed_at < $6
+		RETURNING claim_token
+	`, eventID, realAccountID, ruleID, webhookID, claimToken, staleBefore)
+	if err != nil {
+		return service.UsageAlertDeliveryBusy, err
+	}
+	claimed := false
+	if rows.Next() {
+		var returnedToken string
+		if err := rows.Scan(&returnedToken); err != nil {
+			_ = rows.Close()
+			return service.UsageAlertDeliveryBusy, err
+		}
+		claimed = returnedToken == claimToken
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return service.UsageAlertDeliveryBusy, err
+	}
+	if err := rows.Close(); err != nil {
+		return service.UsageAlertDeliveryBusy, err
+	}
+	if claimed {
+		return service.UsageAlertDeliveryClaimed, nil
+	}
+
+	rows, err = r.sql.QueryContext(ctx, `
+		SELECT status
+		FROM usage_alert_deliveries
+		WHERE event_id = $1 AND webhook_id = $2
+	`, eventID, webhookID)
+	if err != nil {
+		return service.UsageAlertDeliveryBusy, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return service.UsageAlertDeliveryBusy, err
+		}
+		return service.UsageAlertDeliveryBusy, nil
+	}
+	var status string
+	if err := rows.Scan(&status); err != nil {
+		return service.UsageAlertDeliveryBusy, err
+	}
+	if status == "delivered" {
+		return service.UsageAlertDeliveryAlreadyDelivered, nil
+	}
+	return service.UsageAlertDeliveryBusy, nil
+}
+
+func (r *usageAlertRepository) CompleteWebhookDelivery(ctx context.Context, eventID string, webhookID int64, claimToken string) error {
+	if r.sql == nil {
+		return fmt.Errorf("usage alert repository SQL executor not configured")
+	}
+	result, err := r.sql.ExecContext(ctx, `
+		UPDATE usage_alert_deliveries
+		SET status = 'delivered', delivered_at = NOW(), updated_at = NOW()
+		WHERE event_id = $1 AND webhook_id = $2 AND status = 'pending' AND claim_token = $3
+	`, eventID, webhookID, claimToken)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return fmt.Errorf("usage alert delivery claim was lost")
+	}
+	return nil
+}
+
+func (r *usageAlertRepository) ReleaseWebhookDelivery(ctx context.Context, eventID string, webhookID int64, claimToken string) error {
+	if r.sql == nil {
+		return fmt.Errorf("usage alert repository SQL executor not configured")
+	}
+	_, err := r.sql.ExecContext(ctx, `
+		DELETE FROM usage_alert_deliveries
+		WHERE event_id = $1 AND webhook_id = $2 AND status = 'pending' AND claim_token = $3
+	`, eventID, webhookID, claimToken)
 	return err
 }
 

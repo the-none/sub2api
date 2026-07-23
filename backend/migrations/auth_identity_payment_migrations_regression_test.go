@@ -279,3 +279,16 @@ func TestMigration173AllowsCyberBlockedUsageRequestType(t *testing.T) {
 	require.Contains(t, sql, "ADD CONSTRAINT usage_logs_request_type_check")
 	require.Contains(t, sql, "CHECK (request_type IN (0, 1, 2, 3, 4)) NOT VALID")
 }
+
+func TestMigration186AddsPerWebhookUsageAlertDeliveryReceipts(t *testing.T) {
+	content, err := FS.ReadFile("186_usage_alert_delivery_receipts.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS usage_alert_deliveries")
+	require.Contains(t, sql, "PRIMARY KEY (event_id, webhook_id)")
+	require.Contains(t, sql, "REFERENCES real_accounts(id) ON DELETE CASCADE")
+	require.Contains(t, sql, "REFERENCES usage_alert_rules(id) ON DELETE CASCADE")
+	require.Contains(t, sql, "REFERENCES usage_alert_webhooks(id) ON DELETE CASCADE")
+	require.Contains(t, sql, "CHECK (status IN ('pending', 'delivered'))")
+}

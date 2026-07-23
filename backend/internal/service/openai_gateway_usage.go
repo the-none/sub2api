@@ -844,6 +844,19 @@ func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotFromHeaders(ctx context.C
 	}
 }
 
+func (s *OpenAIGatewayService) updateCodexUsageSnapshotFromHeadersForAccount(ctx context.Context, account *Account, headers http.Header) {
+	if s == nil || account == nil || account.ID <= 0 {
+		return
+	}
+	if account.IsShadow() {
+		if s.usageRefresher != nil {
+			s.usageRefresher.RefreshOpenAICodexUsageSnapshot(account.ID, false)
+		}
+		return
+	}
+	s.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, headers)
+}
+
 // UpdateCodexUsageSnapshotFromResult distinguishes per-request HTTP headers
 // from connection-scoped WS handshake headers. Reused WS turns must use an
 // authoritative periodic quota query instead of repeatedly refreshing the
@@ -859,4 +872,18 @@ func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotFromResult(ctx context.Co
 		return
 	}
 	s.UpdateCodexUsageSnapshotFromHeaders(ctx, accountID, result.ResponseHeaders)
+}
+
+// UpdateCodexUsageSnapshotForAccount preserves the distinct Spark quota
+// dimension: shadow accounts refresh /wham/usage instead of consuming global
+// x-codex headers from the parent credential.
+func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotForAccount(ctx context.Context, account *Account, result *OpenAIForwardResult) {
+	if s == nil || account == nil || account.ID <= 0 || result == nil {
+		return
+	}
+	if account.IsShadow() {
+		s.updateCodexUsageSnapshotFromHeadersForAccount(ctx, account, result.ResponseHeaders)
+		return
+	}
+	s.UpdateCodexUsageSnapshotFromResult(ctx, account.ID, result)
 }

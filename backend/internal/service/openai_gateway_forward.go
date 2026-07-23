@@ -923,12 +923,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		s.bindHTTPResponseAccount(ctx, c, account, responseID)
 
-		// Extract and save Codex usage snapshot from response headers (for OAuth accounts).
-		// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
-		if account.Type == AccountTypeOAuth && !account.IsShadow() {
-			if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
-				s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
-			}
+		// Extract the global headers for ordinary OAuth accounts; Spark shadows
+		// schedule an authoritative bengalfox usage refresh instead.
+		if account.Type == AccountTypeOAuth {
+			s.updateCodexUsageSnapshotFromHeadersForAccount(ctx, account, resp.Header)
 		}
 
 		if usage == nil {

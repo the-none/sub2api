@@ -38,6 +38,24 @@ func TestOpenAIGatewayService_WSTurnSchedulesAuthoritativeUsageRefresh(t *testin
 	}
 }
 
+func TestOpenAIGatewayService_SparkRequestSchedulesAuthoritativeUsageRefresh(t *testing.T) {
+	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 1)}
+	svc := &OpenAIGatewayService{usageRefresher: refresher}
+	parentID := int64(80)
+	shadow := &Account{ID: 81, ParentAccountID: &parentID, QuotaDimension: QuotaDimensionSpark}
+
+	svc.UpdateCodexUsageSnapshotForAccount(context.Background(), shadow, &OpenAIForwardResult{
+		ResponseHeaders: http.Header{"x-codex-primary-used-percent": []string{"99"}},
+	})
+
+	select {
+	case force := <-refresher.calls:
+		require.False(t, force)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Spark quota refresh request")
+	}
+}
+
 func TestAccountUsageService_WSUsageRefreshIsThrottledAndForceable(t *testing.T) {
 	updatesCh := make(chan map[string]any, 2)
 	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
@@ -125,6 +143,100 @@ func TestAccountUsageService_WSUsageRefreshRetriesAfterFailure(t *testing.T) {
 		t.Fatal("timed out waiting for quota refresh retry")
 	}
 	require.Equal(t, int32(2), fetchCalls.Load())
+}
+
+func TestAccountUsageService_ForceDuringFlightSchedulesFollowupProbe(t *testing.T) {
+	updatesCh := make(chan map[string]any, 2)
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var fetchCalls atomic.Int32
+	svc := &AccountUsageService{
+		accountRepo: repo,
+		cache:       NewUsageCache(),
+		openAIQuotaSnapshotFn: func(context.Context, int64) (*OpenAIQuotaUsage, error) {
+			if fetchCalls.Add(1) == 1 {
+				close(firstStarted)
+				<-releaseFirst
+			}
+			return &OpenAIQuotaUsage{RateLimit: &OpenAIRateLimit{
+				PrimaryWindow: &OpenAIRateLimitWindow{
+					UsedPercent:        42,
+					LimitWindowSeconds: 7 * 24 * 60 * 60,
+					ResetAfterSeconds:  24 * 60 * 60,
+				},
+			}}, nil
+		},
+	}
+
+	svc.RefreshOpenAICodexUsageSnapshot(85, false)
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first quota refresh")
+	}
+	svc.RefreshOpenAICodexUsageSnapshot(85, true)
+	close(releaseFirst)
+
+	require.Eventually(t, func() bool {
+		return fetchCalls.Load() == 2
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		_, pending := svc.cache.openAIProbeForced.Load(int64(85))
+		_, inFlight := svc.cache.openAIProbeFlight.Load(int64(85))
+		return !pending && !inFlight
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestAccountUsageService_SparkRefreshPersistsBengalfoxWindows(t *testing.T) {
+	parentID := int64(86)
+	shadow := Account{
+		ID:              87,
+		ParentAccountID: &parentID,
+		QuotaDimension:  QuotaDimensionSpark,
+	}
+	updatesCh := make(chan map[string]any, 1)
+	repo := &snapshotUpdateAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{shadow}},
+		updateExtraCalls:      updatesCh,
+	}
+	svc := &AccountUsageService{
+		accountRepo: repo,
+		cache:       NewUsageCache(),
+		openAIQuotaSnapshotFn: func(context.Context, int64) (*OpenAIQuotaUsage, error) {
+			return &OpenAIQuotaUsage{
+				RateLimit: &OpenAIRateLimit{PrimaryWindow: &OpenAIRateLimitWindow{
+					UsedPercent:        10,
+					LimitWindowSeconds: 7 * 24 * 60 * 60,
+				}},
+				AdditionalRateLimits: []OpenAIAdditionalRateLimit{{
+					MeteredFeature: "codex_bengalfox",
+					RateLimit: &OpenAIRateLimit{
+						PrimaryWindow: &OpenAIRateLimitWindow{
+							UsedPercent:        77,
+							LimitWindowSeconds: 5 * 60 * 60,
+							ResetAfterSeconds:  60 * 60,
+						},
+						SecondaryWindow: &OpenAIRateLimitWindow{
+							UsedPercent:        55,
+							LimitWindowSeconds: 7 * 24 * 60 * 60,
+							ResetAfterSeconds:  24 * 60 * 60,
+						},
+					},
+				}},
+			}, nil
+		},
+	}
+
+	svc.RefreshOpenAICodexUsageSnapshot(shadow.ID, false)
+
+	select {
+	case updates := <-updatesCh:
+		require.Equal(t, 77.0, updates["codex_5h_used_percent"])
+		require.Equal(t, 55.0, updates["codex_7d_used_percent"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Spark usage snapshot")
+	}
 }
 
 func TestOpenAIGatewayService_WSRateLimitForcesAuthoritativeUsageRefresh(t *testing.T) {

@@ -87,6 +87,8 @@ func TestHandleUpstreamError_AnthropicWindowLimitPreemptsTempUnschedRule(t *test
 	require.Zero(t, repo.tempUnschedCalls, "official Anthropic window limits should not be shortened by local temp-unsched rules")
 	require.Equal(t, 1, repo.rateLimitCalls)
 	require.Equal(t, resetAt, repo.lastRateLimitReset)
+	require.NotNil(t, repo.lastExtraUpdates, "terminal 5h/7d limits must persist the final usage sample")
+	require.Equal(t, 1.02, repo.lastExtraUpdates["session_window_utilization"])
 }
 
 // fable429Headers 构造 7d_oi（Fable 专属 7d 窗口）触发 429 的完整响应头，

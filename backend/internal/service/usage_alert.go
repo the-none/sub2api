@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +47,9 @@ const (
 	UsageAlertStatusTriggered = "triggered"
 
 	usageAlertRuleNameMaxLength = 100
+	usageAlertDeliveryLease     = 3 * time.Minute
+	usageAlertRetryMinDelay     = 30 * time.Second
+	usageAlertRetryMaxDelay     = 5 * time.Minute
 
 	UsageAlertSourceOpenAICodexHeaders  = "openai_codex_headers"
 	UsageAlertSourceOpenAICodexProbe    = "openai_codex_probe"
@@ -164,7 +169,16 @@ type UsageAlertTrigger struct {
 	WindowState UsageAlertWindowSnapshot
 	TriggeredAt time.Time
 	Resolved    bool
+	StateAnchor string
 }
+
+type UsageAlertDeliveryClaim int
+
+const (
+	UsageAlertDeliveryBusy UsageAlertDeliveryClaim = iota
+	UsageAlertDeliveryClaimed
+	UsageAlertDeliveryAlreadyDelivered
+)
 
 type UsageAlertWebhookEvent struct {
 	Event            string     `json:"event"`
@@ -226,6 +240,9 @@ type UsageAlertRepository interface {
 	UpsertSnapshot(ctx context.Context, snapshot *UsageAlertSnapshot) (bool, error)
 	GetState(ctx context.Context, realAccountID, ruleID int64, usageType, window string) (*UsageAlertState, error)
 	UpsertState(ctx context.Context, state *UsageAlertState) error
+	ClaimWebhookDelivery(ctx context.Context, eventID string, realAccountID, ruleID, webhookID int64, claimToken string, staleBefore time.Time) (UsageAlertDeliveryClaim, error)
+	CompleteWebhookDelivery(ctx context.Context, eventID string, webhookID int64, claimToken string) error
+	ReleaseWebhookDelivery(ctx context.Context, eventID string, webhookID int64, claimToken string) error
 }
 
 type UsageAlertService struct {
@@ -233,6 +250,14 @@ type UsageAlertService struct {
 	accountRepo     AccountRepository
 	httpClient      *http.Client
 	evaluationLocks sync.Map
+	workers         sync.Map
+}
+
+type usageAlertObservationWorker struct {
+	mu         sync.Mutex
+	running    bool
+	pending    *UsageAlertSnapshot
+	retryDelay time.Duration
 }
 
 func NewUsageAlertService(repo UsageAlertRepository, accountRepo AccountRepository) *UsageAlertService {
@@ -441,7 +466,69 @@ func (s *UsageAlertService) Observe(ctx context.Context, snapshot *UsageAlertSna
 	}
 	snapshot.UsageRelation, snapshot.ParentUsageType = usageAlertTypeRelationship(snapshot.UsageType)
 
-	go s.observeAsync(*snapshot)
+	s.enqueueObservation(*snapshot)
+}
+
+func (s *UsageAlertService) enqueueObservation(snapshot UsageAlertSnapshot) {
+	key := fmt.Sprintf("%d:%s", snapshot.RealAccountID, normalizeUsageAlertUsageType(snapshot.UsageType))
+	actual, _ := s.workers.LoadOrStore(key, &usageAlertObservationWorker{})
+	worker, ok := actual.(*usageAlertObservationWorker)
+	if !ok {
+		return
+	}
+
+	worker.mu.Lock()
+	snapshotCopy := snapshot
+	worker.pending = &snapshotCopy
+	if worker.running {
+		worker.mu.Unlock()
+		return
+	}
+	worker.running = true
+	worker.mu.Unlock()
+
+	go s.runObservationWorker(worker)
+}
+
+func (s *UsageAlertService) runObservationWorker(worker *usageAlertObservationWorker) {
+	for {
+		worker.mu.Lock()
+		pending := worker.pending
+		worker.pending = nil
+		if pending == nil {
+			worker.running = false
+			worker.mu.Unlock()
+			return
+		}
+		worker.mu.Unlock()
+		retry := s.observeAsync(*pending)
+		worker.mu.Lock()
+		if !retry {
+			worker.retryDelay = 0
+			worker.mu.Unlock()
+			continue
+		}
+		if worker.pending != nil {
+			// A fresher observation arrived while this one was being
+			// processed. Evaluate it immediately instead of sleeping on the
+			// stale retry.
+			worker.retryDelay = 0
+			worker.mu.Unlock()
+			continue
+		}
+		retrySnapshot := *pending
+		worker.pending = &retrySnapshot
+		if worker.retryDelay <= 0 {
+			worker.retryDelay = usageAlertRetryMinDelay
+		} else {
+			worker.retryDelay = min(worker.retryDelay*2, usageAlertRetryMaxDelay)
+		}
+		delay := worker.retryDelay
+		worker.mu.Unlock()
+
+		timer := time.NewTimer(delay)
+		<-timer.C
+	}
 }
 
 func (s *UsageAlertService) resolveUsageAlertScope(ctx context.Context, accountID int64) (int64, string) {
@@ -484,70 +571,132 @@ func (s *UsageAlertService) resolveUsageAlertScope(ctx context.Context, accountI
 	return realAccount.ID, usageType
 }
 
-func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) {
+func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) bool {
 	evaluationLock := s.evaluationLock(snapshot.RealAccountID, snapshot.UsageType)
 	evaluationLock.Lock()
 	defer evaluationLock.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	previous, err := s.repo.GetSnapshot(ctx, snapshot.RealAccountID, snapshot.UsageType)
 	if err != nil {
 		slog.Warn("usage_alert_get_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
+		return true
 	}
 	evaluationSnapshot, persistedSnapshot, hasFreshWindows := prepareUsageAlertSnapshot(previous, snapshot)
 	if !hasFreshWindows {
-		return
+		return false
 	}
 	accepted, err := s.repo.UpsertSnapshot(ctx, &persistedSnapshot)
 	if err != nil {
 		slog.Warn("usage_alert_upsert_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
-		return
+		return true
 	}
 	if !accepted {
-		return
+		return false
 	}
 
 	rules, err := s.repo.ListEnabledRules(ctx, snapshot.RealAccountID, snapshot.UsageType)
 	if err != nil {
 		slog.Warn("usage_alert_list_rules_failed", "real_account_id", snapshot.RealAccountID, "error", err)
-		return
+		return true
 	}
 	if len(rules) == 0 {
-		return
+		return false
 	}
 
-	triggers := s.evaluateRules(ctx, previous, &evaluationSnapshot, rules)
+	triggers, err := s.evaluateRules(ctx, previous, &evaluationSnapshot, rules)
+	if err != nil {
+		slog.Warn("usage_alert_evaluate_rules_failed", "real_account_id", snapshot.RealAccountID, "error", err)
+		return true
+	}
 	if len(triggers) == 0 {
-		return
+		return false
 	}
 	webhooks, err := s.repo.ListEnabledWebhooksForRealAccount(ctx, snapshot.RealAccountID)
 	if err != nil {
 		slog.Warn("usage_alert_list_webhooks_failed", "real_account_id", snapshot.RealAccountID, "error", err)
-		return
+		return true
 	}
 	if len(webhooks) == 0 {
 		slog.Info("usage_alert_trigger_without_webhook", "real_account_id", snapshot.RealAccountID, "trigger_count", len(triggers))
 		for _, trigger := range triggers {
-			s.commitUsageAlertTrigger(trigger, snapshot.RealAccountID)
+			if err := s.commitUsageAlertTrigger(trigger, snapshot.RealAccountID); err != nil {
+				slog.Warn("usage_alert_commit_state_failed", "real_account_id", snapshot.RealAccountID, "rule_id", trigger.Rule.ID, "error", err)
+				return true
+			}
 		}
-		return
+		return false
 	}
 	realAccount, _ := s.repo.GetRealAccount(ctx, snapshot.RealAccountID)
 	for _, trigger := range triggers {
 		event := buildUsageAlertWebhookEvent(&evaluationSnapshot, realAccount, trigger)
-		delivered := true
-		for _, webhook := range webhooks {
-			if err := s.deliverWebhookWithRetry(context.Background(), *webhook, event); err != nil {
-				delivered = false
-				slog.Warn("usage_alert_webhook_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "attempts", webhook.RetryCount+1, "error", err)
-			}
+		if !s.deliverUsageAlertEvent(ctx, snapshot.RealAccountID, trigger.Rule.ID, webhooks, event) {
+			return true
 		}
-		if delivered {
-			s.commitUsageAlertTrigger(trigger, snapshot.RealAccountID)
+		if err := s.commitUsageAlertTrigger(trigger, snapshot.RealAccountID); err != nil {
+			slog.Warn("usage_alert_commit_state_failed", "real_account_id", snapshot.RealAccountID, "rule_id", trigger.Rule.ID, "event_id", event.EventID, "error", err)
+			return true
 		}
 	}
+	return false
+}
+
+func (s *UsageAlertService) deliverUsageAlertEvent(ctx context.Context, realAccountID, ruleID int64, webhooks []*UsageAlertWebhook, event UsageAlertWebhookEvent) bool {
+	for _, webhook := range webhooks {
+		if webhook == nil {
+			continue
+		}
+		claimToken, err := newUsageAlertClaimToken()
+		if err != nil {
+			slog.Warn("usage_alert_claim_token_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "error", err)
+			return false
+		}
+		claimCtx, cancelClaim := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		claim, err := s.repo.ClaimWebhookDelivery(claimCtx, event.EventID, realAccountID, ruleID, webhook.ID, claimToken, time.Now().UTC().Add(-usageAlertDeliveryLease))
+		cancelClaim()
+		if err != nil {
+			slog.Warn("usage_alert_webhook_claim_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "error", err)
+			return false
+		}
+		switch claim {
+		case UsageAlertDeliveryAlreadyDelivered:
+			continue
+		case UsageAlertDeliveryBusy:
+			// Stop before claiming later endpoints. This ensures one instance
+			// owns the remaining delivery sequence instead of splitting it
+			// across instances and leaving neither able to commit state.
+			return false
+		}
+
+		if err := s.deliverWebhookWithRetry(context.Background(), *webhook, event); err != nil {
+			releaseCtx, cancelRelease := context.WithTimeout(context.Background(), 5*time.Second)
+			releaseErr := s.repo.ReleaseWebhookDelivery(releaseCtx, event.EventID, webhook.ID, claimToken)
+			cancelRelease()
+			if releaseErr != nil {
+				slog.Warn("usage_alert_webhook_release_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "error", releaseErr)
+			}
+			slog.Warn("usage_alert_webhook_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "attempts", webhook.RetryCount+1, "error", err)
+			return false
+		}
+		completeCtx, cancelComplete := context.WithTimeout(context.Background(), 5*time.Second)
+		err = s.repo.CompleteWebhookDelivery(completeCtx, event.EventID, webhook.ID, claimToken)
+		cancelComplete()
+		if err != nil {
+			slog.Warn("usage_alert_webhook_complete_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "error", err)
+			return false
+		}
+	}
+	return true
+}
+
+func newUsageAlertClaimToken() (string, error) {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", token[:]), nil
 }
 
 func (s *UsageAlertService) evaluationLock(realAccountID int64, usageType string) *sync.Mutex {
@@ -603,7 +752,7 @@ func usageAlertWindowGenerationIsOlder(previous, current UsageAlertWindowSnapsho
 	return current.ResetAt.Before(*previous.ResetAt)
 }
 
-func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current *UsageAlertSnapshot, rules []*UsageAlertRule) []UsageAlertTrigger {
+func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current *UsageAlertSnapshot, rules []*UsageAlertRule) ([]UsageAlertTrigger, error) {
 	now := time.Now().UTC()
 	triggers := make([]UsageAlertTrigger, 0)
 	for _, rule := range rules {
@@ -614,32 +763,45 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 		if !ok {
 			continue
 		}
-		state, _ := s.repo.GetState(ctx, current.RealAccountID, rule.ID, current.UsageType, rule.Window)
+		state, err := s.repo.GetState(ctx, current.RealAccountID, rule.ID, current.UsageType, rule.Window)
+		if err != nil {
+			return nil, fmt.Errorf("get state for rule %d: %w", rule.ID, err)
+		}
 		if state != nil && usageAlertWindowGenerationIsOlder(
 			UsageAlertWindowSnapshot{ResetAt: state.LastResetAt},
 			window,
 		) {
 			continue
 		}
+		stateAnchor := usageAlertStateAnchor(state)
 		value := metricValue(window, rule.Metric)
 		if !resetConstraintSatisfied(window, rule.MinResetAfterHours, now) {
 			if usageAlertStateWasTriggered(state) {
-				triggers = append(triggers, usageAlertResolvedTrigger(rule, window, value, now))
+				triggers = append(triggers, usageAlertResolvedTrigger(rule, window, value, now, stateAnchor))
 				continue
 			}
-			s.updateRuleState(ctx, current.RealAccountID, rule, window, false, value)
+			if err := s.updateRuleState(ctx, current.RealAccountID, rule, window, false, value); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		matched := compareUsageAlertValue(value, rule.Operator, rule.Threshold)
 		if !matched {
 			if usageAlertStateWasTriggered(state) {
-				triggers = append(triggers, usageAlertResolvedTrigger(rule, window, value, now))
+				triggers = append(triggers, usageAlertResolvedTrigger(rule, window, value, now, stateAnchor))
 				continue
 			}
-			s.updateRuleState(ctx, current.RealAccountID, rule, window, false, value)
+			if err := s.updateRuleState(ctx, current.RealAccountID, rule, window, false, value); err != nil {
+				return nil, err
+			}
 			continue
 		}
-		if !usageAlertRuleAllowsTrigger(previous, current, rule, state, value, now) {
+		stateForTrigger := state
+		if state != nil && usageAlertWindowGenerationIsNewer(state.LastResetAt, window.ResetAt) {
+			stateForTrigger = nil
+			stateAnchor = "new-generation"
+		}
+		if !usageAlertRuleAllowsTrigger(previous, current, rule, stateForTrigger, value, now) {
 			continue
 		}
 		triggers = append(triggers, UsageAlertTrigger{
@@ -648,32 +810,42 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 			Value:       value,
 			WindowState: window,
 			TriggeredAt: now,
+			StateAnchor: stateAnchor,
 		})
 	}
-	return triggers
+	return triggers, nil
 }
 
-func (s *UsageAlertService) commitUsageAlertTrigger(trigger UsageAlertTrigger, realAccountID int64) {
+func (s *UsageAlertService) commitUsageAlertTrigger(trigger UsageAlertTrigger, realAccountID int64) error {
 	if trigger.Rule == nil || realAccountID <= 0 {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s.updateRuleState(ctx, realAccountID, trigger.Rule, trigger.WindowState, !trigger.Resolved, trigger.Value)
+	return s.updateRuleState(ctx, realAccountID, trigger.Rule, trigger.WindowState, !trigger.Resolved, trigger.Value)
 }
 
 func usageAlertRuleAllowsTrigger(previous, current *UsageAlertSnapshot, rule *UsageAlertRule, state *UsageAlertState, value float64, now time.Time) bool {
 	if usageAlertRuleStepPercent(rule) > 0 {
 		return usageAlertStepAllowsTrigger(state, rule, value, now)
 	}
-	return crossedThreshold(previous, current, rule, value) || stateAllowsRepeat(state, rule, now)
+	if state == nil {
+		return true
+	}
+	if crossedThreshold(previous, current, rule, value) {
+		return true
+	}
+	if rule.CooldownMinutes <= 0 {
+		return false
+	}
+	return stateAllowsRepeat(state, rule, now)
 }
 
 func usageAlertStateWasTriggered(state *UsageAlertState) bool {
 	return state != nil && state.LastStatus == UsageAlertStatusTriggered
 }
 
-func usageAlertResolvedTrigger(rule *UsageAlertRule, window UsageAlertWindowSnapshot, value float64, now time.Time) UsageAlertTrigger {
+func usageAlertResolvedTrigger(rule *UsageAlertRule, window UsageAlertWindowSnapshot, value float64, now time.Time, stateAnchor string) UsageAlertTrigger {
 	return UsageAlertTrigger{
 		Rule:        rule,
 		Window:      rule.Window,
@@ -681,7 +853,31 @@ func usageAlertResolvedTrigger(rule *UsageAlertRule, window UsageAlertWindowSnap
 		WindowState: window,
 		TriggeredAt: now,
 		Resolved:    true,
+		StateAnchor: stateAnchor,
 	}
+}
+
+func usageAlertWindowGenerationIsNewer(previous, current *time.Time) bool {
+	return previous != nil && current != nil && current.After(*previous)
+}
+
+func usageAlertStateAnchor(state *UsageAlertState) string {
+	if state == nil {
+		return "none"
+	}
+	triggeredAt := int64(0)
+	if state.LastTriggeredAt != nil {
+		triggeredAt = state.LastTriggeredAt.UTC().UnixNano()
+	}
+	lastValue := "nil"
+	if state.LastValue != nil {
+		lastValue = strconv.FormatFloat(*state.LastValue, 'g', -1, 64)
+	}
+	resetAt := int64(0)
+	if state.LastResetAt != nil {
+		resetAt = state.LastResetAt.UTC().UnixNano()
+	}
+	return fmt.Sprintf("%s:%d:%s:%d", state.LastStatus, triggeredAt, lastValue, resetAt)
 }
 
 func (s *UsageAlertService) populateUsageAlertRuleScope(ctx context.Context, rule *UsageAlertRule) error {
@@ -704,7 +900,7 @@ func (s *UsageAlertService) populateUsageAlertRuleScope(ctx context.Context, rul
 	return nil
 }
 
-func (s *UsageAlertService) updateRuleState(ctx context.Context, realAccountID int64, rule *UsageAlertRule, window UsageAlertWindowSnapshot, triggered bool, value float64) {
+func (s *UsageAlertService) updateRuleState(ctx context.Context, realAccountID int64, rule *UsageAlertRule, window UsageAlertWindowSnapshot, triggered bool, value float64) error {
 	status := UsageAlertStatusNormal
 	var triggeredAt *time.Time
 	if triggered {
@@ -729,9 +925,7 @@ func (s *UsageAlertService) updateRuleState(ctx context.Context, realAccountID i
 		LastValue:       &value,
 		LastResetAt:     window.ResetAt,
 	}
-	if err := s.repo.UpsertState(ctx, state); err != nil {
-		slog.Warn("usage_alert_upsert_state_failed", "real_account_id", realAccountID, "usage_type", rule.UsageType, "rule_id", rule.ID, "error", err)
-	}
+	return s.repo.UpsertState(ctx, state)
 }
 
 func (s *UsageAlertService) deliverWebhookWithRetry(ctx context.Context, webhook UsageAlertWebhook, event UsageAlertWebhookEvent) error {
@@ -1437,9 +1631,24 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 	if trigger.Resolved {
 		eventName = UsageAlertEventResolved
 	}
+	eventIdentity := fmt.Sprintf(
+		"%d|%s|%d|%s|%s|%s|%s|%.12g|%s|%s|%d",
+		snapshot.RealAccountID,
+		snapshot.UsageType,
+		trigger.Rule.ID,
+		trigger.Window,
+		eventName,
+		trigger.Rule.Metric,
+		trigger.Rule.Operator,
+		trigger.Rule.Threshold,
+		usageAlertOptionalFloatIdentity(trigger.Rule.StepPercent),
+		trigger.StateAnchor,
+		usageAlertResetUnixNano(trigger.WindowState.ResetAt),
+	)
+	eventHash := sha256.Sum256([]byte(eventIdentity))
 	return UsageAlertWebhookEvent{
 		Event:            eventName,
-		EventID:          fmt.Sprintf("%d-%s-%d-%s-%d", snapshot.RealAccountID, snapshot.UsageType, trigger.Rule.ID, trigger.Window, trigger.TriggeredAt.UnixNano()),
+		EventID:          fmt.Sprintf("ua-%x", eventHash[:]),
 		TriggeredAt:      trigger.TriggeredAt,
 		AccountID:        snapshot.AccountID,
 		RealAccountID:    snapshot.RealAccountID,
@@ -1462,6 +1671,20 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 		ResetAt:          trigger.WindowState.ResetAt,
 		StepPercent:      trigger.Rule.StepPercent,
 	}
+}
+
+func usageAlertOptionalFloatIdentity(value *float64) string {
+	if value == nil {
+		return "nil"
+	}
+	return strconv.FormatFloat(*value, 'g', -1, 64)
+}
+
+func usageAlertResetUnixNano(resetAt *time.Time) int64 {
+	if resetAt == nil {
+		return 0
+	}
+	return resetAt.UTC().UnixNano()
 }
 
 func usageAlertSnapshotsFromUsageInfo(accountID int64, platform, source string, usage *UsageInfo, sampledAt time.Time) []*UsageAlertSnapshot {
