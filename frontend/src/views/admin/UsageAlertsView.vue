@@ -173,7 +173,7 @@
               </label>
               <label class="block">
                 <span class="input-label">{{ text.metric }}</span>
-                <select v-model="ruleForm.metric" class="input">
+                <select v-model="ruleForm.metric" class="input" @change="syncRuleOperatorToMetric">
                   <option value="used_percent">{{ text.usedPercent }}</option>
                   <option value="remaining_percent">{{ text.remainingPercent }}</option>
                 </select>
@@ -189,6 +189,13 @@
                 <span class="input-label">{{ text.threshold }}</span>
                 <input v-model.number="ruleForm.threshold" class="input" type="number" min="0" max="100" step="0.1" />
               </label>
+              <p
+                v-if="ruleConditionWarning"
+                class="border-l-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300 md:col-span-2"
+                role="alert"
+              >
+                {{ ruleConditionWarning }}
+              </p>
               <label class="block">
                 <span class="input-label">{{ text.minResetAfter }}</span>
                 <input v-model="ruleForm.minResetAfterHours" class="input" type="number" min="0" step="0.1" />
@@ -368,6 +375,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import accountsAPI from '@/api/admin/accounts'
+import { defaultUsageAlertOperator, isStandardUsageAlertCondition } from '@/utils/usageAlertRule'
 import usageAlertAPI, {
   type RealAccount,
   type UsageAlertBinding,
@@ -436,6 +444,8 @@ const zhText = {
   resolveNotificationHint: '规则恢复正常时会发送“用量告警已重置”通知。',
   usedPercent: '已用百分比',
   remainingPercent: '剩余百分比',
+  reverseUsedWarning: '当前条件会在已用百分比降至阈值或更低时触发。',
+  reverseRemainingWarning: '当前条件会在剩余百分比升至阈值或更高时触发。',
   retry: '重试',
   channelType: '类型',
   telegramBotToken: 'Bot Token',
@@ -501,6 +511,8 @@ const enText: typeof zhText = {
   resolveNotificationHint: 'A reset notification is sent when a rule returns to normal.',
   usedPercent: 'Used percent',
   remainingPercent: 'Remaining percent',
+  reverseUsedWarning: 'This condition triggers when used percentage falls to or below the threshold.',
+  reverseRemainingWarning: 'This condition triggers when remaining percentage rises to or above the threshold.',
   retry: 'Retry',
   channelType: 'Type',
   telegramBotToken: 'Bot Token',
@@ -618,8 +630,18 @@ const attachableAccounts = computed(() => {
   })
 })
 const canAttach = computed(() => attachRealAccountID.value > 0 && attachAccountIDs.value.length > 0)
+const ruleConditionWarning = computed(() => {
+  if (isStandardUsageAlertCondition(ruleForm.metric, ruleForm.operator)) return ''
+  return ruleForm.metric === 'used_percent'
+    ? text.value.reverseUsedWarning
+    : text.value.reverseRemainingWarning
+})
 
 onMounted(loadAll)
+
+function syncRuleOperatorToMetric() {
+  ruleForm.operator = defaultUsageAlertOperator(ruleForm.metric)
+}
 
 async function loadAll() {
   loading.value = true
