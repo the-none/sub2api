@@ -156,8 +156,10 @@ func TestForwardAsRawChatCompletions_InjectedPriorityPropagatesToBillingResult(t
 		httpUpstream:   upstream,
 		settingService: NewSettingService(repo, &config.Config{}),
 	}
+	account := rawChatCompletionsTestAccount()
+	account.Credentials["base_url"] = "https://api.openai.com"
 
-	result, err := svc.forwardAsRawChatCompletions(context.Background(), c, rawChatCompletionsTestAccount(), body, "")
+	result, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.ServiceTier)
