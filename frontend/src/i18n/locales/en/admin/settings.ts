@@ -1042,7 +1042,7 @@ export default {
       },
       openaiFastPolicy: {
         title: 'OpenAI Fast/Flex Policy',
-        description: 'Intercept, filter, or pass OpenAI fast(priority) / flex requests based on the request body service_tier field. Applies to the OpenAI gateway only.',
+        description: 'Intercept, filter, rewrite, or pass OpenAI fast(priority) / flex requests based on the request body service_tier field. Applies to the OpenAI gateway only.',
         empty: 'No rules configured. Click the button below to add one.',
         ruleHeader: 'Rule #{index}',
         removeRule: 'Remove rule',
@@ -1057,6 +1057,8 @@ export default {
         actionFilter: 'Filter (remove service_tier)',
         actionForcePriority: 'Force priority (fast)',
         actionBlock: 'Block (reject request)',
+        injectPriorityIfMissing: 'Inject priority when missing',
+        injectPriorityIfMissingHint: 'When enabled, OpenAI requests without service_tier receive priority (fast). When disabled, only an existing tier is rewritten.',
         scope: 'Scope',
         scopeAll: 'All accounts',
         scopeOAuth: 'OAuth only',

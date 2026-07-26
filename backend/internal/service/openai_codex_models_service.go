@@ -258,7 +258,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		}
 	case credAccount.IsOpenAIApiKey():
 		baseURL := strings.TrimSpace(credAccount.GetCredential("base_url"))
-		if baseURL == "" || isOfficialOpenAIModelsBaseURL(baseURL) {
+		if baseURL == "" || isOfficialOpenAIBaseURL(baseURL) {
 			return nil, infraerrors.New(
 				http.StatusBadGateway,
 				"OPENAI_CODEX_MODELS_API_KEY_UPSTREAM_UNSUPPORTED",
@@ -639,7 +639,7 @@ func codexModelsManifestETagMatches(ifNoneMatch, etag string) bool {
 	return false
 }
 
-func isOfficialOpenAIModelsBaseURL(raw string) bool {
+func isOfficialOpenAIBaseURL(raw string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return false

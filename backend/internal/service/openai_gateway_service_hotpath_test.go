@@ -24,7 +24,20 @@ func TestOpenAIRequestView_ExtractsRawScalars(t *testing.T) {
 	require.Equal(t, "ses-1", view.PromptCacheKey)
 	require.Equal(t, "resp-1", view.PreviousResponseID)
 	require.Equal(t, "fast", view.ServiceTier)
+	require.True(t, view.ServiceTierPresent)
 	require.Equal(t, "medium", view.ReasoningEffort)
+}
+
+func TestOpenAIRequestView_TracksServiceTierPresenceSeparatelyFromValue(t *testing.T) {
+	require.False(t, newOpenAIRequestView([]byte(`{"model":"gpt-5"}`)).ServiceTierPresent)
+
+	for _, body := range [][]byte{
+		[]byte(`{"service_tier":null}`),
+		[]byte(`{"service_tier":""}`),
+		[]byte(`{"service_tier":"unknown"}`),
+	} {
+		require.True(t, newOpenAIRequestView(body).ServiceTierPresent)
+	}
 }
 
 func TestOpenAIRequestView_ExtractsFieldsAfterLargeInput(t *testing.T) {

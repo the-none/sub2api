@@ -962,6 +962,62 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
   });
 
+  it("resets missing-tier injection when the rule no longer supports it", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_fast_policy_settings: {
+        rules: [
+          {
+            service_tier: "all",
+            action: "force_priority",
+            scope: "all",
+            inject_priority_if_missing: true,
+          },
+        ],
+      },
+    });
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const card = wrapper
+      .findAll(".card")
+      .find((node) =>
+        node.text().includes("admin.settings.openaiFastPolicy.title"),
+      );
+    expect(card).toBeDefined();
+
+    const selects = card!.findAll("select");
+    expect(selects).toHaveLength(3);
+    expect((card!.get(".toggle-stub").element as HTMLInputElement).checked).toBe(
+      true,
+    );
+
+    await selects[1]!.setValue("filter");
+    expect(card!.find(".toggle-stub").exists()).toBe(false);
+
+    await selects[1]!.setValue("force_priority");
+    const resetToggle = card!.get(".toggle-stub");
+    expect((resetToggle.element as HTMLInputElement).checked).toBe(false);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openai_fast_policy_settings: {
+          rules: [
+            expect.objectContaining({
+              service_tier: "all",
+              action: "force_priority",
+              inject_priority_if_missing: false,
+            }),
+          ],
+        },
+      }),
+    );
+  });
+
   it("loads and saves upstream billing probe settings from the gateway tab", async () => {
     getUpstreamBillingProbeSettings.mockResolvedValueOnce({
       enabled: false,

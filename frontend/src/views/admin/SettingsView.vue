@@ -1139,10 +1139,10 @@
                     <Select
                       :modelValue="rule.service_tier"
                       @update:modelValue="
-                        rule.service_tier = $event as
-                          | 'all'
-                          | 'priority'
-                          | 'flex'
+                        updateOpenAIFastPolicyTier(
+                          rule,
+                          $event as 'all' | 'priority' | 'flex',
+                        )
                       "
                       :options="openaiFastPolicyTierOptions"
                     />
@@ -1158,11 +1158,14 @@
                     <Select
                       :modelValue="rule.action"
                       @update:modelValue="
-                        rule.action = $event as
-                          | 'pass'
-                          | 'filter'
-                          | 'block'
-                          | 'force_priority'
+                        updateOpenAIFastPolicyAction(
+                          rule,
+                          $event as
+                            | 'pass'
+                            | 'filter'
+                            | 'block'
+                            | 'force_priority',
+                        )
                       "
                       :options="openaiFastPolicyActionOptions"
                     />
@@ -1187,6 +1190,39 @@
                       :options="openaiFastPolicyScopeOptions"
                     />
                   </div>
+                </div>
+
+                <div
+                  v-if="
+                    rule.service_tier === 'all' &&
+                    rule.action === 'force_priority'
+                  "
+                  class="mt-3 flex items-center justify-between gap-4 border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <div>
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiFastPolicy.injectPriorityIfMissing",
+                        )
+                      }}
+                    </label>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiFastPolicy.injectPriorityIfMissingHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <Toggle
+                    :model-value="Boolean(rule.inject_priority_if_missing)"
+                    @update:model-value="
+                      rule.inject_priority_if_missing = $event
+                    "
+                  />
                 </div>
 
                 <!-- User Scope -->
@@ -9762,6 +9798,8 @@ async function loadSettings() {
       openaiFastPolicyForm.rules =
         settings.openai_fast_policy_settings.rules.map((rule) => ({
           ...rule,
+          inject_priority_if_missing:
+            rule.inject_priority_if_missing ?? false,
           user_ids: rule.user_ids ? [...rule.user_ids] : [],
           model_whitelist: rule.model_whitelist
             ? [...rule.model_whitelist]
@@ -10290,6 +10328,10 @@ async function saveSettings() {
             service_tier: rule.service_tier,
             action: rule.action,
             scope: rule.scope,
+            inject_priority_if_missing:
+              rule.service_tier === "all" &&
+              rule.action === "force_priority" &&
+              Boolean(rule.inject_priority_if_missing),
             user_ids:
               rule.user_ids && rule.user_ids.length > 0
                 ? [...rule.user_ids]
@@ -10376,6 +10418,8 @@ async function saveSettings() {
       openaiFastPolicyForm.rules =
         updated.openai_fast_policy_settings.rules.map((rule) => ({
           ...rule,
+          inject_priority_if_missing:
+            rule.inject_priority_if_missing ?? false,
           user_ids: rule.user_ids ? [...rule.user_ids] : [],
           model_whitelist: rule.model_whitelist
             ? [...rule.model_whitelist]
@@ -10876,6 +10920,7 @@ function addOpenAIFastPolicyRule() {
     service_tier: "priority",
     action: "filter",
     scope: "all",
+    inject_priority_if_missing: false,
     user_ids: [],
     error_message: "",
     model_whitelist: [],
@@ -10886,6 +10931,33 @@ function addOpenAIFastPolicyRule() {
 
 function removeOpenAIFastPolicyRule(index: number) {
   openaiFastPolicyForm.rules.splice(index, 1);
+}
+
+function resetOpenAIFastPolicyInjectionUnlessValid(
+  rule: OpenAIFastPolicyRule,
+) {
+  if (
+    rule.service_tier !== "all" ||
+    rule.action !== "force_priority"
+  ) {
+    rule.inject_priority_if_missing = false;
+  }
+}
+
+function updateOpenAIFastPolicyTier(
+  rule: OpenAIFastPolicyRule,
+  tier: OpenAIFastPolicyRule["service_tier"],
+) {
+  rule.service_tier = tier;
+  resetOpenAIFastPolicyInjectionUnlessValid(rule);
+}
+
+function updateOpenAIFastPolicyAction(
+  rule: OpenAIFastPolicyRule,
+  action: OpenAIFastPolicyRule["action"],
+) {
+  rule.action = action;
+  resetOpenAIFastPolicyInjectionUnlessValid(rule);
 }
 
 function addOpenAIFastPolicyModelPattern(rule: OpenAIFastPolicyRule) {

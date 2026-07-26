@@ -11,6 +11,9 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // IsRegistrationEnabled 检查是否开放注册
@@ -802,8 +805,86 @@ func (s *SettingService) SetBetaPolicySettings(ctx context.Context, settings *Be
 	return s.settingRepo.Set(ctx, SettingKeyBetaPolicySettings, string(data))
 }
 
-// GetOpenAIFastPolicySettings 获取 OpenAI fast 策略配置
+type cachedOpenAIFastPolicySettings struct {
+	settings  *OpenAIFastPolicySettings
+	expiresAt int64
+}
+
+func cloneOpenAIFastPolicySettings(settings *OpenAIFastPolicySettings) *OpenAIFastPolicySettings {
+	if settings == nil {
+		return nil
+	}
+	cloned := &OpenAIFastPolicySettings{
+		Rules: make([]OpenAIFastPolicyRule, len(settings.Rules)),
+	}
+	copy(cloned.Rules, settings.Rules)
+	for i := range cloned.Rules {
+		cloned.Rules[i].UserIDs = append([]int64(nil), settings.Rules[i].UserIDs...)
+		cloned.Rules[i].ModelWhitelist = append([]string(nil), settings.Rules[i].ModelWhitelist...)
+	}
+	return cloned
+}
+
+const (
+	openAIFastPolicyCacheTTL  = 5 * time.Second
+	openAIFastPolicyDBTimeout = 5 * time.Second
+	openAIFastPolicyCacheKey  = "openai_fast_policy_settings"
+)
+
+// GetOpenAIFastPolicySettings 获取 OpenAI fast 策略配置。该配置在网关请求
+// 热路径使用，因此以短 TTL 缓存，并通过 singleflight 合并并发刷新。
 func (s *SettingService) GetOpenAIFastPolicySettings(ctx context.Context) (*OpenAIFastPolicySettings, error) {
+	if cached, ok := s.openAIFastPolicyCache.Load().(*cachedOpenAIFastPolicySettings); ok && cached != nil {
+		if time.Now().UnixNano() < cached.expiresAt {
+			return cloneOpenAIFastPolicySettings(cached.settings), nil
+		}
+	}
+
+	resultCh := s.openAIFastPolicySF.DoChan(openAIFastPolicyCacheKey, func() (any, error) {
+		if cached, ok := s.openAIFastPolicyCache.Load().(*cachedOpenAIFastPolicySettings); ok && cached != nil {
+			if time.Now().UnixNano() < cached.expiresAt {
+				return cached.settings, nil
+			}
+		}
+
+		generation := s.openAIFastPolicyGeneration.Load()
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIFastPolicyDBTimeout)
+		defer cancel()
+		settings, loadErr := s.loadOpenAIFastPolicySettings(dbCtx)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		s.openAIFastPolicyCacheMu.Lock()
+		defer s.openAIFastPolicyCacheMu.Unlock()
+		if s.openAIFastPolicyGeneration.Load() != generation {
+			if cached, ok := s.openAIFastPolicyCache.Load().(*cachedOpenAIFastPolicySettings); ok && cached != nil {
+				return cached.settings, nil
+			}
+			return nil, fmt.Errorf("get openai fast policy settings: cache generation changed without a cached value")
+		}
+		s.openAIFastPolicyCache.Store(&cachedOpenAIFastPolicySettings{
+			settings:  cloneOpenAIFastPolicySettings(settings),
+			expiresAt: time.Now().Add(openAIFastPolicyCacheTTL).UnixNano(),
+		})
+		return settings, nil
+	})
+	var result singleflight.Result
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result = <-resultCh:
+	}
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	settings, ok := result.Val.(*OpenAIFastPolicySettings)
+	if !ok || settings == nil {
+		return nil, fmt.Errorf("get openai fast policy settings: invalid cache value")
+	}
+	return cloneOpenAIFastPolicySettings(settings), nil
+}
+
+func (s *SettingService) loadOpenAIFastPolicySettings(ctx context.Context) (*OpenAIFastPolicySettings, error) {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyOpenAIFastPolicySettings)
 	if err != nil {
 		if errors.Is(err, ErrSettingNotFound) {
@@ -834,6 +915,7 @@ func (s *SettingService) SetOpenAIFastPolicySettings(ctx context.Context, settin
 	if settings == nil {
 		return fmt.Errorf("settings cannot be nil")
 	}
+	settings = cloneOpenAIFastPolicySettings(settings)
 
 	validActions := map[string]bool{
 		BetaPolicyActionPass: true, BetaPolicyActionFilter: true, BetaPolicyActionBlock: true,
@@ -860,6 +942,11 @@ func (s *SettingService) SetOpenAIFastPolicySettings(ctx context.Context, settin
 		}
 		if !validScopes[rule.Scope] {
 			return fmt.Errorf("rule[%d]: invalid scope %q", i, rule.Scope)
+		}
+		if rule.InjectPriorityIfMissing &&
+			(tier != OpenAIFastTierAny || rule.Action != OpenAIFastPolicyActionForcePriority) {
+			return fmt.Errorf("rule[%d]: inject_priority_if_missing requires service_tier=%q and action=%q",
+				i, OpenAIFastTierAny, OpenAIFastPolicyActionForcePriority)
 		}
 		seenUserIDs := make(map[int64]struct{}, len(rule.UserIDs))
 		for j, userID := range rule.UserIDs {
@@ -888,7 +975,23 @@ func (s *SettingService) SetOpenAIFastPolicySettings(ctx context.Context, settin
 		return fmt.Errorf("marshal openai fast policy settings: %w", err)
 	}
 
-	return s.settingRepo.Set(ctx, SettingKeyOpenAIFastPolicySettings, string(data))
+	// Serialize admin saves so repository and cache ordering stay consistent,
+	// while keeping the hot-path cache mutex out of the database write.
+	s.openAIFastPolicyWriteMu.Lock()
+	defer s.openAIFastPolicyWriteMu.Unlock()
+	if err := s.settingRepo.Set(ctx, SettingKeyOpenAIFastPolicySettings, string(data)); err != nil {
+		return err
+	}
+
+	s.openAIFastPolicyCacheMu.Lock()
+	s.openAIFastPolicyGeneration.Add(1)
+	s.openAIFastPolicyCache.Store(&cachedOpenAIFastPolicySettings{
+		settings:  cloneOpenAIFastPolicySettings(settings),
+		expiresAt: time.Now().Add(openAIFastPolicyCacheTTL).UnixNano(),
+	})
+	s.openAIFastPolicyCacheMu.Unlock()
+	s.openAIFastPolicySF.Forget(openAIFastPolicyCacheKey)
+	return nil
 }
 
 // SetStreamTimeoutSettings 设置流超时处理配置

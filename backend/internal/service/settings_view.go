@@ -592,14 +592,15 @@ const (
 
 // OpenAIFastPolicyRule 单条 OpenAI fast/flex 策略规则
 type OpenAIFastPolicyRule struct {
-	ServiceTier          string   `json:"service_tier"`                     // "priority" | "flex" | "auto" | "default" | "scale" | "all"
-	Action               string   `json:"action"`                           // "pass" | "filter" | "block" | "force_priority"
-	Scope                string   `json:"scope"`                            // "all" | "oauth" | "apikey" | "bedrock"
-	UserIDs              []int64  `json:"user_ids,omitempty"`               // 空=所有 Sub2API 用户；非空=仅指定 API Key 所属用户
-	ErrorMessage         string   `json:"error_message,omitempty"`          // 自定义错误消息 (action=block 时生效)
-	ModelWhitelist       []string `json:"model_whitelist,omitempty"`        // 模型匹配模式列表（为空=对所有模型生效）
-	FallbackAction       string   `json:"fallback_action,omitempty"`        // 未匹配白名单的模型的处理方式
-	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"` // 未匹配白名单时的自定义错误消息 (fallback_action=block 时生效)
+	ServiceTier             string   `json:"service_tier"`                         // "priority" | "flex" | "auto" | "default" | "scale" | "all"
+	Action                  string   `json:"action"`                               // "pass" | "filter" | "block" | "force_priority"
+	Scope                   string   `json:"scope"`                                // "all" | "oauth" | "apikey" | "bedrock"
+	InjectPriorityIfMissing bool     `json:"inject_priority_if_missing,omitempty"` // 仅 all + force_priority：缺少 service_tier 时注入 priority
+	UserIDs                 []int64  `json:"user_ids,omitempty"`                   // 空=所有 Sub2API 用户；非空=仅指定 API Key 所属用户
+	ErrorMessage            string   `json:"error_message,omitempty"`              // 自定义错误消息 (action=block 时生效)
+	ModelWhitelist          []string `json:"model_whitelist,omitempty"`            // 模型匹配模式列表（为空=对所有模型生效）
+	FallbackAction          string   `json:"fallback_action,omitempty"`            // 未匹配白名单的模型的处理方式
+	FallbackErrorMessage    string   `json:"fallback_error_message,omitempty"`     // 未匹配白名单时的自定义错误消息 (fallback_action=block 时生效)
 }
 
 // OpenAIFastPolicySettings OpenAI fast 策略配置

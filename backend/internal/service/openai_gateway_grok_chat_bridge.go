@@ -519,6 +519,7 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 	}
 	originalModel := chatReq.Model
 	clientStream := chatReq.Stream
+	serviceTierOriginallyPresent := gjson.GetBytes(body, "service_tier").Exists()
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 	cacheIdentity := resolveGrokCacheIdentity(c, body, promptCacheKey, upstreamModel)
@@ -570,7 +571,13 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 		return nil, fmt.Errorf("apply grok responses bridge function-tool cache route: %w", err)
 	}
 
-	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+	updatedBody, policyErr := s.applyOpenAIFastPolicyToNormalizedBody(
+		ctx,
+		account,
+		upstreamModel,
+		responsesBody,
+		serviceTierOriginallyPresent,
+	)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {
@@ -580,6 +587,7 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
+	serviceTier := extractOpenAIServiceTierFromBody(responsesBody)
 
 	token, _, err := s.getRequestCredential(ctx, c, account)
 	if err != nil {
@@ -648,6 +656,7 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 			result.RequestID = firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
 		}
 		result.ReasoningEffort = extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
+		result.ServiceTier = serviceTier
 	}
 	return result, err
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -358,6 +359,7 @@ type openAIRequestView struct {
 	PromptCacheKey     string
 	PreviousResponseID string
 	ServiceTier        string
+	ServiceTierPresent bool
 	ReasoningEffort    string
 	patches            []openAIRequestPatch
 	patchesDisabled    bool
@@ -413,6 +415,7 @@ func newOpenAIRequestView(body []byte) openAIRequestView {
 		case "service_tier":
 			if seen&serviceTierField == 0 {
 				view.ServiceTier = strings.TrimSpace(value.String())
+				view.ServiceTierPresent = true
 				seen |= serviceTierField
 			}
 		case "reasoning":
@@ -764,21 +767,39 @@ func (s *OpenAIGatewayService) evaluateOpenAIFastPolicy(ctx context.Context, acc
 	settings := openAIFastPolicySettingsFromContext(ctx)
 	if settings == nil {
 		fetched, err := s.settingService.GetOpenAIFastPolicySettings(ctx)
-		if err != nil || fetched == nil {
+		if err != nil {
+			slog.Warn("failed to load openai fast policy settings; allowing request", "error", err)
+			return BetaPolicyActionPass, ""
+		}
+		if fetched == nil {
 			return BetaPolicyActionPass, ""
 		}
 		settings = fetched
 	}
-	return evaluateOpenAIFastPolicyWithSettings(settings, openAIFastPolicyUserID(ctx), account, model, tier)
+	decision := evaluateOpenAIFastPolicyDecisionWithSettings(settings, openAIFastPolicyUserID(ctx), account, model, tier, true)
+	return decision.Action, decision.ErrorMessage
 }
 
-// evaluateOpenAIFastPolicyWithSettings is the pure-function core extracted so
+type openAIFastPolicyDecision struct {
+	Action                  string
+	ErrorMessage            string
+	InjectPriorityIfMissing bool
+}
+
+// evaluateOpenAIFastPolicyDecisionWithSettings is the pure-function core extracted so
 // long-lived sessions (e.g. WS) can prefetch settings once and avoid hitting
 // the settingService on every frame. See WSSession entry and
 // openAIFastPolicySettingsFromContext for the caching glue.
-func evaluateOpenAIFastPolicyWithSettings(settings *OpenAIFastPolicySettings, userID int64, account *Account, model, tier string) (action, errMsg string) {
+func evaluateOpenAIFastPolicyDecisionWithSettings(
+	settings *OpenAIFastPolicySettings,
+	userID int64,
+	account *Account,
+	model string,
+	tier string,
+	tierPresent bool,
+) openAIFastPolicyDecision {
 	if settings == nil {
-		return BetaPolicyActionPass, ""
+		return openAIFastPolicyDecision{Action: BetaPolicyActionPass}
 	}
 	isOAuth := account != nil && account.IsOAuth()
 	isBedrock := account != nil && account.IsBedrock()
@@ -794,7 +815,11 @@ func evaluateOpenAIFastPolicyWithSettings(settings *OpenAIFastPolicySettings, us
 				continue
 			}
 			ruleTier := strings.ToLower(strings.TrimSpace(rule.ServiceTier))
-			if ruleTier != "" && ruleTier != OpenAIFastTierAny && ruleTier != tier {
+			if tierPresent {
+				if ruleTier != "" && ruleTier != OpenAIFastTierAny && ruleTier != tier {
+					continue
+				}
+			} else if ruleTier != "" && ruleTier != OpenAIFastTierAny {
 				continue
 			}
 			eff := BetaPolicyRule{
@@ -804,10 +829,48 @@ func evaluateOpenAIFastPolicyWithSettings(settings *OpenAIFastPolicySettings, us
 				FallbackAction:       rule.FallbackAction,
 				FallbackErrorMessage: rule.FallbackErrorMessage,
 			}
-			return resolveRuleAction(eff, model)
+			action, errMsg := resolveRuleAction(eff, model)
+			return openAIFastPolicyDecision{
+				Action:                  action,
+				ErrorMessage:            errMsg,
+				InjectPriorityIfMissing: rule.InjectPriorityIfMissing && ruleTier == OpenAIFastTierAny,
+			}
 		}
 	}
-	return BetaPolicyActionPass, ""
+	return openAIFastPolicyDecision{Action: BetaPolicyActionPass}
+}
+
+func (s *OpenAIGatewayService) shouldInjectOpenAIFastPriority(
+	ctx context.Context,
+	account *Account,
+	model string,
+) bool {
+	if s == nil || s.settingService == nil || account == nil ||
+		account.Platform != PlatformOpenAI ||
+		!isOfficialOpenAIBaseURL(account.GetOpenAIBaseURL()) {
+		return false
+	}
+	settings := openAIFastPolicySettingsFromContext(ctx)
+	if settings == nil {
+		fetched, err := s.settingService.GetOpenAIFastPolicySettings(ctx)
+		if err != nil {
+			slog.Warn("failed to load openai fast policy settings; skipping priority injection", "error", err)
+			return false
+		}
+		if fetched == nil {
+			return false
+		}
+		settings = fetched
+	}
+	decision := evaluateOpenAIFastPolicyDecisionWithSettings(
+		settings,
+		openAIFastPolicyUserID(ctx),
+		account,
+		model,
+		"",
+		false,
+	)
+	return decision.InjectPriorityIfMissing && decision.Action == OpenAIFastPolicyActionForcePriority
 }
 
 func openAIFastPolicyUserID(ctx context.Context) int64 {
@@ -867,7 +930,9 @@ func openAIFastPolicySettingsFromContext(ctx context.Context) *OpenAIFastPolicyS
 // body. When action=filter it removes the service_tier field; when
 // action=block it returns (body, *OpenAIFastBlockedError). On pass it
 // normalizes the service_tier value (e.g. client alias "fast" → "priority").
-// action=force_priority rewrites any matched known tier to "priority".
+// action=force_priority rewrites any matched known tier to "priority". When an
+// all-tier force rule explicitly enables inject_priority_if_missing, a missing
+// field is added as "priority".
 //
 // Rationale for normalize-on-pass: chat-completions / messages 入口在调用本
 // 函数之前已经通过 normalizeResponsesBodyServiceTier 把 service_tier 归一化
@@ -875,10 +940,43 @@ func openAIFastPolicySettingsFromContext(ctx context.Context) *OpenAIFastPolicyS
 // 入口没有这一前置步骤，pass 路径下若不在此处归一化，"fast" 就会被原样
 // 透传到 OpenAI 上游导致 400/拒绝。把归一化收敛到本函数，所有入口行为一致。
 func (s *OpenAIGatewayService) applyOpenAIFastPolicyToBody(ctx context.Context, account *Account, model string, body []byte) ([]byte, error) {
+	return s.applyOpenAIFastPolicyToNormalizedBody(
+		ctx,
+		account,
+		model,
+		body,
+		gjson.GetBytes(body, "service_tier").Exists(),
+	)
+}
+
+// applyOpenAIFastPolicyToNormalizedBody preserves whether service_tier existed
+// before a protocol conversion or normalizer removed an invalid/null value.
+// Injection is allowed only when the client truly omitted the field.
+func (s *OpenAIGatewayService) applyOpenAIFastPolicyToNormalizedBody(
+	ctx context.Context,
+	account *Account,
+	model string,
+	body []byte,
+	serviceTierOriginallyPresent bool,
+) ([]byte, error) {
 	if len(body) == 0 {
 		return body, nil
 	}
-	rawTier := gjson.GetBytes(body, "service_tier").String()
+	tierResult := gjson.GetBytes(body, "service_tier")
+	if !tierResult.Exists() {
+		if serviceTierOriginallyPresent {
+			return body, nil
+		}
+		if !s.shouldInjectOpenAIFastPriority(ctx, account, model) {
+			return body, nil
+		}
+		updated, err := sjson.SetBytes(body, "service_tier", OpenAIFastTierPriority)
+		if err != nil {
+			return body, fmt.Errorf("inject service_tier priority into body: %w", err)
+		}
+		return updated, nil
+	}
+	rawTier := tierResult.String()
 	if rawTier == "" {
 		return body, nil
 	}
@@ -949,7 +1047,8 @@ func writeOpenAIFastPolicyBlockedResponse(c *gin.Context, err *OpenAIFastBlocked
 //
 //   - pass: keeps service_tier, normalizing aliases such as "fast" to "priority"
 //   - filter: returns a copy with top-level service_tier removed
-//   - force_priority: keeps service_tier and rewrites it to "priority"
+//   - force_priority: keeps service_tier and rewrites it to "priority"; an
+//     all-tier rule with inject_priority_if_missing also adds a missing field
 //   - block: returns (frame, *OpenAIFastBlockedError)
 //
 // Only frames whose "type" field strictly equals "response.create" are
@@ -989,7 +1088,18 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToWSResponseCreate(
 	if frameType != "response.create" {
 		return frame, nil, nil
 	}
-	rawTier := gjson.GetBytes(frame, "service_tier").String()
+	tierResult := gjson.GetBytes(frame, "service_tier")
+	if !tierResult.Exists() {
+		if !s.shouldInjectOpenAIFastPriority(ctx, account, model) {
+			return frame, nil, nil
+		}
+		updated, err := sjson.SetBytes(frame, "service_tier", OpenAIFastTierPriority)
+		if err != nil {
+			return frame, nil, fmt.Errorf("inject service_tier priority into ws frame: %w", err)
+		}
+		return updated, nil, nil
+	}
+	rawTier := tierResult.String()
 	if rawTier == "" {
 		return frame, nil, nil
 	}

@@ -287,4 +287,19 @@ func TestOpenAIFastPolicySettingsFromDTO_NormalizesServiceTier(t *testing.T) {
 		require.Equal(t, service.OpenAIFastTierFlex, out.Rules[1].ServiceTier)
 		require.Equal(t, service.OpenAIFastTierAny, out.Rules[2].ServiceTier)
 	})
+
+	t.Run("missing tier injection switch survives conversion", func(t *testing.T) {
+		in := &dto.OpenAIFastPolicySettings{
+			Rules: []dto.OpenAIFastPolicyRule{{
+				ServiceTier:             "all",
+				Action:                  service.OpenAIFastPolicyActionForcePriority,
+				Scope:                   service.BetaPolicyScopeAll,
+				InjectPriorityIfMissing: true,
+			}},
+		}
+
+		out := openaiFastPolicySettingsFromDTO(in)
+
+		require.True(t, out.Rules[0].InjectPriorityIfMissing)
+	})
 }

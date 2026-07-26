@@ -1036,7 +1036,7 @@ export default {
       },
       openaiFastPolicy: {
         title: 'OpenAI Fast/Flex 策略',
-        description: '基于请求体 service_tier 字段拦截/过滤/透传 OpenAI fast(priority) 与 flex 请求；仅作用于 OpenAI 网关。',
+        description: '基于请求体 service_tier 字段拦截、过滤、改写或透传 OpenAI fast(priority) 与 flex 请求；仅作用于 OpenAI 网关。',
         empty: '尚未配置任何规则。点击下方按钮新增。',
         ruleHeader: '规则 #{index}',
         removeRule: '删除规则',
@@ -1051,6 +1051,8 @@ export default {
         actionFilter: '过滤（移除 service_tier）',
         actionForcePriority: '强制设置 priority（fast）',
         actionBlock: '拦截（拒绝请求）',
+        injectPriorityIfMissing: '缺失时注入 priority',
+        injectPriorityIfMissingHint: '开启后，OpenAI 请求未携带 service_tier 时也会主动注入 priority（fast）。关闭时只改写已有 tier。',
         scope: '生效范围',
         scopeAll: '全部账号',
         scopeOAuth: '仅 OAuth 账号',

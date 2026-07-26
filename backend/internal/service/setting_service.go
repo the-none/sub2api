@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -59,6 +60,11 @@ type SettingService struct {
 	openAICodexUASF             singleflight.Group
 	codexRestrictionPolicyCache atomic.Value // *cachedCodexRestrictionPolicy
 	codexRestrictionPolicySF    singleflight.Group
+	openAIFastPolicyCache       atomic.Value // *cachedOpenAIFastPolicySettings
+	openAIFastPolicySF          singleflight.Group
+	openAIFastPolicyCacheMu     sync.Mutex
+	openAIFastPolicyWriteMu     sync.Mutex
+	openAIFastPolicyGeneration  atomic.Uint64
 
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
 	cyberSessionBlockRuntimeSF    singleflight.Group

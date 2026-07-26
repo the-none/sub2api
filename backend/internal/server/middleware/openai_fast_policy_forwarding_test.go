@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	upstreamBodies := make(chan []byte, 2)
+	upstreamBodies := make(chan []byte, 4)
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -38,14 +39,26 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 		Rules: []service.OpenAIFastPolicyRule{
 			{
 				ServiceTier: service.OpenAIFastTierPriority,
+				Action:      service.BetaPolicyActionPass,
+				Scope:       service.BetaPolicyScopeAll,
+				UserIDs:     []int64{42},
+			},
+			{
+				ServiceTier:             service.OpenAIFastTierAny,
+				Action:                  service.OpenAIFastPolicyActionForcePriority,
+				Scope:                   service.BetaPolicyScopeAll,
+				InjectPriorityIfMissing: true,
+				UserIDs:                 []int64{42},
+			},
+			{
+				ServiceTier: service.OpenAIFastTierPriority,
 				Action:      service.BetaPolicyActionFilter,
 				Scope:       service.BetaPolicyScopeAll,
 			},
 			{
-				ServiceTier: service.OpenAIFastTierPriority,
-				Action:      service.BetaPolicyActionPass,
+				ServiceTier: service.OpenAIFastTierAny,
+				Action:      service.OpenAIFastPolicyActionForcePriority,
 				Scope:       service.BetaPolicyScopeAll,
-				UserIDs:     []int64{42},
 			},
 		},
 	}
@@ -59,9 +72,14 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 	settingService := service.NewSettingService(&openAIFastPolicyForwardingSettingRepo{
 		value: string(settingsJSON),
 	}, cfg)
+	upstreamTarget, err := url.Parse(upstreamServer.URL)
+	require.NoError(t, err)
 	gatewayService := service.NewOpenAIGatewayService(
 		nil, nil, nil, nil, nil, nil, nil, cfg,
-		nil, nil, nil, nil, nil, &openAIFastPolicyForwardingHTTPUpstream{client: upstreamServer.Client()},
+		nil, nil, nil, nil, nil, &openAIFastPolicyForwardingHTTPUpstream{
+			client: upstreamServer.Client(),
+			target: upstreamTarget,
+		},
 		nil, nil, nil, nil, nil, nil, settingService, nil,
 	)
 
@@ -88,7 +106,7 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"api_key":  "sk-test",
-			"base_url": upstreamServer.URL,
+			"base_url": "https://api.openai.com",
 		},
 		Extra: map[string]any{"use_responses_api": true},
 	}
@@ -109,11 +127,11 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 		c.Status(http.StatusOK)
 	})
 
-	send := func(apiKey string) {
+	send := func(apiKey, body string) {
 		request := httptest.NewRequest(
 			http.MethodPost,
 			"/v1/responses",
-			bytes.NewBufferString(`{"model":"gpt-5","stream":false,"service_tier":"priority","input":"hi"}`),
+			bytes.NewBufferString(body),
 		)
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("x-api-key", apiKey)
@@ -122,13 +140,23 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 		require.Equal(t, http.StatusOK, response.Code)
 	}
 
-	send("key-user-42")
-	send("key-user-43")
+	const explicitPriorityBody = `{"model":"gpt-5","stream":false,"service_tier":"priority","input":"hi"}`
+	const missingTierBody = `{"model":"gpt-5","stream":false,"input":"hi"}`
+	send("key-user-42", explicitPriorityBody)
+	send("key-user-43", explicitPriorityBody)
+	send("key-user-42", missingTierBody)
+	send("key-user-43", missingTierBody)
 
 	allowedUserBody := <-upstreamBodies
 	otherUserBody := <-upstreamBodies
+	injectedUserBody := <-upstreamBodies
+	untouchedUserBody := <-upstreamBodies
 	require.Equal(t, service.OpenAIFastTierPriority, gjson.GetBytes(allowedUserBody, "service_tier").String())
 	require.False(t, gjson.GetBytes(otherUserBody, "service_tier").Exists())
+	require.Equal(t, service.OpenAIFastTierPriority, gjson.GetBytes(injectedUserBody, "service_tier").String())
+	// User 43 reaches the global all+force rule, but its injection switch is
+	// disabled, so the missing field must remain absent at the HTTP boundary.
+	require.False(t, gjson.GetBytes(untouchedUserBody, "service_tier").Exists())
 }
 
 func newOpenAIFastPolicyForwardingAPIKey(id int64, key string, userID, groupID int64, group *service.Group) *service.APIKey {
@@ -178,10 +206,15 @@ func (r *openAIFastPolicyForwardingSettingRepo) GetValue(context.Context, string
 
 type openAIFastPolicyForwardingHTTPUpstream struct {
 	client *http.Client
+	target *url.URL
 }
 
 func (u *openAIFastPolicyForwardingHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	return u.client.Do(req)
+	forwarded := req.Clone(req.Context())
+	forwarded.URL.Scheme = u.target.Scheme
+	forwarded.URL.Host = u.target.Host
+	forwarded.Host = u.target.Host
+	return u.client.Do(forwarded)
 }
 
 func (u *openAIFastPolicyForwardingHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {

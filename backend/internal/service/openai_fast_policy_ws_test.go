@@ -168,21 +168,39 @@ func TestWSResponseCreate_NoServiceTierUntouched(t *testing.T) {
 	require.Equal(t, string(frame), string(updated), "no service_tier present must result in zero mutation")
 }
 
+func TestWSResponseCreate_MissingServiceTierInjectionIsExplicit(t *testing.T) {
+	settings := &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{{
+			ServiceTier:             OpenAIFastTierAny,
+			Action:                  OpenAIFastPolicyActionForcePriority,
+			Scope:                   BetaPolicyScopeAll,
+			InjectPriorityIfMissing: true,
+		}},
+	}
+	svc := newOpenAIGatewayServiceWithSettings(t, settings)
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	frame := []byte(`{"type":"response.create","model":"gpt-5.5","input":[]}`)
+
+	updated, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
+	require.NoError(t, err)
+	require.Nil(t, blocked)
+	require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(updated, "service_tier").String())
+}
+
 func TestWSResponseCreate_NonResponseCreateFrameUntouched(t *testing.T) {
 	settings := &OpenAIFastPolicySettings{
 		Rules: []OpenAIFastPolicyRule{{
-			ServiceTier:    OpenAIFastTierPriority,
-			Action:         BetaPolicyActionFilter,
-			Scope:          BetaPolicyScopeAll,
-			ModelWhitelist: []string{"*"},
-			FallbackAction: BetaPolicyActionFilter,
+			ServiceTier:             OpenAIFastTierAny,
+			Action:                  OpenAIFastPolicyActionForcePriority,
+			Scope:                   BetaPolicyScopeAll,
+			InjectPriorityIfMissing: true,
 		}},
 	}
 	svc := newOpenAIGatewayServiceWithSettings(t, settings)
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
-	// response.cancel happens to carry a service_tier-shaped field — must not be touched.
-	frame := []byte(`{"type":"response.cancel","service_tier":"priority"}`)
+	// A missing tier must not be injected into any non-response.create frame.
+	frame := []byte(`{"type":"response.cancel"}`)
 	updated, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
 	require.NoError(t, err)
 	require.Nil(t, blocked)

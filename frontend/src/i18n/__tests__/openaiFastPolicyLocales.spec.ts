@@ -12,7 +12,9 @@ describe('OpenAI Fast/Flex policy locale keys', () => {
       userSearchEmpty: '未找到匹配用户',
       userDeleted: '（已删除）',
       userIdFallback: '用户 #{id}',
-      removeUser: '移除用户'
+      removeUser: '移除用户',
+      injectPriorityIfMissing: '缺失时注入 priority',
+      injectPriorityIfMissingHint: '开启后，OpenAI 请求未携带 service_tier 时也会主动注入 priority（fast）。关闭时只改写已有 tier。'
     })
   })
 
@@ -24,7 +26,9 @@ describe('OpenAI Fast/Flex policy locale keys', () => {
       userSearchEmpty: 'No matching users found',
       userDeleted: '(deleted)',
       userIdFallback: 'User #{id}',
-      removeUser: 'Remove user'
+      removeUser: 'Remove user',
+      injectPriorityIfMissing: 'Inject priority when missing',
+      injectPriorityIfMissingHint: 'When enabled, OpenAI requests without service_tier receive priority (fast). When disabled, only an existing tier is rewritten.'
     })
   })
 })
