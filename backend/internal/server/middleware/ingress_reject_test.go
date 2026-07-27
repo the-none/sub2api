@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	ippkg "github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -27,6 +29,29 @@ func TestNormalizeIngressRejectIP(t *testing.T) {
 	require.Equal(t, "2001:db8:abcd:1234::", normalizeIngressRejectIP("2001:db8:abcd:1234:ffff::1"))
 	require.Equal(t, "192.0.2.4", normalizeIngressRejectIP("::ffff:192.0.2.4"))
 	require.Equal(t, "0.0.0.0", normalizeIngressRejectIP("not-an-ip"))
+}
+
+func TestInvalidAuthClientKeyIgnoresUntrustedForwardedHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	require.NoError(t, router.SetTrustedProxies(nil))
+	router.Use(func(c *gin.Context) {
+		ippkg.SetForwardedIPSettings(c, true, nil)
+		c.Next()
+	})
+	router.GET("/key", func(c *gin.Context) {
+		c.String(http.StatusOK, invalidAuthClientKey(c))
+	})
+
+	for _, xff := range []string{"10.0.0.7", "198.51.100.8"} {
+		request := httptest.NewRequest(http.MethodGet, "/key", nil)
+		request.RemoteAddr = "203.0.113.10:1234"
+		request.Header.Set("X-Forwarded-For", xff)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		require.Equal(t, "203.0.113.10", recorder.Body.String())
+	}
 }
 
 func TestLoggerRecordsIngressRejectOnce(t *testing.T) {

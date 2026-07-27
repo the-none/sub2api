@@ -78,6 +78,11 @@ func TestConfigureTrustedProxies(t *testing.T) {
 			want: "9.9.9.9",
 		},
 		{
+			name: "unconfigured proxy list ignores forwarded client",
+			cfg:  config.ServerConfig{},
+			want: "9.9.9.9",
+		},
+		{
 			name: "invalid proxy list fails closed",
 			cfg: config.ServerConfig{
 				TrustedProxies:           []string{"not-a-cidr"},

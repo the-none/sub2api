@@ -256,7 +256,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		RequestID:           requestID,
 		Model:               result.Model,
 		RequestedModel:      requestedModel,
-		UpstreamModel:       optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		UpstreamModel:       optionalTrimmedStringPtr(result.UpstreamModel),
 		ServiceTier:         result.ServiceTier,
 		ReasoningEffort:     result.ReasoningEffort,
 		InboundEndpoint:     optionalTrimmedStringPtr(input.InboundEndpoint),
@@ -866,12 +866,13 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshotFromHeadersForAccount(ctx
 // UpdateCodexUsageSnapshotFromResult distinguishes per-request HTTP headers
 // from connection-scoped WS handshake headers. Reused WS turns must use an
 // authoritative periodic quota query instead of repeatedly refreshing the
-// timestamp on a stale handshake snapshot.
+// timestamp on a stale handshake snapshot; the HTTP bridge explicitly marks
+// its per-turn response headers as fresh.
 func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotFromResult(ctx context.Context, accountID int64, result *OpenAIForwardResult) {
 	if s == nil || accountID <= 0 || result == nil {
 		return
 	}
-	if result.OpenAIWSMode {
+	if result.OpenAIWSMode && !result.CodexUsageResponseHeadersFresh {
 		if s.usageRefresher != nil {
 			s.usageRefresher.RefreshOpenAICodexUsageSnapshot(accountID, false)
 		}

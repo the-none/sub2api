@@ -103,7 +103,7 @@ func configureTrustedProxies(r *gin.Engine, cfg config.ServerConfig) {
 			log.Printf("Failed to disable trusted proxies: %v", err)
 		}
 		if cfg.Mode == "release" {
-			log.Printf("Warning: server.trusted_proxies is not configured; disabling the forwarded-IP compatibility switch will use direct peer addresses only")
+			log.Printf("Warning: server.trusted_proxies is not configured; security-sensitive IP rate limits use direct peer addresses only. Reverse-proxy deployments must configure the exact proxy CIDRs to avoid shared rate-limit buckets")
 		}
 	}
 }

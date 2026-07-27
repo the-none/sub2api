@@ -105,6 +105,7 @@ func TestMigrationChecksumCompatibilityRules_CoverEditedUpgradeCompatibilityMigr
 		"118_wechat_dual_mode_and_auth_source_defaults.sql",
 		"120_enforce_payment_orders_out_trade_no_unique_notx.sql",
 		"123_fix_legacy_auth_source_grant_on_signup_defaults.sql",
+		"154_usage_alert_real_accounts.sql",
 		"174_usage_alert_usage_type.sql",
 	} {
 		rule, ok := migrationChecksumCompatibilityRules[name]
@@ -112,6 +113,18 @@ func TestMigrationChecksumCompatibilityRules_CoverEditedUpgradeCompatibilityMigr
 		require.NotEmpty(t, rule.fileChecksum)
 		require.NotEmpty(t, rule.acceptedDBChecksum)
 	}
+}
+
+func TestMigration154ChecksumAcceptsInitialVersion(t *testing.T) {
+	content, err := os.ReadFile("../../migrations/154_usage_alert_real_accounts.sql")
+	require.NoError(t, err)
+	current := migrationChecksum(string(content))
+	require.Equal(t, "92bc5957d3cc776c913e05c692e907f7360acc76ca0ad91cc36f8fd4c13a8b72", current)
+	require.True(t, isMigrationChecksumCompatible(
+		"154_usage_alert_real_accounts.sql",
+		"72cf2e98e154e4d821e980a74dd54a2aac435791ff65e95245eaa2e36054e903",
+		current,
+	))
 }
 
 func TestMigration174ChecksumAcceptsPublishedBrokenOrdering(t *testing.T) {

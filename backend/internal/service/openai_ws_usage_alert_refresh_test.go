@@ -38,6 +38,36 @@ func TestOpenAIGatewayService_WSTurnSchedulesAuthoritativeUsageRefresh(t *testin
 	}
 }
 
+func TestOpenAIGatewayService_WSHTTPBridgeUsesFreshUsageHeaders(t *testing.T) {
+	updatesCh := make(chan map[string]any, 1)
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 1)}
+	svc := &OpenAIGatewayService{
+		accountRepo:    repo,
+		usageRefresher: refresher,
+	}
+	freshHeaders := make(http.Header)
+	freshHeaders.Set("x-codex-primary-used-percent", "23")
+
+	svc.UpdateCodexUsageSnapshotFromResult(context.Background(), 83, &OpenAIForwardResult{
+		OpenAIWSMode:                   true,
+		CodexUsageResponseHeadersFresh: true,
+		ResponseHeaders:                freshHeaders,
+	})
+
+	select {
+	case updates := <-updatesCh:
+		require.Equal(t, 23.0, updates["codex_primary_used_percent"])
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for fresh bridge quota headers to persist")
+	}
+	select {
+	case <-refresher.calls:
+		t.Fatal("fresh HTTP bridge headers must not schedule an authoritative refresh")
+	default:
+	}
+}
+
 func TestOpenAIGatewayService_SparkRequestSchedulesAuthoritativeUsageRefresh(t *testing.T) {
 	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 1)}
 	svc := &OpenAIGatewayService{usageRefresher: refresher}
@@ -45,7 +75,9 @@ func TestOpenAIGatewayService_SparkRequestSchedulesAuthoritativeUsageRefresh(t *
 	shadow := &Account{ID: 81, ParentAccountID: &parentID, QuotaDimension: QuotaDimensionSpark}
 
 	svc.UpdateCodexUsageSnapshotForAccount(context.Background(), shadow, &OpenAIForwardResult{
-		ResponseHeaders: http.Header{"x-codex-primary-used-percent": []string{"99"}},
+		OpenAIWSMode:                   true,
+		CodexUsageResponseHeadersFresh: true,
+		ResponseHeaders:                http.Header{"x-codex-primary-used-percent": []string{"99"}},
 	})
 
 	select {

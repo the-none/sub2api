@@ -244,6 +244,10 @@ type OpenAIForwardResult struct {
 	ReasoningEffort *string
 	Stream          bool
 	OpenAIWSMode    bool
+	// CodexUsageResponseHeadersFresh marks headers captured from the HTTP
+	// bridge response for this exact WS turn, rather than connection-scoped
+	// headers from a reused upstream WebSocket handshake.
+	CodexUsageResponseHeadersFresh bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string

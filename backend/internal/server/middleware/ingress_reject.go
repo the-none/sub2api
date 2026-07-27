@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	ippkg "github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -37,7 +39,7 @@ type IngressRejectRecorder interface {
 }
 
 func invalidAuthClientKey(c *gin.Context) string {
-	return normalizeIngressRejectIP(SecurityClientIP(c))
+	return normalizeIngressRejectIP(ippkg.GetTrustedClientIP(c))
 }
 
 func rejectInvalidAuthAbuse(c *gin.Context, apiKeyService interface {

@@ -38,6 +38,16 @@ func newStagedPassthroughConn() *stagedPassthroughConn {
 	}
 }
 
+func TestOpenAIWSTurnRequestID(t *testing.T) {
+	require.Equal(t, "resp_upstream", openAIWSTurnRequestID(" resp_upstream ", "client:connection", 2))
+	require.Equal(t, "client:connection:ws-turn:1", openAIWSTurnRequestID("", "client:connection", 1))
+	require.Equal(t, "client:connection:ws-turn:2", openAIWSTurnRequestID("", "client:connection", 2))
+	require.NotEqual(t,
+		openAIWSTurnRequestID("", "client:connection", 1),
+		openAIWSTurnRequestID("", "client:connection", 2),
+	)
+}
+
 func (c *stagedPassthroughConn) Send(payload string) {
 	c.frames <- stagedPassthroughFrame{messageType: coderws.MessageText, payload: []byte(payload)}
 }
