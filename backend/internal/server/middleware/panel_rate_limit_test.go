@@ -265,6 +265,18 @@ func TestPanelRateLimiterFailOpenOnRedisError(t *testing.T) {
 	}
 }
 
+func TestPanelRateLimiterPublicIPFailCloseOnRedisError(t *testing.T) {
+	p := &PanelRateLimiter{
+		limiter:        &fakePanelAllower{err: errors.New("redis down")},
+		settingService: newPanelRateLimitTestService(t, `{"enabled":true,"user_rpm":1,"heavy_rpm":1,"exempt_admin":true,"public_ip_rpm":1}`),
+	}
+	router := newPanelTestRouter(p.PublicIPFailClose(), nil)
+
+	rec := performPanelRequest(router, "203.0.113.9:1000")
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.Equal(t, "60", rec.Header().Get("Retry-After"))
+}
+
 func TestPanelRateLimiterPublicIP(t *testing.T) {
 	allower := &fakePanelAllower{}
 	p := &PanelRateLimiter{

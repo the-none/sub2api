@@ -609,7 +609,7 @@ func (s *BillingService) initFallbackPricing() {
 
 // getFallbackPricing 根据模型系列获取回退价格
 func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
-	modelLower := strings.ToLower(model)
+	modelLower := strings.ToLower(normalizeClaudeCodeLongContextModel(model))
 
 	// 按模型系列匹配
 	if strings.Contains(modelLower, "opus") {
@@ -716,7 +716,7 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// K2-0905 / K2-0711 官方未保留定价，不进入 fallback。
 	// K3 规则置于 K2 前：API Platform 仅官方 kimi-k3（及 / 路径后缀）；
 	// Code bare aliases 仅精确 k3 / k3-256k 或 /k3|/k3-256k 后缀，避免 kimi-k30 等未知型号误命中。
-	// 注意：kimi-k3[1m] 是 Claude Code 上下文选择语法，不是 Kimi API 模型 ID，不进入 fallback。
+	// Claude Code 的 [1m] 上下文选择后缀会先规范化，避免别名路径漏计费。
 	if strings.Contains(modelLower, "kimi-for-coding") {
 		return s.fallbackPrices["kimi-for-coding"]
 	}

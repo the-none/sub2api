@@ -77,6 +77,7 @@ type longContextBillingRepoStub struct {
 	accounts         []*Account
 	createdAccount   *Account
 	updateExtraCalls int
+	lastExtraUpdate  map[string]any
 	bulkUpdateCalls  int
 }
 
@@ -106,8 +107,9 @@ func (r *longContextBillingRepoStub) Update(_ context.Context, account *Account)
 	return nil
 }
 
-func (r *longContextBillingRepoStub) UpdateExtra(_ context.Context, _ int64, _ map[string]any) error {
+func (r *longContextBillingRepoStub) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
 	r.updateExtraCalls++
+	r.lastExtraUpdate = updates
 	return nil
 }
 
@@ -242,6 +244,57 @@ func TestAdminServiceUpdateAccountExtraAllowsProviderOwnedValueForNonOpenAIAccou
 
 	require.NoError(t, err)
 	require.Equal(t, 1, repo.updateExtraCalls)
+}
+
+func TestAdminAccountWritesProtectSyntheticUITestMarker(t *testing.T) {
+	t.Run("create strips marker", func(t *testing.T) {
+		repo := &longContextBillingRepoStub{}
+		svc := &adminServiceImpl{accountRepo: repo}
+
+		account, err := svc.CreateAccount(context.Background(), &CreateAccountInput{
+			Name:                 "production",
+			Platform:             PlatformAnthropic,
+			Type:                 AccountTypeOAuth,
+			Credentials:          map[string]any{"access_token": "token"},
+			Extra:                map[string]any{syntheticUITestExtraKey: true},
+			SkipDefaultGroupBind: true,
+		})
+
+		require.NoError(t, err)
+		require.NotContains(t, account.Extra, syntheticUITestExtraKey)
+	})
+
+	t.Run("partial extra update strips marker", func(t *testing.T) {
+		repo := &longContextBillingRepoStub{account: &Account{ID: 1, Platform: PlatformAnthropic}}
+		svc := &adminServiceImpl{accountRepo: repo}
+
+		err := svc.UpdateAccountExtra(context.Background(), 1, map[string]any{
+			syntheticUITestExtraKey: true,
+			"label":                 "kept",
+		})
+
+		require.NoError(t, err)
+		require.NotContains(t, repo.lastExtraUpdate, syntheticUITestExtraKey)
+		require.Equal(t, "kept", repo.lastExtraUpdate["label"])
+	})
+
+	t.Run("full update preserves system marker", func(t *testing.T) {
+		repo := &longContextBillingRepoStub{account: &Account{
+			ID:       1,
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeOAuth,
+			Extra:    map[string]any{syntheticUITestExtraKey: true},
+		}}
+		svc := &adminServiceImpl{accountRepo: repo}
+
+		account, err := svc.UpdateAccount(context.Background(), 1, &UpdateAccountInput{
+			Extra: map[string]any{syntheticUITestExtraKey: false, "label": "kept"},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, true, account.Extra[syntheticUITestExtraKey])
+		require.Equal(t, "kept", account.Extra["label"])
+	})
 }
 
 func TestAdminServiceBulkUpdateAccountsRejectsMalformedOpenAILongContextBillingValue(t *testing.T) {

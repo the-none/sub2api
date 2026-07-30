@@ -285,6 +285,9 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	if fields.Status {
 		updateOp = updateOp.SetStatus(userIn.Status)
 	}
+	if fields.TokenVersion {
+		updateOp = updateOp.SetTokenVersion(userIn.TokenVersion)
+	}
 	if fields.BalanceNotifySettings {
 		updateOp = updateOp.
 			SetBalanceNotifyEnabled(userIn.BalanceNotifyEnabled).
@@ -866,7 +869,9 @@ func (r *userRepository) AdjustBalance(ctx context.Context, id int64, delta floa
 	const updateSQL = `
 		UPDATE users
 		SET balance = balance + $1, updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND balance + $1 >= 0
+		WHERE id = $2
+		  AND deleted_at IS NULL
+		  AND ($1 >= 0 OR balance + $1 >= 0)
 		RETURNING balance - $1, balance
 	`
 	change, ok, err := scanBalanceChange(ctx, clientFromContext(ctx, r.client), updateSQL, delta, id)
@@ -896,11 +901,17 @@ func (r *userRepository) SetBalance(ctx context.Context, id int64, value float64
 		return service.BalanceChange{Old: current, New: value}, service.ErrBalanceNegative
 	}
 	const updateSQL = `
+		WITH locked AS MATERIALIZED (
+			SELECT id, balance
+			FROM users
+			WHERE id = $2 AND deleted_at IS NULL
+			FOR UPDATE
+		)
 		UPDATE users AS u
 		SET balance = $1, updated_at = NOW()
-		FROM (SELECT id, balance FROM users WHERE id = $2 AND deleted_at IS NULL) AS prev
-		WHERE u.id = prev.id AND u.deleted_at IS NULL
-		RETURNING prev.balance, u.balance
+		FROM locked
+		WHERE u.id = locked.id AND u.deleted_at IS NULL
+		RETURNING locked.balance, u.balance
 	`
 	change, ok, err := scanBalanceChange(ctx, clientFromContext(ctx, r.client), updateSQL, value, id)
 	if err != nil {
@@ -1346,6 +1357,7 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 	}
 	dst.ID = src.ID
 	dst.SignupSource = src.SignupSource
+	dst.TokenVersion = src.TokenVersion
 	dst.LastLoginAt = src.LastLoginAt
 	dst.LastActiveAt = src.LastActiveAt
 	dst.CreatedAt = src.CreatedAt

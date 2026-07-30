@@ -191,6 +191,30 @@ func TestMigration155CreatesUsageAlertAccountIndexConcurrently(t *testing.T) {
 	require.Contains(t, sql, "WHERE real_account_id IS NOT NULL")
 }
 
+func TestMigration192RepairsLegacyUsageAlertWebhookSchema(t *testing.T) {
+	content, err := FS.ReadFile("192_usage_alert_webhook_types.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS type VARCHAR(32)")
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS config JSONB")
+	require.Contains(t, sql, "SET type = 'json_post'")
+	require.Contains(t, sql, "ALTER COLUMN type SET NOT NULL")
+	require.Contains(t, sql, "ALTER COLUMN config SET NOT NULL")
+	require.Contains(t, sql, "ALTER COLUMN url DROP NOT NULL")
+	require.Contains(t, sql, "usage_alert_webhooks_type_check")
+	require.Contains(t, sql, "usage_alert_webhooks_json_post_url_check")
+	require.Contains(t, sql, "CREATE INDEX IF NOT EXISTS usage_alert_webhooks_type_idx")
+}
+
+func TestMigration193PersistsUserTokenVersion(t *testing.T) {
+	content, err := FS.ReadFile("193_user_token_version.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS token_version BIGINT NOT NULL DEFAULT 0")
+}
+
 func TestMigration174GeneralizesUsageAlertTypesCompatibly(t *testing.T) {
 	content, err := FS.ReadFile("174_usage_alert_usage_type.sql")
 	require.NoError(t, err)

@@ -107,6 +107,16 @@ func (p *PanelRateLimiter) userScoped(scope string, limitOf func(service.PanelRa
 // 内网/链路本地地址时跳过计数（这类地址通常是反代内部转发地址，按它计数
 // 会把整条反代链路的所有真实用户合并进同一个桶造成大面积误拦截）。
 func (p *PanelRateLimiter) PublicIP() gin.HandlerFunc {
+	return p.publicIP(false)
+}
+
+// PublicIPFailClose protects anonymous endpoints that must not become
+// unthrottled when the shared limiter is unavailable.
+func (p *PanelRateLimiter) PublicIPFailClose() gin.HandlerFunc {
+	return p.publicIP(true)
+}
+
+func (p *PanelRateLimiter) publicIP(failClose bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if p == nil || p.limiter == nil || p.settingService == nil {
 			c.Next()
@@ -125,7 +135,11 @@ func (p *PanelRateLimiter) PublicIP() gin.HandlerFunc {
 
 		result, err := p.limiter.Allow(c.Request.Context(), "panel:public:ip:"+clientIP, settings.PublicIPRPM, panelRateLimitWindow)
 		if err != nil {
-			slog.Warn("panel public rate limit check failed, allowing request", "error", err)
+			slog.Warn("panel public rate limit check failed", "fail_close", failClose, "error", err)
+			if failClose {
+				abortPanelRateLimited(c, panelRateLimitWindow)
+				return
+			}
 			c.Next()
 			return
 		}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -112,6 +113,29 @@ func TestMigrationChecksumCompatibilityRules_CoverEditedUpgradeCompatibilityMigr
 		require.Truef(t, ok, "missing compatibility rule for %s", name)
 		require.NotEmpty(t, rule.fileChecksum)
 		require.NotEmpty(t, rule.acceptedDBChecksum)
+	}
+}
+
+func TestMigrationChecksumCompatibilityRulesMatchCurrentFiles(t *testing.T) {
+	for name, rule := range migrationChecksumCompatibilityRules {
+		content, err := os.ReadFile(filepath.Join("../../migrations", name))
+		require.NoErrorf(t, err, "read migration %s", name)
+		require.Equalf(
+			t,
+			rule.fileChecksum,
+			migrationChecksum(string(content)),
+			"compatibility rule for %s must identify the current file checksum",
+			name,
+		)
+		for accepted := range rule.acceptedDBChecksum {
+			require.Truef(
+				t,
+				isMigrationChecksumCompatible(name, accepted, rule.fileChecksum),
+				"compatibility rule for %s must accept published checksum %s",
+				name,
+				accepted,
+			)
+		}
 	}
 }
 

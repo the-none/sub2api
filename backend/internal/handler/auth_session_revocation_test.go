@@ -3,7 +3,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,6 +39,10 @@ func TestAuthHandlerRevokeAllSessionsInvalidatesAccessTokens(t *testing.T) {
 	}
 	authService := service.NewAuthService(nil, repo, nil, refreshTokenCache, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
 	handler := &AuthHandler{authService: authService}
+	oldToken, err := authService.GenerateToken(context.Background(), repo.user)
+	require.NoError(t, err)
+	oldClaims, err := authService.ValidateToken(oldToken)
+	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -47,11 +53,10 @@ func TestAuthHandlerRevokeAllSessionsInvalidatesAccessTokens(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, []int64{29}, refreshTokenCache.revokedUserIDs)
-	// users 表没有 token_version 列（见 resolvedTokenVersion：JWT 里的值由
-	// email+password_hash 指纹推导），所以自增 TokenVersion 只停留在内存里。
-	// 此前紧跟其后的整行 Update 不写任何有效数据，却会用旧快照覆盖并发写入的列，
-	// 已移除。会话撤销由上面的 refresh session 清理承担。
-	require.Equal(t, int64(7), repo.user.TokenVersion)
+	require.Equal(t, int64(8), repo.user.TokenVersion)
+	loaded, err := service.NewUserService(repo, nil, nil, nil).GetByID(context.Background(), repo.user.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, oldClaims.TokenVersion, loaded.TokenVersion)
 
 	var resp struct {
 		Code int `json:"code"`
@@ -62,4 +67,29 @@ func TestAuthHandlerRevokeAllSessionsInvalidatesAccessTokens(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
 	require.Equal(t, 0, resp.Code)
 	require.Equal(t, "All sessions have been revoked. Please log in again.", resp.Data.Message)
+}
+
+func TestAuthHandlerRevokeAllSessionsReportsRefreshRevocationFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &userHandlerRepoStub{user: &service.User{
+		ID: 30, Email: "session-error@example.com", Role: service.RoleUser,
+		Status: service.StatusActive, TokenVersion: 2,
+	}}
+	refreshTokenCache := &userHandlerRefreshTokenCacheStub{deleteUserErr: errors.New("redis down")}
+	authService := service.NewAuthService(nil, repo, nil, refreshTokenCache, &config.Config{
+		JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1},
+	}, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := &AuthHandler{authService: authService}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/revoke-all-sessions", nil)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 30})
+
+	handler.RevokeAllSessions(c)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, int64(3), repo.user.TokenVersion, "access tokens remain revoked even if refresh cleanup fails")
+	require.Equal(t, []int64{30}, refreshTokenCache.revokedUserIDs)
 }

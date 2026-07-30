@@ -320,10 +320,20 @@ func (s *PasskeyService) FinishLogin(
 	if !ok || waUser.account == nil {
 		return nil, ErrPasskeyVerify
 	}
+	if err = validatePasskeyCredential(credential); err != nil {
+		return nil, err
+	}
 	if err = s.repo.UpdateCredential(ctx, waUser.account.ID, credential, time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	return waUser.account, nil
+}
+
+func validatePasskeyCredential(credential *webauthn.Credential) error {
+	if credential == nil || credential.Authenticator.CloneWarning {
+		return ErrPasskeyVerify
+	}
+	return nil
 }
 
 func (s *PasskeyService) List(ctx context.Context, userID int64) ([]PasskeyCredentialSummary, error) {

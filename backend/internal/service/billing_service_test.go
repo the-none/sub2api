@@ -746,9 +746,9 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		// kimi-k3 非 Contains：kimi-k30 / 内嵌 foo-kimi-k3-bar 不得误命中。
 		{name: "kimi-k30 unknown no fallback", model: "kimi-k30", expectNilPricing: true},
 		{name: "embedded kimi-k3 unknown no fallback", model: "foo-kimi-k3-bar", expectNilPricing: true},
-		// kimi-k3[1m] 是 Claude Code 上下文选择语法，不是 Kimi API 模型 ID，不命中 fallback。
-		{name: "kimi-k3[1m] not an API model id no fallback", model: "kimi-k3[1m]", expectNilPricing: true},
-		{name: "path kimi-k3[1m] not an API model id no fallback", model: "moonshot/kimi-k3[1m]", expectNilPricing: true},
+		// Claude Code 的 [1m] 后缀先规范化，不能因此漏计费。
+		{name: "kimi-k3[1m] normalizes to k3 pricing", model: "kimi-k3[1m]", expectedInput: 3e-6, expectedOutput: floatPtr(15e-6), expectedCacheRead: floatPtr(0.30e-6)},
+		{name: "path kimi-k3[1m] normalizes to k3 pricing", model: "moonshot/kimi-k3[1m]", expectedInput: 3e-6, expectedOutput: floatPtr(15e-6), expectedCacheRead: floatPtr(0.30e-6)},
 		// kimi-k2-0905 / kimi-k2-0711 官方未公布独立价，走 kimi-k2 隐性回退（接受）——
 		// 如未来官方公布独立价，需在 getFallbackPricing 加显式分支。
 		{
@@ -855,8 +855,8 @@ func TestComputeTokenBreakdown_GptImage2ImageEditIssue4386(t *testing.T) {
 
 	cost := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
 
-	wantTextInput := float64(19) * 5e-6    // 0.000095
-	wantImageInput := float64(352) * 8e-6  // 0.002816
+	wantTextInput := float64(19) * 5e-6     // 0.000095
+	wantImageInput := float64(352) * 8e-6   // 0.002816
 	wantImageOutput := float64(439) * 30e-6 // 0.013170
 	require.InDelta(t, wantTextInput, cost.InputCost, 1e-15, "InputCost 仅含文本输入")
 	require.InDelta(t, wantImageInput, cost.ImageInputCost, 1e-15, "图片输入按 $8/1M 独立计费")

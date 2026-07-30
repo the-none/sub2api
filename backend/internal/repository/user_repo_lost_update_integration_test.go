@@ -3,6 +3,10 @@
 package repository
 
 import (
+	"context"
+	"sync"
+	"time"
+
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -156,6 +160,15 @@ func (s *UserRepoSuite) TestAdjustBalance_RefusesNegativeResult() {
 	s.Require().InDelta(3, got.Balance, 1e-9, "refused adjustment must not write")
 }
 
+func (s *UserRepoSuite) TestAdjustBalance_AllowsRechargeFromOverdrawnBalance() {
+	user := s.mustCreateUser(&service.User{Email: "adjust-overdrawn@example.com", Balance: -5})
+
+	change, err := s.repo.AdjustBalance(s.ctx, user.ID, 3)
+	s.Require().NoError(err)
+	s.Require().InDelta(-5, change.Old, 1e-9)
+	s.Require().InDelta(-2, change.New, 1e-9)
+}
+
 func (s *UserRepoSuite) TestAdjustBalance_UserNotFound() {
 	_, err := s.repo.AdjustBalance(s.ctx, 99999999, 1)
 	s.Require().ErrorIs(err, service.ErrUserNotFound)
@@ -172,6 +185,49 @@ func (s *UserRepoSuite) TestSetBalance_ReplacesValueAndReportsPrevious() {
 	got, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err, "GetByID")
 	s.Require().InDelta(2, got.Balance, 1e-9)
+}
+
+func (s *UserRepoSuite) TestSetBalance_ReportsValueAfterConcurrentDeduction() {
+	user := s.mustCreateUser(&service.User{Email: "set-balance-concurrent@example.com", Balance: 50})
+
+	lockTx, err := integrationDB.BeginTx(context.Background(), nil)
+	s.Require().NoError(err)
+	defer func() { _ = lockTx.Rollback() }()
+	_, err = lockTx.ExecContext(s.ctx, "UPDATE users SET balance = balance - 10 WHERE id = $1", user.ID)
+	s.Require().NoError(err)
+
+	var (
+		wg     sync.WaitGroup
+		change service.BalanceChange
+		setErr error
+	)
+	started := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		close(started)
+		change, setErr = s.repo.SetBalance(context.Background(), user.ID, 100)
+	}()
+	<-started
+	time.Sleep(50 * time.Millisecond)
+	s.Require().NoError(lockTx.Commit())
+	wg.Wait()
+
+	s.Require().NoError(setErr)
+	s.Require().InDelta(40, change.Old, 1e-9)
+	s.Require().InDelta(100, change.New, 1e-9)
+}
+
+func (s *UserRepoSuite) TestUpdate_PersistsTokenVersionWithoutTouchingOtherFields() {
+	user := s.mustCreateUser(&service.User{Email: "token-version@example.com", Balance: 10})
+	user.TokenVersion = 3
+
+	s.Require().NoError(s.repo.Update(s.ctx, user, service.UserUpdateFields{TokenVersion: true}))
+
+	got, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(3), got.TokenVersion)
+	s.Require().InDelta(10, got.Balance, 1e-9)
 }
 
 func (s *UserRepoSuite) TestSetBalance_RejectsNegativeValue() {

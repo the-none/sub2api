@@ -137,6 +137,8 @@ func (a *Account) IsActive() bool {
 	return a.Status == StatusActive
 }
 
+const syntheticUITestExtraKey = "synthetic_ui_test"
+
 // IsSyntheticUITest reports whether the account belongs to an isolated UI load-test
 // dataset. Production accounts never receive this marker. It lets the dedicated
 // test instance exercise interactive quota and connection-test controls without
@@ -145,7 +147,7 @@ func (a *Account) IsSyntheticUITest() bool {
 	if a == nil || a.Extra == nil {
 		return false
 	}
-	enabled, ok := a.Extra["synthetic_ui_test"].(bool)
+	enabled, ok := a.Extra[syntheticUITestExtraKey].(bool)
 	return ok && enabled
 }
 

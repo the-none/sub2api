@@ -77,7 +77,7 @@ func TestParseGatewayRequest_InvalidStreamType(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestParseGatewayRequest_AnthropicNormalizesClaudeCodeLongContextModelSuffix(t *testing.T) {
+func TestParseGatewayRequest_NormalizesClaudeCodeLongContextModelSuffix(t *testing.T) {
 	tests := []struct {
 		name  string
 		model string
@@ -103,12 +103,12 @@ func TestParseGatewayRequest_AnthropicNormalizesClaudeCodeLongContextModelSuffix
 	}
 }
 
-func TestParseGatewayRequest_NonAnthropicPreservesClaudeCodeLongContextModelSuffix(t *testing.T) {
-	body := []byte(`{"model":"claude-opus-4-8[1m]","input":"hi"}`)
+func TestParseGatewayRequest_NonAnthropicNormalizesClaudeCodeLongContextModelSuffix(t *testing.T) {
+	body := []byte(`{"model":"kimi-k3[1m]","input":"hi"}`)
 	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), "responses")
 	require.NoError(t, err)
-	require.Equal(t, "claude-opus-4-8[1m]", parsed.Model)
-	require.Equal(t, "claude-opus-4-8[1m]", gjson.GetBytes(parsed.Body.Bytes(), "model").String())
+	require.Equal(t, "kimi-k3", parsed.Model)
+	require.Equal(t, "kimi-k3", gjson.GetBytes(parsed.Body.Bytes(), "model").String())
 }
 
 func TestParseGatewayRequest_ResponsesInput(t *testing.T) {

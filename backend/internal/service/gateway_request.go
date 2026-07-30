@@ -195,18 +195,16 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 			return fmt.Errorf("invalid model field type")
 		}
 		parsed.Model = modelResult.String()
-		if protocol == domain.PlatformAnthropic {
-			normalizedModel := normalizeClaudeCodeLongContextModel(parsed.Model)
-			if normalizedModel != parsed.Model {
-				normalizedBody, err := sjson.SetBytes(bodyBytes, "model", normalizedModel)
-				if err != nil {
-					return fmt.Errorf("normalize model field: %w", err)
-				}
-				parsed.Body.Replace(normalizedBody)
-				bodyBytes = normalizedBody
-				jsonStr = *(*string)(unsafe.Pointer(&bodyBytes))
-				parsed.Model = normalizedModel
+		normalizedModel := normalizeClaudeCodeLongContextModel(parsed.Model)
+		if normalizedModel != parsed.Model {
+			normalizedBody, err := sjson.SetBytes(bodyBytes, "model", normalizedModel)
+			if err != nil {
+				return fmt.Errorf("normalize model field: %w", err)
 			}
+			parsed.Body.Replace(normalizedBody)
+			bodyBytes = normalizedBody
+			jsonStr = *(*string)(unsafe.Pointer(&bodyBytes))
+			parsed.Model = normalizedModel
 		}
 	}
 

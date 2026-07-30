@@ -31,6 +31,14 @@ func TestPasskeySummaryReportsCurrentBackupState(t *testing.T) {
 	require.True(t, passkeySummary(record).Backup)
 }
 
+func TestValidatePasskeyCredentialRejectsCloneWarning(t *testing.T) {
+	require.ErrorIs(t, validatePasskeyCredential(nil), ErrPasskeyVerify)
+	require.ErrorIs(t, validatePasskeyCredential(&webauthn.Credential{
+		Authenticator: webauthn.Authenticator{CloneWarning: true},
+	}), ErrPasskeyVerify)
+	require.NoError(t, validatePasskeyCredential(&webauthn.Credential{}))
+}
+
 // 桩仅实现测试所需方法；未桩方法调用即 panic（嵌入 nil 接口）。
 type passkeyPwUserRepoStub struct {
 	UserRepository

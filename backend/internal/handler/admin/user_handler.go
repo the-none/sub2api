@@ -78,7 +78,6 @@ type UpdateUserRequest struct {
 	Username      *string  `json:"username"`
 	Notes         *string  `json:"notes"`
 	Role          string   `json:"role" binding:"omitempty,oneof=admin user"`
-	Balance       *float64 `json:"balance"`
 	Concurrency   *int     `json:"concurrency"`
 	RPMLimit      *int     `json:"rpm_limit"`
 	Status        string   `json:"status" binding:"omitempty,oneof=active disabled"`
@@ -347,7 +346,6 @@ func (h *UserHandler) Update(c *gin.Context) {
 		Username:      req.Username,
 		Notes:         req.Notes,
 		Role:          req.Role,
-		Balance:       req.Balance,
 		Concurrency:   req.Concurrency,
 		RPMLimit:      req.RPMLimit,
 		Status:        req.Status,
