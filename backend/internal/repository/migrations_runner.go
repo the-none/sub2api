@@ -55,6 +55,9 @@ const paymentOrdersOutTradeNoUniqueMigration = "120_enforce_payment_orders_out_t
 const paymentOrdersOutTradeNoUniqueIndex = "paymentorder_out_trade_no_unique"
 const schedulerOutboxPendingDedupKeyMigration = "153_scheduler_outbox_pending_dedup_key_index_notx.sql"
 const schedulerOutboxPendingDedupKeyIndex = "idx_scheduler_outbox_pending_dedup_key"
+const sparkShadowIndexesMigration = "154a_account_spark_shadow_indexes_notx.sql"
+const sparkShadowParentIndex = "idx_accounts_parent_account_id"
+const sparkShadowUniqueIndex = "uq_accounts_spark_shadow_per_parent"
 const usageAlertAccountIndexMigration = "155_usage_alert_accounts_real_account_index_notx.sql"
 const usageAlertAccountIndex = "accounts_real_account_id_idx"
 const latestAPIKeyIPIndexMigration = "174_add_usage_logs_api_key_latest_ip_index_notx.sql"
@@ -285,6 +288,11 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio
 		return preparePaymentOrdersOutTradeNoUniqueMigration(ctx, db)
 	case schedulerOutboxPendingDedupKeyMigration:
 		return dropInvalidIndexIfPresent(ctx, db, schedulerOutboxPendingDedupKeyIndex)
+	case sparkShadowIndexesMigration:
+		if err := dropInvalidIndexIfPresent(ctx, db, sparkShadowParentIndex); err != nil {
+			return err
+		}
+		return dropInvalidIndexIfPresent(ctx, db, sparkShadowUniqueIndex)
 	case usageAlertAccountIndexMigration:
 		return dropInvalidIndexIfPresent(ctx, db, usageAlertAccountIndex)
 	case latestAPIKeyIPIndexMigration:
