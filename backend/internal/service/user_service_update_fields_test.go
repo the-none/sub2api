@@ -60,7 +60,7 @@ func TestUpdateProfile_AvatarOnlySkipsUserRowWrite(t *testing.T) {
 	require.Equal(t, []UserUpdateFields{{}}, repo.updateFields, "no user column should be declared")
 }
 
-func TestChangePassword_OnlyDeclaresPasswordHash(t *testing.T) {
+func TestChangePassword_DeclaresPasswordHashAndTokenVersion(t *testing.T) {
 	user := &User{ID: 7, Balance: 0.30}
 	require.NoError(t, user.SetPassword("old-password"))
 	repo := &mockUserRepo{getByIDUser: user}
@@ -71,7 +71,7 @@ func TestChangePassword_OnlyDeclaresPasswordHash(t *testing.T) {
 		NewPassword:     "new-password",
 	})
 	require.NoError(t, err)
-	require.Equal(t, []UserUpdateFields{{PasswordHash: true}}, repo.updateFields)
+	require.Equal(t, []UserUpdateFields{{PasswordHash: true, TokenVersion: true}}, repo.updateFields)
 }
 
 func TestUpdateStatus_OnlyDeclaresStatus(t *testing.T) {
