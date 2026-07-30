@@ -120,6 +120,9 @@ func TestMigrationChecksumCompatibilityRulesMatchCurrentFiles(t *testing.T) {
 	for name, rule := range migrationChecksumCompatibilityRules {
 		content, err := os.ReadFile(filepath.Join("../../migrations", name))
 		require.NoErrorf(t, err, "read migration %s", name)
+		currentBytes, err := hex.DecodeString(rule.fileChecksum)
+		require.NoErrorf(t, err, "current checksum for %s must be hexadecimal", name)
+		require.Lenf(t, currentBytes, sha256.Size, "current checksum for %s must be SHA-256", name)
 		require.Equalf(
 			t,
 			rule.fileChecksum,
@@ -128,6 +131,9 @@ func TestMigrationChecksumCompatibilityRulesMatchCurrentFiles(t *testing.T) {
 			name,
 		)
 		for accepted := range rule.acceptedDBChecksum {
+			acceptedBytes, err := hex.DecodeString(accepted)
+			require.NoErrorf(t, err, "published checksum for %s must be hexadecimal", name)
+			require.Lenf(t, acceptedBytes, sha256.Size, "published checksum for %s must be SHA-256", name)
 			require.Truef(
 				t,
 				isMigrationChecksumCompatible(name, accepted, rule.fileChecksum),
