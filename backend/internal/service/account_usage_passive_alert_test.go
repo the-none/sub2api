@@ -79,3 +79,48 @@ func TestGetPassiveUsageDoesNotReplayCachedSampleIntoUsageAlerts(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+func TestGetPassiveUsageAppliesSyntheticWindowStatsWithoutReplayingAlert(t *testing.T) {
+	accountRepo := &passiveUsageAccountRepoStub{account: &Account{
+		ID:       3,
+		Name:     "Synthetic Claude account",
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"synthetic_ui_test": true,
+			"synthetic_window_stats": map[string]any{
+				"requests":      12,
+				"tokens":        3456,
+				"cost":          1.25,
+				"standard_cost": 1.5,
+				"user_cost":     1.75,
+			},
+		},
+	}}
+	alertRepo := &passiveUsageAlertRepoStub{upsertCalled: make(chan struct{}, 1)}
+	usageService := NewAccountUsageService(
+		accountRepo,
+		&passiveUsageLogRepoStub{},
+		nil, nil, nil, nil, nil, nil,
+		NewUsageCache(),
+		nil, nil,
+	)
+	usageService.SetUsageAlertService(NewUsageAlertService(alertRepo, accountRepo))
+
+	usage, err := usageService.GetPassiveUsage(context.Background(), 3)
+
+	require.NoError(t, err)
+	require.NotNil(t, usage.FiveHour)
+	require.Equal(t, &WindowStats{
+		Requests:     12,
+		Tokens:       3456,
+		Cost:         1.25,
+		StandardCost: 1.5,
+		UserCost:     1.75,
+	}, usage.FiveHour.WindowStats)
+	select {
+	case <-alertRepo.upsertCalled:
+		t.Fatal("synthetic passive usage read must not be observed as a new usage alert sample")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
