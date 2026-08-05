@@ -221,6 +221,7 @@ func TestPeakMultiplier_SnapshotRoundTrip(t *testing.T) {
 	restored := svc.snapshotToAPIKey("k", snapshot)
 	if restored.Group == nil {
 		t.Fatalf("restored.Group must not be nil")
+		return
 	}
 
 	if !restored.Group.PeakRateEnabled ||

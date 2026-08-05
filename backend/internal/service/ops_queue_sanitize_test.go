@@ -27,6 +27,7 @@ func TestSanitizeOpsUpstreamErrorsForQueueBoundsAndRedacts(t *testing.T) {
 	}
 	if entry.UpstreamErrorsJSON == nil {
 		t.Fatal("sanitized upstream event JSON is missing")
+		return
 	}
 	events, err := ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
 	if err != nil {

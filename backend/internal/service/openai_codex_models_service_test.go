@@ -437,6 +437,7 @@ func TestFetchCodexModelsManifestAPIKeyCustomUpstream(t *testing.T) {
 
 	if gotRequest == nil {
 		t.Fatal("expected request to custom API key upstream")
+		return
 	}
 	if gotRequest.Method != http.MethodGet {
 		t.Errorf("method: got %q", gotRequest.Method)

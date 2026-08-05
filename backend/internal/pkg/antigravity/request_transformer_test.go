@@ -354,11 +354,13 @@ func TestBuildGenerationConfig_ThinkingDynamicBudget(t *testing.T) {
 			cfg := buildGenerationConfig(req)
 			if cfg == nil {
 				t.Fatalf("expected non-nil generationConfig")
+				return
 			}
 
 			if tt.wantPresent {
 				if cfg.ThinkingConfig == nil {
 					t.Fatalf("expected thinkingConfig to be present")
+					return
 				}
 				if !cfg.ThinkingConfig.IncludeThoughts {
 					t.Fatalf("expected includeThoughts=true")
