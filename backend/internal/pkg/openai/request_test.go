@@ -2,6 +2,28 @@ package openai
 
 import "testing"
 
+func TestIsBrowserUserAgent(t *testing.T) {
+	tests := []struct {
+		name string
+		ua   string
+		want bool
+	}{
+		{name: "Chrome", ua: "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/126.0", want: true},
+		{name: "大小写和空白", ua: "  MOZILLA/5.0 Firefox/128.0  ", want: true},
+		{name: "Codex CLI", ua: "codex_cli_rs/0.171.0", want: false},
+		{name: "中段 Mozilla 不算浏览器", ua: "third-party/1.0 Mozilla/5.0", want: false},
+		{name: "空字符串", ua: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsBrowserUserAgent(tt.ua); got != tt.want {
+				t.Fatalf("IsBrowserUserAgent(%q) = %v, want %v", tt.ua, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsCodexCLIRequest(t *testing.T) {
 	tests := []struct {
 		name string

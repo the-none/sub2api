@@ -57,6 +57,13 @@ var codexOfficialClientOriginators = map[string]bool{
 	"codex_sdk_ts":          true, // TypeScript SDK
 }
 
+// IsBrowserUserAgent 判断 User-Agent 是否来自浏览器（Chrome/Firefox/Safari/Edge/Opera 等）。
+// 现代浏览器 UA 以 Mozilla/ 开头；CLI 工具不会。该判定用于避免 ChatGPT 内部接口触发 JS 质询。
+func IsBrowserUserAgent(userAgent string) bool {
+	ua := strings.TrimSpace(userAgent)
+	return ua != "" && strings.HasPrefix(strings.ToLower(ua), "mozilla/")
+}
+
 // IsCodexCLIRequest checks if the User-Agent indicates a Codex CLI request
 func IsCodexCLIRequest(userAgent string) bool {
 	ua := normalizeCodexClientHeader(userAgent)

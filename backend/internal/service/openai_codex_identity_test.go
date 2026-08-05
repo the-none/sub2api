@@ -304,6 +304,30 @@ func TestEnforceCodexIdentityHeaders_NoOriginatorIsNoop(t *testing.T) {
 	require.Equal(t, "third-party-client/1.0.0", h.Get("user-agent"))
 }
 
+// compat Messages 桥会删除 originator，但仍然访问 ChatGPT 内部接口。浏览器 UA 必须被替换，
+// 同时不能因为兜底而把 originator/version 补回去。
+func TestNormalizeCodexBrowserUserAgent_NoOriginatorPreservesCompatBridgeSemantics(t *testing.T) {
+	h := make(http.Header)
+	h.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0")
+
+	normalizeCodexBrowserUserAgent(h)
+	enforceCodexIdentityHeaders(h)
+
+	require.Equal(t, codexCLIUserAgent, h.Get("user-agent"))
+	require.Empty(t, h.Get("originator"))
+	require.Empty(t, h.Get("version"))
+}
+
+func TestNormalizeCodexBrowserUserAgent_NoOriginatorKeepsNonBrowserUA(t *testing.T) {
+	h := make(http.Header)
+	h.Set("user-agent", "third-party-client/1.0.0")
+
+	normalizeCodexBrowserUserAgent(h)
+
+	require.Equal(t, "third-party-client/1.0.0", h.Get("user-agent"))
+	require.Empty(t, h.Get("originator"))
+}
+
 func TestNormalizeCodexClientVersion(t *testing.T) {
 	require.Equal(t, "0.146.0", NormalizeCodexClientVersion(" 0.146.0 "))
 	require.Equal(t, "0.147.0-alpha.4", NormalizeCodexClientVersion("0.147.0-alpha.4"))

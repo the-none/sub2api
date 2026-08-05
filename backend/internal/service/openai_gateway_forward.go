@@ -1100,8 +1100,14 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		req.Header.Set("user-agent", codexCLIUserAgent)
 	}
 
+	// 浏览器型 UA 兜底必须先于身份收口执行。compat Messages 桥会主动删除 originator，
+	// 因此身份收口会保持 no-op；这里单独避免浏览器 UA 到达 ChatGPT 内部接口并触发 JS 质询。
+	if account.Type == AccountTypeOAuth {
+		normalizeCodexBrowserUserAgent(req.Header)
+	}
+
 	// 终态收口：强制统一 OAuth 出站身份（User-Agent / originator / version 同源自洽）。
-	// 客户端自报身份不参与构造，浏览器型 UA 也因此不会再到达上游（原浏览器 UA 兜底已被吸收）。
+	// compat Messages 桥不携带 originator，身份收口不会为其补回身份头。
 	if account.Type == AccountTypeOAuth {
 		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
 	}

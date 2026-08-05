@@ -170,6 +170,15 @@ func enforceCodexIdentityHeaders(h http.Header) {
 	enforceCodexIdentityHeadersWithUA(h, "")
 }
 
+// normalizeCodexBrowserUserAgent 避免浏览器 UA 到达 ChatGPT 内部接口并触发 JS 质询。
+// 它不补齐 originator/version，确保 compat Messages 桥的无身份头语义保持不变。
+func normalizeCodexBrowserUserAgent(h http.Header) {
+	if h == nil || !openai.IsBrowserUserAgent(h.Get("user-agent")) {
+		return
+	}
+	h.Set("user-agent", resolveCodexOutboundIdentity("").userAgent)
+}
+
 // enforceCodexIdentityHeadersWithUA 强制统一 OAuth 出站身份：User-Agent / originator / version
 // 一律改写为网关的规范身份，客户端自报身份不参与构造。上游在容量紧张时按客户端身份分优先级
 // 降载，被降载的请求会拿到 HTTP 200 + 流内 server_is_overloaded；统一出口可确保没有请求带着
