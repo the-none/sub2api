@@ -46387,6 +46387,8 @@ type UsageAlertStateMutation struct {
 	last_value          *float64
 	addlast_value       *float64
 	last_reset_at       *time.Time
+	last_generation     *int64
+	addlast_generation  *int64
 	clearedFields       map[string]struct{}
 	real_account        *int64
 	clearedreal_account bool
@@ -46915,6 +46917,62 @@ func (m *UsageAlertStateMutation) ResetLastResetAt() {
 	delete(m.clearedFields, usagealertstate.FieldLastResetAt)
 }
 
+// SetLastGeneration sets the "last_generation" field.
+func (m *UsageAlertStateMutation) SetLastGeneration(i int64) {
+	m.last_generation = &i
+	m.addlast_generation = nil
+}
+
+// LastGeneration returns the value of the "last_generation" field in the mutation.
+func (m *UsageAlertStateMutation) LastGeneration() (r int64, exists bool) {
+	v := m.last_generation
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastGeneration returns the old "last_generation" field's value of the UsageAlertState entity.
+// If the UsageAlertState object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageAlertStateMutation) OldLastGeneration(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastGeneration is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastGeneration requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastGeneration: %w", err)
+	}
+	return oldValue.LastGeneration, nil
+}
+
+// AddLastGeneration adds i to the "last_generation" field.
+func (m *UsageAlertStateMutation) AddLastGeneration(i int64) {
+	if m.addlast_generation != nil {
+		*m.addlast_generation += i
+	} else {
+		m.addlast_generation = &i
+	}
+}
+
+// AddedLastGeneration returns the value that was added to the "last_generation" field in this mutation.
+func (m *UsageAlertStateMutation) AddedLastGeneration() (r int64, exists bool) {
+	v := m.addlast_generation
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetLastGeneration resets all changes to the "last_generation" field.
+func (m *UsageAlertStateMutation) ResetLastGeneration() {
+	m.last_generation = nil
+	m.addlast_generation = nil
+}
+
 // ClearRealAccount clears the "real_account" edge to the RealAccount entity.
 func (m *UsageAlertStateMutation) ClearRealAccount() {
 	m.clearedreal_account = true
@@ -47003,7 +47061,7 @@ func (m *UsageAlertStateMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageAlertStateMutation) Fields() []string {
-	fields := make([]string, 0, 10)
+	fields := make([]string, 0, 11)
 	if m.created_at != nil {
 		fields = append(fields, usagealertstate.FieldCreatedAt)
 	}
@@ -47034,6 +47092,9 @@ func (m *UsageAlertStateMutation) Fields() []string {
 	if m.last_reset_at != nil {
 		fields = append(fields, usagealertstate.FieldLastResetAt)
 	}
+	if m.last_generation != nil {
+		fields = append(fields, usagealertstate.FieldLastGeneration)
+	}
 	return fields
 }
 
@@ -47062,6 +47123,8 @@ func (m *UsageAlertStateMutation) Field(name string) (ent.Value, bool) {
 		return m.LastValue()
 	case usagealertstate.FieldLastResetAt:
 		return m.LastResetAt()
+	case usagealertstate.FieldLastGeneration:
+		return m.LastGeneration()
 	}
 	return nil, false
 }
@@ -47091,6 +47154,8 @@ func (m *UsageAlertStateMutation) OldField(ctx context.Context, name string) (en
 		return m.OldLastValue(ctx)
 	case usagealertstate.FieldLastResetAt:
 		return m.OldLastResetAt(ctx)
+	case usagealertstate.FieldLastGeneration:
+		return m.OldLastGeneration(ctx)
 	}
 	return nil, fmt.Errorf("unknown UsageAlertState field %s", name)
 }
@@ -47170,6 +47235,13 @@ func (m *UsageAlertStateMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetLastResetAt(v)
 		return nil
+	case usagealertstate.FieldLastGeneration:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastGeneration(v)
+		return nil
 	}
 	return fmt.Errorf("unknown UsageAlertState field %s", name)
 }
@@ -47181,6 +47253,9 @@ func (m *UsageAlertStateMutation) AddedFields() []string {
 	if m.addlast_value != nil {
 		fields = append(fields, usagealertstate.FieldLastValue)
 	}
+	if m.addlast_generation != nil {
+		fields = append(fields, usagealertstate.FieldLastGeneration)
+	}
 	return fields
 }
 
@@ -47191,6 +47266,8 @@ func (m *UsageAlertStateMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case usagealertstate.FieldLastValue:
 		return m.AddedLastValue()
+	case usagealertstate.FieldLastGeneration:
+		return m.AddedLastGeneration()
 	}
 	return nil, false
 }
@@ -47206,6 +47283,13 @@ func (m *UsageAlertStateMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddLastValue(v)
+		return nil
+	case usagealertstate.FieldLastGeneration:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddLastGeneration(v)
 		return nil
 	}
 	return fmt.Errorf("unknown UsageAlertState numeric field %s", name)
@@ -47284,6 +47368,9 @@ func (m *UsageAlertStateMutation) ResetField(name string) error {
 		return nil
 	case usagealertstate.FieldLastResetAt:
 		m.ResetLastResetAt()
+		return nil
+	case usagealertstate.FieldLastGeneration:
+		m.ResetLastGeneration()
 		return nil
 	}
 	return fmt.Errorf("unknown UsageAlertState field %s", name)

@@ -34,6 +34,8 @@ const (
 	FieldLastValue = "last_value"
 	// FieldLastResetAt holds the string denoting the last_reset_at field in the database.
 	FieldLastResetAt = "last_reset_at"
+	// FieldLastGeneration holds the string denoting the last_generation field in the database.
+	FieldLastGeneration = "last_generation"
 	// EdgeRealAccount holds the string denoting the real_account edge name in mutations.
 	EdgeRealAccount = "real_account"
 	// EdgeRule holds the string denoting the rule edge name in mutations.
@@ -69,6 +71,7 @@ var Columns = []string{
 	FieldLastTriggeredAt,
 	FieldLastValue,
 	FieldLastResetAt,
+	FieldLastGeneration,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -98,6 +101,8 @@ var (
 	DefaultLastStatus string
 	// LastStatusValidator is a validator for the "last_status" field. It is called by the builders before save.
 	LastStatusValidator func(string) error
+	// DefaultLastGeneration holds the default value on creation for the "last_generation" field.
+	DefaultLastGeneration int64
 )
 
 // OrderOption defines the ordering options for the UsageAlertState queries.
@@ -156,6 +161,11 @@ func ByLastValue(opts ...sql.OrderTermOption) OrderOption {
 // ByLastResetAt orders the results by the last_reset_at field.
 func ByLastResetAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLastResetAt, opts...).ToFunc()
+}
+
+// ByLastGeneration orders the results by the last_generation field.
+func ByLastGeneration(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLastGeneration, opts...).ToFunc()
 }
 
 // ByRealAccountField orders the results by real_account field.

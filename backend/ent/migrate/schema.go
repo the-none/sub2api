@@ -1767,6 +1767,7 @@ var (
 		{Name: "last_triggered_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "last_value", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "last_reset_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "last_generation", Type: field.TypeInt64, Default: 0},
 		{Name: "real_account_id", Type: field.TypeInt64},
 		{Name: "rule_id", Type: field.TypeInt64},
 	}
@@ -1778,13 +1779,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "usage_alert_states_real_accounts_real_account",
-				Columns:    []*schema.Column{UsageAlertStatesColumns[9]},
+				Columns:    []*schema.Column{UsageAlertStatesColumns[10]},
 				RefColumns: []*schema.Column{RealAccountsColumns[0]},
 				OnDelete:   schema.Cascade,
 			},
 			{
 				Symbol:     "usage_alert_states_usage_alert_rules_rule",
-				Columns:    []*schema.Column{UsageAlertStatesColumns[10]},
+				Columns:    []*schema.Column{UsageAlertStatesColumns[11]},
 				RefColumns: []*schema.Column{UsageAlertRulesColumns[0]},
 				OnDelete:   schema.Cascade,
 			},
@@ -1793,12 +1794,12 @@ var (
 			{
 				Name:    "usagealertstate_real_account_id_rule_id_quota_dimension_window",
 				Unique:  true,
-				Columns: []*schema.Column{UsageAlertStatesColumns[9], UsageAlertStatesColumns[10], UsageAlertStatesColumns[3], UsageAlertStatesColumns[4]},
+				Columns: []*schema.Column{UsageAlertStatesColumns[10], UsageAlertStatesColumns[11], UsageAlertStatesColumns[3], UsageAlertStatesColumns[4]},
 			},
 			{
 				Name:    "usagealertstate_rule_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsageAlertStatesColumns[10]},
+				Columns: []*schema.Column{UsageAlertStatesColumns[11]},
 			},
 		},
 	}

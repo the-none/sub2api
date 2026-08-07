@@ -879,8 +879,6 @@ func (s *AccountUsageService) ReconcileOpenAIQuotaReset(ctx context.Context, acc
 	if err := s.accountRepo.UpdateExtra(ctx, accountID, outcome.Updates); err != nil {
 		return fmt.Errorf("persist confirmed quota reset snapshot: %w", err)
 	}
-	mergeAccountExtra(account, outcome.Updates)
-
 	if s.quotaResetScheduler == nil {
 		return fmt.Errorf("openai quota reset scheduler reconciler is not configured")
 	}
@@ -888,10 +886,14 @@ func (s *AccountUsageService) ReconcileOpenAIQuotaReset(ctx context.Context, acc
 		return fmt.Errorf("clear scheduler state after confirmed quota reset: %w", err)
 	}
 
-	now := time.Now()
-	usage := &UsageInfo{UpdatedAt: &now}
-	applyExtraToUsage(usage, account.Extra, now)
-	s.observeUsageAlert(ctx, accountID, UsageAlertPlatformOpenAI, UsageAlertSourceOpenAIQuotaReset, usage)
+	if s.usageAlertService != nil {
+		s.usageAlertService.Observe(ctx, usageAlertSnapshotFromCodexExtra(
+			accountID,
+			UsageAlertSourceOpenAIQuotaReset,
+			outcome.Updates,
+			time.Now(),
+		))
+	}
 	return nil
 }
 

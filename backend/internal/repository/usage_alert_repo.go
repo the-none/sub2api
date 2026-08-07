@@ -519,6 +519,13 @@ func (r *usageAlertRepository) UpsertSnapshot(ctx context.Context, snapshot *ser
 	if r.sql == nil {
 		return false, fmt.Errorf("usage alert repository SQL executor not configured")
 	}
+	for window, value := range snapshot.Windows {
+		if value.SampledAt == nil && !snapshot.SampledAt.IsZero() {
+			sampledAt := snapshot.SampledAt.UTC()
+			value.SampledAt = &sampledAt
+			snapshot.Windows[window] = value
+		}
+	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		return false, err
@@ -536,21 +543,19 @@ func (r *usageAlertRepository) UpsertSnapshot(ctx context.Context, snapshot *ser
 				WHERE NOT EXISTS (
 					SELECT 1
 					FROM jsonb_each(COALESCE(EXCLUDED.snapshot_json->'windows', '{}'::jsonb)) AS incoming_window
-					WHERE incoming_window.value ? 'reset_at'
-						AND real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key ? 'reset_at'
-						AND (incoming_window.value->>'reset_at')::timestamptz
-							< (real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key->>'reset_at')::timestamptz
-				)
-				AND (
-					real_account_usage_snapshots.sampled_at <= EXCLUDED.sampled_at
-					OR EXISTS (
-						SELECT 1
-						FROM jsonb_each(COALESCE(EXCLUDED.snapshot_json->'windows', '{}'::jsonb)) AS incoming_window
-						WHERE incoming_window.value ? 'reset_at'
-							AND real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key ? 'reset_at'
-							AND (incoming_window.value->>'reset_at')::timestamptz
-								> (real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key->>'reset_at')::timestamptz
-					)
+					WHERE real_account_usage_snapshots.snapshot_json->'windows' ? incoming_window.key
+						AND (
+							COALESCE((incoming_window.value->>'generation')::bigint, 0)
+								< COALESCE((real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key->>'generation')::bigint, 0)
+							OR (
+								COALESCE((incoming_window.value->>'generation')::bigint, 0)
+									= COALESCE((real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key->>'generation')::bigint, 0)
+								AND incoming_window.value ? 'sampled_at'
+								AND real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key ? 'sampled_at'
+								AND (incoming_window.value->>'sampled_at')::timestamptz
+									< (real_account_usage_snapshots.snapshot_json->'windows'->incoming_window.key->>'sampled_at')::timestamptz
+							)
+						)
 				)
 		`, snapshot.RealAccountID, snapshot.UsageType, snapshot.Platform, snapshot.Source, string(raw), snapshot.SampledAt)
 	if err != nil {
@@ -599,20 +604,28 @@ func (r *usageAlertRepository) UpsertState(ctx context.Context, state *service.U
 	}
 	_, err := r.sql.ExecContext(ctx, `
 		INSERT INTO usage_alert_states (
-				real_account_id, rule_id, quota_dimension, "window", last_status, last_triggered_at, last_value, last_reset_at, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+				real_account_id, rule_id, quota_dimension, "window", last_status, last_triggered_at, last_value, last_reset_at, last_generation, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
 			ON CONFLICT (real_account_id, rule_id, quota_dimension, "window") DO UPDATE SET
 			last_status = EXCLUDED.last_status,
 			last_triggered_at = COALESCE(EXCLUDED.last_triggered_at, usage_alert_states.last_triggered_at),
 			last_value = EXCLUDED.last_value,
 			last_reset_at = EXCLUDED.last_reset_at,
+			last_generation = EXCLUDED.last_generation,
 			updated_at = NOW()
-			WHERE usage_alert_states.last_reset_at IS NULL
+			WHERE usage_alert_states.last_generation < EXCLUDED.last_generation
 				OR (
-					EXCLUDED.last_reset_at IS NOT NULL
-					AND usage_alert_states.last_reset_at <= EXCLUDED.last_reset_at
+					usage_alert_states.last_generation = EXCLUDED.last_generation
+					AND (
+						NOT $10
+						OR usage_alert_states.last_reset_at IS NULL
+						OR (
+							EXCLUDED.last_reset_at IS NOT NULL
+							AND usage_alert_states.last_reset_at <= EXCLUDED.last_reset_at
+						)
+					)
 				)
-		`, state.RealAccountID, state.RuleID, state.UsageType, state.Window, state.LastStatus, triggeredAt, lastValue, resetAt)
+		`, state.RealAccountID, state.RuleID, state.UsageType, state.Window, state.LastStatus, triggeredAt, lastValue, resetAt, state.LastGeneration, state.ResetOrderProtected)
 	return err
 }
 
@@ -833,6 +846,7 @@ func usageAlertStateEntityToService(row *dbent.UsageAlertState) *service.UsageAl
 		LastTriggeredAt: row.LastTriggeredAt,
 		LastValue:       row.LastValue,
 		LastResetAt:     row.LastResetAt,
+		LastGeneration:  row.LastGeneration,
 		CreatedAt:       row.CreatedAt,
 		UpdatedAt:       row.UpdatedAt,
 	}

@@ -173,6 +173,27 @@ func (_u *UsageAlertStateUpdate) ClearLastResetAt() *UsageAlertStateUpdate {
 	return _u
 }
 
+// SetLastGeneration sets the "last_generation" field.
+func (_u *UsageAlertStateUpdate) SetLastGeneration(v int64) *UsageAlertStateUpdate {
+	_u.mutation.ResetLastGeneration()
+	_u.mutation.SetLastGeneration(v)
+	return _u
+}
+
+// SetNillableLastGeneration sets the "last_generation" field if the given value is not nil.
+func (_u *UsageAlertStateUpdate) SetNillableLastGeneration(v *int64) *UsageAlertStateUpdate {
+	if v != nil {
+		_u.SetLastGeneration(*v)
+	}
+	return _u
+}
+
+// AddLastGeneration adds value to the "last_generation" field.
+func (_u *UsageAlertStateUpdate) AddLastGeneration(v int64) *UsageAlertStateUpdate {
+	_u.mutation.AddLastGeneration(v)
+	return _u
+}
+
 // SetRealAccount sets the "real_account" edge to the RealAccount entity.
 func (_u *UsageAlertStateUpdate) SetRealAccount(v *RealAccount) *UsageAlertStateUpdate {
 	return _u.SetRealAccountID(v.ID)
@@ -306,6 +327,12 @@ func (_u *UsageAlertStateUpdate) sqlSave(ctx context.Context) (_node int, err er
 	}
 	if _u.mutation.LastResetAtCleared() {
 		_spec.ClearField(usagealertstate.FieldLastResetAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.LastGeneration(); ok {
+		_spec.SetField(usagealertstate.FieldLastGeneration, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedLastGeneration(); ok {
+		_spec.AddField(usagealertstate.FieldLastGeneration, field.TypeInt64, value)
 	}
 	if _u.mutation.RealAccountCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -528,6 +555,27 @@ func (_u *UsageAlertStateUpdateOne) ClearLastResetAt() *UsageAlertStateUpdateOne
 	return _u
 }
 
+// SetLastGeneration sets the "last_generation" field.
+func (_u *UsageAlertStateUpdateOne) SetLastGeneration(v int64) *UsageAlertStateUpdateOne {
+	_u.mutation.ResetLastGeneration()
+	_u.mutation.SetLastGeneration(v)
+	return _u
+}
+
+// SetNillableLastGeneration sets the "last_generation" field if the given value is not nil.
+func (_u *UsageAlertStateUpdateOne) SetNillableLastGeneration(v *int64) *UsageAlertStateUpdateOne {
+	if v != nil {
+		_u.SetLastGeneration(*v)
+	}
+	return _u
+}
+
+// AddLastGeneration adds value to the "last_generation" field.
+func (_u *UsageAlertStateUpdateOne) AddLastGeneration(v int64) *UsageAlertStateUpdateOne {
+	_u.mutation.AddLastGeneration(v)
+	return _u
+}
+
 // SetRealAccount sets the "real_account" edge to the RealAccount entity.
 func (_u *UsageAlertStateUpdateOne) SetRealAccount(v *RealAccount) *UsageAlertStateUpdateOne {
 	return _u.SetRealAccountID(v.ID)
@@ -691,6 +739,12 @@ func (_u *UsageAlertStateUpdateOne) sqlSave(ctx context.Context) (_node *UsageAl
 	}
 	if _u.mutation.LastResetAtCleared() {
 		_spec.ClearField(usagealertstate.FieldLastResetAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.LastGeneration(); ok {
+		_spec.SetField(usagealertstate.FieldLastGeneration, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedLastGeneration(); ok {
+		_spec.AddField(usagealertstate.FieldLastGeneration, field.TypeInt64, value)
 	}
 	if _u.mutation.RealAccountCleared() {
 		edge := &sqlgraph.EdgeSpec{

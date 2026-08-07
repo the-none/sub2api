@@ -2202,6 +2202,10 @@ func init() {
 	usagealertstate.DefaultLastStatus = usagealertstateDescLastStatus.Default.(string)
 	// usagealertstate.LastStatusValidator is a validator for the "last_status" field. It is called by the builders before save.
 	usagealertstate.LastStatusValidator = usagealertstateDescLastStatus.Validators[0].(func(string) error)
+	// usagealertstateDescLastGeneration is the schema descriptor for last_generation field.
+	usagealertstateDescLastGeneration := usagealertstateFields[8].Descriptor()
+	// usagealertstate.DefaultLastGeneration holds the default value on creation for the last_generation field.
+	usagealertstate.DefaultLastGeneration = usagealertstateDescLastGeneration.Default.(int64)
 	usagealertwebhookMixin := schema.UsageAlertWebhook{}.Mixin()
 	usagealertwebhookMixinHooks1 := usagealertwebhookMixin[1].Hooks()
 	usagealertwebhook.Hooks[0] = usagealertwebhookMixinHooks1[0]

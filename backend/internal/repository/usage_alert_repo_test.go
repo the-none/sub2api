@@ -24,11 +24,11 @@ func TestUpsertUsageAlertSnapshotRejectsOlderSamples(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = db.Close() })
 
-			mock.ExpectExec(`(?s)INSERT INTO real_account_usage_snapshots.*WHERE NOT EXISTS.*incoming_window.value.*reset_at.*real_account_usage_snapshots.sampled_at <= EXCLUDED.sampled_at.*OR EXISTS`).
+			mock.ExpectExec(`(?s)INSERT INTO real_account_usage_snapshots.*WHERE NOT EXISTS.*incoming_window.value.*generation.*sampled_at`).
 				WillReturnResult(sqlmock.NewResult(0, tc.rowsAffected))
 
 			repo := &usageAlertRepository{sql: db}
-			accepted, err := repo.UpsertSnapshot(context.Background(), &service.UsageAlertSnapshot{
+			snapshot := &service.UsageAlertSnapshot{
 				AccountID:     2,
 				RealAccountID: 9,
 				UsageType:     service.UsageAlertTypeOverall,
@@ -38,13 +38,43 @@ func TestUpsertUsageAlertSnapshotRejectsOlderSamples(t *testing.T) {
 				Windows: map[string]service.UsageAlertWindowSnapshot{
 					service.UsageAlertWindow7d: {UsedPercent: 5, RemainingPercent: 95},
 				},
-			})
+			}
+			accepted, err := repo.UpsertSnapshot(context.Background(), snapshot)
 
 			require.NoError(t, err)
 			require.Equal(t, tc.accepted, accepted)
+			require.NotNil(t, snapshot.Windows[service.UsageAlertWindow7d].SampledAt)
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
+}
+
+func TestUpsertUsageAlertStateUsesGenerationCAS(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	resetAt := time.Now().UTC().Add(7 * 24 * time.Hour)
+	value := 60.0
+
+	mock.ExpectExec(`(?s)INSERT INTO usage_alert_states.*last_generation.*usage_alert_states.last_generation < EXCLUDED.last_generation.*NOT \$10.*last_reset_at <= EXCLUDED.last_reset_at`).
+		WithArgs(int64(9), int64(7), service.UsageAlertTypeOverall, service.UsageAlertWindow7d, service.UsageAlertStatusTriggered, sqlmock.AnyArg(), value, resetAt, int64(4), true).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	repo := &usageAlertRepository{sql: db}
+	err = repo.UpsertState(context.Background(), &service.UsageAlertState{
+		RealAccountID:       9,
+		RuleID:              7,
+		UsageType:           service.UsageAlertTypeOverall,
+		Window:              service.UsageAlertWindow7d,
+		LastStatus:          service.UsageAlertStatusTriggered,
+		LastValue:           &value,
+		LastResetAt:         &resetAt,
+		LastGeneration:      4,
+		ResetOrderProtected: true,
+	})
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestClaimUsageAlertWebhookDeliveryDistinguishesClaimedDeliveredAndBusy(t *testing.T) {

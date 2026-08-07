@@ -105,6 +105,11 @@ func LastResetAt(v time.Time) predicate.UsageAlertState {
 	return predicate.UsageAlertState(sql.FieldEQ(FieldLastResetAt, v))
 }
 
+// LastGeneration applies equality check predicate on the "last_generation" field. It's identical to LastGenerationEQ.
+func LastGeneration(v int64) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldEQ(FieldLastGeneration, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.UsageAlertState {
 	return predicate.UsageAlertState(sql.FieldEQ(FieldCreatedAt, v))
@@ -568,6 +573,46 @@ func LastResetAtIsNil() predicate.UsageAlertState {
 // LastResetAtNotNil applies the NotNil predicate on the "last_reset_at" field.
 func LastResetAtNotNil() predicate.UsageAlertState {
 	return predicate.UsageAlertState(sql.FieldNotNull(FieldLastResetAt))
+}
+
+// LastGenerationEQ applies the EQ predicate on the "last_generation" field.
+func LastGenerationEQ(v int64) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldEQ(FieldLastGeneration, v))
+}
+
+// LastGenerationNEQ applies the NEQ predicate on the "last_generation" field.
+func LastGenerationNEQ(v int64) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldNEQ(FieldLastGeneration, v))
+}
+
+// LastGenerationIn applies the In predicate on the "last_generation" field.
+func LastGenerationIn(vs ...int64) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldIn(FieldLastGeneration, vs...))
+}
+
+// LastGenerationNotIn applies the NotIn predicate on the "last_generation" field.
+func LastGenerationNotIn(vs ...int64) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldNotIn(FieldLastGeneration, vs...))
+}
+
+// LastGenerationGT applies the GT predicate on the "last_generation" field.
+func LastGenerationGT(v int64) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldGT(FieldLastGeneration, v))
+}
+
+// LastGenerationGTE applies the GTE predicate on the "last_generation" field.
+func LastGenerationGTE(v int64) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldGTE(FieldLastGeneration, v))
+}
+
+// LastGenerationLT applies the LT predicate on the "last_generation" field.
+func LastGenerationLT(v int64) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldLT(FieldLastGeneration, v))
+}
+
+// LastGenerationLTE applies the LTE predicate on the "last_generation" field.
+func LastGenerationLTE(v int64) predicate.UsageAlertState {
+	return predicate.UsageAlertState(sql.FieldLTE(FieldLastGeneration, v))
 }
 
 // HasRealAccount applies the HasEdge predicate on the "real_account" edge.

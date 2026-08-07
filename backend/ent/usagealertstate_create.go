@@ -140,6 +140,20 @@ func (_c *UsageAlertStateCreate) SetNillableLastResetAt(v *time.Time) *UsageAler
 	return _c
 }
 
+// SetLastGeneration sets the "last_generation" field.
+func (_c *UsageAlertStateCreate) SetLastGeneration(v int64) *UsageAlertStateCreate {
+	_c.mutation.SetLastGeneration(v)
+	return _c
+}
+
+// SetNillableLastGeneration sets the "last_generation" field if the given value is not nil.
+func (_c *UsageAlertStateCreate) SetNillableLastGeneration(v *int64) *UsageAlertStateCreate {
+	if v != nil {
+		_c.SetLastGeneration(*v)
+	}
+	return _c
+}
+
 // SetRealAccount sets the "real_account" edge to the RealAccount entity.
 func (_c *UsageAlertStateCreate) SetRealAccount(v *RealAccount) *UsageAlertStateCreate {
 	return _c.SetRealAccountID(v.ID)
@@ -201,6 +215,10 @@ func (_c *UsageAlertStateCreate) defaults() {
 		v := usagealertstate.DefaultLastStatus
 		_c.mutation.SetLastStatus(v)
 	}
+	if _, ok := _c.mutation.LastGeneration(); !ok {
+		v := usagealertstate.DefaultLastGeneration
+		_c.mutation.SetLastGeneration(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -240,6 +258,9 @@ func (_c *UsageAlertStateCreate) check() error {
 		if err := usagealertstate.LastStatusValidator(v); err != nil {
 			return &ValidationError{Name: "last_status", err: fmt.Errorf(`ent: validator failed for field "UsageAlertState.last_status": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.LastGeneration(); !ok {
+		return &ValidationError{Name: "last_generation", err: errors.New(`ent: missing required field "UsageAlertState.last_generation"`)}
 	}
 	if len(_c.mutation.RealAccountIDs()) == 0 {
 		return &ValidationError{Name: "real_account", err: errors.New(`ent: missing required edge "UsageAlertState.real_account"`)}
@@ -305,6 +326,10 @@ func (_c *UsageAlertStateCreate) createSpec() (*UsageAlertState, *sqlgraph.Creat
 	if value, ok := _c.mutation.LastResetAt(); ok {
 		_spec.SetField(usagealertstate.FieldLastResetAt, field.TypeTime, value)
 		_node.LastResetAt = &value
+	}
+	if value, ok := _c.mutation.LastGeneration(); ok {
+		_spec.SetField(usagealertstate.FieldLastGeneration, field.TypeInt64, value)
+		_node.LastGeneration = value
 	}
 	if nodes := _c.mutation.RealAccountIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -524,6 +549,24 @@ func (u *UsageAlertStateUpsert) ClearLastResetAt() *UsageAlertStateUpsert {
 	return u
 }
 
+// SetLastGeneration sets the "last_generation" field.
+func (u *UsageAlertStateUpsert) SetLastGeneration(v int64) *UsageAlertStateUpsert {
+	u.Set(usagealertstate.FieldLastGeneration, v)
+	return u
+}
+
+// UpdateLastGeneration sets the "last_generation" field to the value that was provided on create.
+func (u *UsageAlertStateUpsert) UpdateLastGeneration() *UsageAlertStateUpsert {
+	u.SetExcluded(usagealertstate.FieldLastGeneration)
+	return u
+}
+
+// AddLastGeneration adds v to the "last_generation" field.
+func (u *UsageAlertStateUpsert) AddLastGeneration(v int64) *UsageAlertStateUpsert {
+	u.Add(usagealertstate.FieldLastGeneration, v)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -720,6 +763,27 @@ func (u *UsageAlertStateUpsertOne) UpdateLastResetAt() *UsageAlertStateUpsertOne
 func (u *UsageAlertStateUpsertOne) ClearLastResetAt() *UsageAlertStateUpsertOne {
 	return u.Update(func(s *UsageAlertStateUpsert) {
 		s.ClearLastResetAt()
+	})
+}
+
+// SetLastGeneration sets the "last_generation" field.
+func (u *UsageAlertStateUpsertOne) SetLastGeneration(v int64) *UsageAlertStateUpsertOne {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.SetLastGeneration(v)
+	})
+}
+
+// AddLastGeneration adds v to the "last_generation" field.
+func (u *UsageAlertStateUpsertOne) AddLastGeneration(v int64) *UsageAlertStateUpsertOne {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.AddLastGeneration(v)
+	})
+}
+
+// UpdateLastGeneration sets the "last_generation" field to the value that was provided on create.
+func (u *UsageAlertStateUpsertOne) UpdateLastGeneration() *UsageAlertStateUpsertOne {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.UpdateLastGeneration()
 	})
 }
 
@@ -1085,6 +1149,27 @@ func (u *UsageAlertStateUpsertBulk) UpdateLastResetAt() *UsageAlertStateUpsertBu
 func (u *UsageAlertStateUpsertBulk) ClearLastResetAt() *UsageAlertStateUpsertBulk {
 	return u.Update(func(s *UsageAlertStateUpsert) {
 		s.ClearLastResetAt()
+	})
+}
+
+// SetLastGeneration sets the "last_generation" field.
+func (u *UsageAlertStateUpsertBulk) SetLastGeneration(v int64) *UsageAlertStateUpsertBulk {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.SetLastGeneration(v)
+	})
+}
+
+// AddLastGeneration adds v to the "last_generation" field.
+func (u *UsageAlertStateUpsertBulk) AddLastGeneration(v int64) *UsageAlertStateUpsertBulk {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.AddLastGeneration(v)
+	})
+}
+
+// UpdateLastGeneration sets the "last_generation" field to the value that was provided on create.
+func (u *UsageAlertStateUpsertBulk) UpdateLastGeneration() *UsageAlertStateUpsertBulk {
+	return u.Update(func(s *UsageAlertStateUpsert) {
+		s.UpdateLastGeneration()
 	})
 }
 

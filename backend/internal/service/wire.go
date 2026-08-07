@@ -208,6 +208,7 @@ func ProvideAccountUsageService(
 		tlsFPProfileService,
 	)
 	service.SetUsageAlertService(usageAlertService)
+	usageAlertService.SetOpenAICodexBoundaryRefresher(service)
 	service.SetOpenAIQuotaResetScheduler(rateLimitService)
 	service.agentIdentityWS = openAIGatewayService
 	if openAIGatewayService != nil {

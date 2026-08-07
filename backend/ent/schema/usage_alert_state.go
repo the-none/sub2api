@@ -55,6 +55,8 @@ func (UsageAlertState) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
+		field.Int64("last_generation").
+			Default(0),
 	}
 }
 

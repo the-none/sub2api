@@ -52,6 +52,8 @@ const (
 	usageAlertCleanupInterval   = 24 * time.Hour
 	usageAlertRetryMinDelay     = 30 * time.Second
 	usageAlertRetryMaxDelay     = 5 * time.Minute
+	codex7dBoundaryRefreshDelay = 30 * time.Second
+	codex7dMinimumCycleDuration = 6 * 24 * time.Hour
 
 	UsageAlertSourceOpenAICodexHeaders  = "openai_codex_headers"
 	UsageAlertSourceOpenAICodexProbe    = "openai_codex_probe"
@@ -142,14 +144,22 @@ type UsageAlertState struct {
 	LastTriggeredAt *time.Time `json:"last_triggered_at,omitempty"`
 	LastValue       *float64   `json:"last_value,omitempty"`
 	LastResetAt     *time.Time `json:"last_reset_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	LastGeneration  int64      `json:"last_generation"`
+	// ResetOrderProtected is an in-process repository write policy. Codex 7d
+	// uses generation ordering because its projected reset_at drifts.
+	ResetOrderProtected bool      `json:"-"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type UsageAlertWindowSnapshot struct {
-	UsedPercent      float64    `json:"used_percent"`
-	RemainingPercent float64    `json:"remaining_percent"`
-	ResetAt          *time.Time `json:"reset_at,omitempty"`
+	UsedPercent           float64    `json:"used_percent"`
+	RemainingPercent      float64    `json:"remaining_percent"`
+	ResetAt               *time.Time `json:"reset_at,omitempty"`
+	SampledAt             *time.Time `json:"sampled_at,omitempty"`
+	Generation            int64      `json:"generation,omitempty"`
+	BoundaryAt            *time.Time `json:"boundary_at,omitempty"`
+	AwaitingOfficialReset bool       `json:"awaiting_official_reset,omitempty"`
 }
 
 type UsageAlertSnapshot struct {
@@ -250,24 +260,29 @@ type UsageAlertRepository interface {
 }
 
 type UsageAlertService struct {
-	repo            UsageAlertRepository
-	accountRepo     AccountRepository
-	httpClient      *http.Client
-	evaluationLocks sync.Map
-	workers         sync.Map
-	cleanupMu       sync.Mutex
-	cleanupRunning  bool
-	lastCleanupAt   time.Time
+	repo                   UsageAlertRepository
+	accountRepo            AccountRepository
+	httpClient             *http.Client
+	codexBoundaryRefresher OpenAICodexUsageSnapshotRefresher
+	evaluationLocks        sync.Map
+	workers                sync.Map
+	cleanupMu              sync.Mutex
+	cleanupRunning         bool
+	lastCleanupAt          time.Time
+	codexBoundaryRefreshMu sync.Mutex
+	codexBoundaryRefreshAt map[int64]time.Time
 }
 
 type usageAlertObservationWorker struct {
-	mu           sync.Mutex
-	running      bool
-	waiting      bool
-	pending      *UsageAlertSnapshot
-	retryPending *UsageAlertSnapshot
-	retryDelay   time.Duration
-	wake         chan struct{}
+	mu               sync.Mutex
+	running          bool
+	waiting          bool
+	pending          *UsageAlertSnapshot
+	manualPending    *UsageAlertSnapshot
+	authorityPending *UsageAlertSnapshot
+	retryPending     *UsageAlertSnapshot
+	retryDelay       time.Duration
+	wake             chan struct{}
 }
 
 type usageAlertDeliveryCleaner interface {
@@ -279,6 +294,12 @@ func NewUsageAlertService(repo UsageAlertRepository, accountRepo AccountReposito
 		repo:        repo,
 		accountRepo: accountRepo,
 		httpClient:  &http.Client{Timeout: 8 * time.Second},
+	}
+}
+
+func (s *UsageAlertService) SetOpenAICodexBoundaryRefresher(refresher OpenAICodexUsageSnapshotRefresher) {
+	if s != nil {
+		s.codexBoundaryRefresher = refresher
 	}
 }
 
@@ -493,7 +514,14 @@ func (s *UsageAlertService) enqueueObservation(snapshot UsageAlertSnapshot) {
 
 	worker.mu.Lock()
 	snapshotCopy := snapshot
-	worker.pending = &snapshotCopy
+	switch usageAlertObservationPriority(snapshot) {
+	case 2:
+		worker.manualPending = &snapshotCopy
+	case 1:
+		worker.authorityPending = &snapshotCopy
+	default:
+		worker.pending = &snapshotCopy
+	}
 	if worker.running {
 		select {
 		case worker.wake <- struct{}{}:
@@ -514,6 +542,12 @@ func (s *UsageAlertService) runObservationWorker(worker *usageAlertObservationWo
 		pending := worker.retryPending
 		if pending != nil {
 			worker.retryPending = nil
+		} else if worker.manualPending != nil {
+			pending = worker.manualPending
+			worker.manualPending = nil
+		} else if worker.authorityPending != nil {
+			pending = worker.authorityPending
+			worker.authorityPending = nil
 		} else {
 			pending = worker.pending
 			worker.pending = nil
@@ -561,6 +595,23 @@ func (s *UsageAlertService) runObservationWorker(worker *usageAlertObservationWo
 		worker.mu.Lock()
 		worker.waiting = false
 		worker.mu.Unlock()
+	}
+}
+
+func usageAlertObservationPriority(snapshot UsageAlertSnapshot) int {
+	if !isCodexOverall7dWindow(snapshot, UsageAlertWindow7d) {
+		return 0
+	}
+	if _, ok := snapshot.Windows[UsageAlertWindow7d]; !ok {
+		return 0
+	}
+	switch snapshot.Source {
+	case UsageAlertSourceOpenAIQuotaReset:
+		return 2
+	case UsageAlertSourceOpenAICodexUsageAPI:
+		return 1
+	default:
+		return 0
 	}
 }
 
@@ -612,23 +663,39 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	previous, err := s.repo.GetSnapshot(ctx, snapshot.RealAccountID, snapshot.UsageType)
-	if err != nil {
-		slog.Warn("usage_alert_get_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
-		return true
-	}
-	evaluationSnapshot, persistedSnapshot, hasFreshWindows := prepareUsageAlertSnapshot(previous, snapshot)
-	if !hasFreshWindows {
-		return false
-	}
-	accepted, err := s.repo.UpsertSnapshot(ctx, &persistedSnapshot)
-	if err != nil {
-		slog.Warn("usage_alert_upsert_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
-		return true
+	var previous *UsageAlertSnapshot
+	var evaluationSnapshot UsageAlertSnapshot
+	refreshCodex7d := false
+	accepted := false
+	for attempt := 0; attempt < 2; attempt++ {
+		var err error
+		previous, err = s.repo.GetSnapshot(ctx, snapshot.RealAccountID, snapshot.UsageType)
+		if err != nil {
+			slog.Warn("usage_alert_get_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
+			return true
+		}
+		var persistedSnapshot UsageAlertSnapshot
+		var hasFreshWindows, needsCodex7dRefresh bool
+		evaluationSnapshot, persistedSnapshot, hasFreshWindows, needsCodex7dRefresh = prepareUsageAlertSnapshot(previous, snapshot)
+		refreshCodex7d = refreshCodex7d || needsCodex7dRefresh
+		if !hasFreshWindows {
+			s.requestCodex7dBoundaryRefresh(ctx, snapshot, refreshCodex7d)
+			return false
+		}
+		accepted, err = s.repo.UpsertSnapshot(ctx, &persistedSnapshot)
+		if err != nil {
+			slog.Warn("usage_alert_upsert_snapshot_failed", "real_account_id", snapshot.RealAccountID, "error", err)
+			return true
+		}
+		if accepted {
+			break
+		}
 	}
 	if !accepted {
+		s.requestCodex7dBoundaryRefresh(ctx, snapshot, refreshCodex7d)
 		return false
 	}
+	s.requestCodex7dBoundaryRefresh(ctx, snapshot, refreshCodex7d)
 
 	rules, err := s.repo.ListEnabledRules(ctx, snapshot.RealAccountID, snapshot.UsageType)
 	if err != nil {
@@ -674,6 +741,42 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) bool {
 		}
 	}
 	return false
+}
+
+func (s *UsageAlertService) requestCodex7dBoundaryRefresh(ctx context.Context, snapshot UsageAlertSnapshot, required bool) {
+	if !required || s.codexBoundaryRefresher == nil {
+		return
+	}
+	accountIDs := []int64{snapshot.AccountID}
+	if realAccount, err := s.repo.GetRealAccount(ctx, snapshot.RealAccountID); err == nil && realAccount != nil {
+		for _, account := range realAccount.Accounts {
+			if account == nil || account.ID <= 0 || account.ID == snapshot.AccountID || account.Platform != PlatformOpenAI || account.IsShadow() {
+				continue
+			}
+			accountIDs = append(accountIDs, account.ID)
+		}
+	}
+	for _, accountID := range accountIDs {
+		if s.allowCodex7dBoundaryRefresh(accountID, time.Now().UTC()) {
+			s.codexBoundaryRefresher.RefreshOpenAICodexUsageSnapshot(accountID, true)
+		}
+	}
+}
+
+func (s *UsageAlertService) allowCodex7dBoundaryRefresh(accountID int64, now time.Time) bool {
+	if accountID <= 0 {
+		return false
+	}
+	s.codexBoundaryRefreshMu.Lock()
+	defer s.codexBoundaryRefreshMu.Unlock()
+	if last := s.codexBoundaryRefreshAt[accountID]; !last.IsZero() && now.Sub(last) < codex7dBoundaryRefreshDelay {
+		return false
+	}
+	if s.codexBoundaryRefreshAt == nil {
+		s.codexBoundaryRefreshAt = make(map[int64]time.Time)
+	}
+	s.codexBoundaryRefreshAt[accountID] = now
+	return true
 }
 
 func (s *UsageAlertService) deliverUsageAlertEvent(ctx context.Context, realAccountID, ruleID int64, webhooks []*UsageAlertWebhook, event UsageAlertWebhookEvent) bool {
@@ -777,33 +880,159 @@ func (s *UsageAlertService) evaluationLock(realAccountID int64, usageType string
 // prepareUsageAlertSnapshot separates windows that are safe to evaluate from
 // the merged snapshot persisted for later comparisons. A sample collected later
 // must not move a linked real account back to an older quota window.
-func prepareUsageAlertSnapshot(previous *UsageAlertSnapshot, current UsageAlertSnapshot) (UsageAlertSnapshot, UsageAlertSnapshot, bool) {
+func prepareUsageAlertSnapshot(previous *UsageAlertSnapshot, current UsageAlertSnapshot) (UsageAlertSnapshot, UsageAlertSnapshot, bool, bool) {
 	freshWindows := make(map[string]UsageAlertWindowSnapshot, len(current.Windows))
 	persistedWindows := make(map[string]UsageAlertWindowSnapshot, len(current.Windows))
 	if previous != nil {
 		for window, value := range previous.Windows {
-			persistedWindows[window] = value
+			persistedWindows[window] = normalizePersistedUsageAlertWindow(previous, window, value)
 		}
 	}
 
+	refreshCodex7d := false
 	for window, value := range current.Windows {
+		if !current.SampledAt.IsZero() {
+			value.SampledAt = usageAlertTimePtr(current.SampledAt)
+		}
+		initialized := false
 		if previous != nil {
-			if previousValue, ok := previous.Windows[window]; ok && usageAlertWindowGenerationIsOlder(previousValue, value) {
-				continue
+			if previousValue, ok := persistedWindows[window]; ok {
+				var accepted bool
+				if isCodexOverall7dWindow(current, window) {
+					value, accepted, refreshCodex7d = prepareCodex7dWindow(previousValue, value, current.Source, current.SampledAt)
+				} else {
+					value, accepted = prepareResetOrderedWindow(previousValue, value)
+				}
+				if !accepted {
+					continue
+				}
+			} else {
+				value = initializeUsageAlertWindow(current, window, value)
+				initialized = true
 			}
+		}
+		if previous == nil && !initialized {
+			value = initializeUsageAlertWindow(current, window, value)
 		}
 		freshWindows[window] = value
 		persistedWindows[window] = value
 	}
 	if len(freshWindows) == 0 {
-		return UsageAlertSnapshot{}, UsageAlertSnapshot{}, false
+		return UsageAlertSnapshot{}, UsageAlertSnapshot{}, false, refreshCodex7d
 	}
 
 	evaluation := current
 	evaluation.Windows = freshWindows
 	persisted := current
 	persisted.Windows = persistedWindows
-	return evaluation, persisted, true
+	return evaluation, persisted, true, refreshCodex7d
+}
+
+func initializeUsageAlertWindow(snapshot UsageAlertSnapshot, window string, value UsageAlertWindowSnapshot) UsageAlertWindowSnapshot {
+	value.Generation = 1
+	if isCodexOverall7dWindow(snapshot, window) {
+		value.BoundaryAt = value.ResetAt
+		value.AwaitingOfficialReset = snapshot.Source == UsageAlertSourceOpenAIQuotaReset
+	}
+	return value
+}
+
+func normalizePersistedUsageAlertWindow(snapshot *UsageAlertSnapshot, window string, value UsageAlertWindowSnapshot) UsageAlertWindowSnapshot {
+	if value.Generation <= 0 {
+		value.Generation = 1
+	}
+	if value.SampledAt == nil && snapshot != nil && !snapshot.SampledAt.IsZero() {
+		value.SampledAt = usageAlertTimePtr(snapshot.SampledAt)
+	}
+	if snapshot != nil && isCodexOverall7dWindow(*snapshot, window) && value.BoundaryAt == nil {
+		value.BoundaryAt = value.ResetAt
+	}
+	return value
+}
+
+func prepareResetOrderedWindow(previous, current UsageAlertWindowSnapshot) (UsageAlertWindowSnapshot, bool) {
+	if usageAlertWindowGenerationIsOlder(previous, current) {
+		return UsageAlertWindowSnapshot{}, false
+	}
+	current.Generation = previous.Generation
+	if current.Generation <= 0 {
+		current.Generation = 1
+	}
+	if usageAlertWindowGenerationIsNewer(previous.ResetAt, current.ResetAt) {
+		current.Generation++
+	}
+	if current.Generation == previous.Generation && usageAlertWindowSampleIsOlder(previous, current) {
+		return UsageAlertWindowSnapshot{}, false
+	}
+	return current, true
+}
+
+func prepareCodex7dWindow(previous, current UsageAlertWindowSnapshot, source string, sampledAt time.Time) (UsageAlertWindowSnapshot, bool, bool) {
+	current.Generation = previous.Generation
+	if current.Generation <= 0 {
+		current.Generation = 1
+	}
+	current.BoundaryAt = previous.BoundaryAt
+	if current.BoundaryAt == nil {
+		current.BoundaryAt = previous.ResetAt
+	}
+
+	if source == UsageAlertSourceOpenAIQuotaReset {
+		if usageAlertWindowSampleIsOlder(previous, current) {
+			return UsageAlertWindowSnapshot{}, false, false
+		}
+		if !previous.AwaitingOfficialReset {
+			current.Generation++
+		}
+		current.AwaitingOfficialReset = true
+		return current, true, false
+	}
+
+	boundaryDue := current.BoundaryAt != nil && !sampledAt.Before(*current.BoundaryAt)
+	if boundaryDue {
+		if source == UsageAlertSourceOpenAICodexUsageAPI && codex7dRolloverConfirmed(current) {
+			current.Generation++
+			current.BoundaryAt = current.ResetAt
+			current.AwaitingOfficialReset = false
+			return current, true, false
+		}
+		return UsageAlertWindowSnapshot{}, false, true
+	}
+
+	// While a manual generation is awaiting the official rollover, only accept
+	// samples whose reset horizon itself proves that they belong to the new 7d
+	// cycle. This avoids treating minute-level reset_at drift as cycle identity.
+	if previous.AwaitingOfficialReset && !codex7dRolloverConfirmed(current) {
+		return UsageAlertWindowSnapshot{}, false, false
+	}
+	if current.ResetAt != nil && !current.ResetAt.After(sampledAt) {
+		return UsageAlertWindowSnapshot{}, false, false
+	}
+	if usageAlertWindowSampleIsOlder(previous, current) {
+		return UsageAlertWindowSnapshot{}, false, false
+	}
+
+	current.AwaitingOfficialReset = previous.AwaitingOfficialReset
+	return current, true, false
+}
+
+func codex7dRolloverConfirmed(current UsageAlertWindowSnapshot) bool {
+	return current.ResetAt != nil && current.BoundaryAt != nil && current.ResetAt.After(current.BoundaryAt.Add(codex7dMinimumCycleDuration))
+}
+
+func usageAlertWindowSampleIsOlder(previous, current UsageAlertWindowSnapshot) bool {
+	return previous.SampledAt != nil && current.SampledAt != nil && current.SampledAt.Before(*previous.SampledAt)
+}
+
+func isCodexOverall7dWindow(snapshot UsageAlertSnapshot, window string) bool {
+	return snapshot.Platform == UsageAlertPlatformOpenAI &&
+		normalizeUsageAlertUsageType(snapshot.UsageType) == UsageAlertTypeOverall &&
+		window == UsageAlertWindow7d
+}
+
+func usageAlertTimePtr(value time.Time) *time.Time {
+	value = value.UTC()
+	return &value
 }
 
 func usageAlertWindowGenerationIsOlder(previous, current UsageAlertWindowSnapshot) bool {
@@ -831,9 +1060,11 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 		if err != nil {
 			return nil, fmt.Errorf("get state for rule %d: %w", rule.ID, err)
 		}
-		if state != nil && usageAlertWindowGenerationIsOlder(
-			UsageAlertWindowSnapshot{ResetAt: state.LastResetAt},
-			window,
+		if state != nil && state.LastGeneration > 0 && window.Generation > 0 && state.LastGeneration > window.Generation {
+			continue
+		}
+		if state != nil && state.LastGeneration == 0 && !isCodexOverall7dWindow(*current, rule.Window) && usageAlertWindowGenerationIsOlder(
+			UsageAlertWindowSnapshot{ResetAt: state.LastResetAt}, window,
 		) {
 			continue
 		}
@@ -861,7 +1092,17 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 			continue
 		}
 		stateForTrigger := state
-		if state != nil && usageAlertWindowGenerationIsNewer(state.LastResetAt, window.ResetAt) {
+		previousWindow, hasPreviousWindow := UsageAlertWindowSnapshot{}, false
+		if previous != nil {
+			previousWindow, hasPreviousWindow = previous.Windows[rule.Window]
+		}
+		if state != nil && usageAlertWindowStateGenerationIsNewer(
+			state,
+			window,
+			previousWindow,
+			hasPreviousWindow,
+			isCodexOverall7dWindow(*current, rule.Window),
+		) {
 			stateForTrigger = nil
 			stateAnchor = "new-generation"
 		}
@@ -878,6 +1119,29 @@ func (s *UsageAlertService) evaluateRules(ctx context.Context, previous, current
 		})
 	}
 	return triggers, nil
+}
+
+func usageAlertWindowStateGenerationIsNewer(
+	state *UsageAlertState,
+	window UsageAlertWindowSnapshot,
+	previousWindow UsageAlertWindowSnapshot,
+	hasPreviousWindow bool,
+	codex7d bool,
+) bool {
+	if state == nil {
+		return false
+	}
+	if state.LastGeneration > 0 && window.Generation > 0 {
+		return window.Generation > state.LastGeneration
+	}
+	if codex7d && hasPreviousWindow && window.Generation > 0 {
+		previousGeneration := previousWindow.Generation
+		if previousGeneration <= 0 {
+			previousGeneration = 1
+		}
+		return window.Generation > previousGeneration
+	}
+	return usageAlertWindowGenerationIsNewer(state.LastResetAt, window.ResetAt)
 }
 
 func (s *UsageAlertService) commitUsageAlertTrigger(trigger UsageAlertTrigger, realAccountID int64) error {
@@ -941,7 +1205,7 @@ func usageAlertStateAnchor(state *UsageAlertState) string {
 	if state.LastResetAt != nil {
 		resetAt = state.LastResetAt.UTC().UnixNano()
 	}
-	return fmt.Sprintf("%s:%d:%s:%d", state.LastStatus, triggeredAt, lastValue, resetAt)
+	return fmt.Sprintf("%s:%d:%s:%d:%d", state.LastStatus, triggeredAt, lastValue, resetAt, state.LastGeneration)
 }
 
 func (s *UsageAlertService) populateUsageAlertRuleScope(ctx context.Context, rule *UsageAlertRule) error {
@@ -980,16 +1244,24 @@ func (s *UsageAlertService) updateRuleState(ctx context.Context, realAccountID i
 		}
 	}
 	state := &UsageAlertState{
-		RealAccountID:   realAccountID,
-		RuleID:          rule.ID,
-		UsageType:       rule.UsageType,
-		Window:          rule.Window,
-		LastStatus:      status,
-		LastTriggeredAt: triggeredAt,
-		LastValue:       &value,
-		LastResetAt:     window.ResetAt,
+		RealAccountID:       realAccountID,
+		RuleID:              rule.ID,
+		UsageType:           rule.UsageType,
+		Window:              rule.Window,
+		LastStatus:          status,
+		LastTriggeredAt:     triggeredAt,
+		LastValue:           &value,
+		LastResetAt:         window.ResetAt,
+		LastGeneration:      window.Generation,
+		ResetOrderProtected: !isCodexOverall7dRule(rule),
 	}
 	return s.repo.UpsertState(ctx, state)
+}
+
+func isCodexOverall7dRule(rule *UsageAlertRule) bool {
+	return rule != nil && rule.Platform == UsageAlertPlatformOpenAI &&
+		normalizeUsageAlertUsageType(rule.UsageType) == UsageAlertTypeOverall &&
+		rule.Window == UsageAlertWindow7d
 }
 
 func (s *UsageAlertService) deliverWebhookWithRetry(ctx context.Context, webhook UsageAlertWebhook, event UsageAlertWebhookEvent) error {
@@ -1696,7 +1968,7 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 		eventName = UsageAlertEventResolved
 	}
 	eventIdentity := fmt.Sprintf(
-		"%d|%s|%d|%s|%s|%s|%s|%.12g|%s|%s|%d",
+		"%d|%s|%d|%s|%s|%s|%s|%.12g|%s|%s|%s",
 		snapshot.RealAccountID,
 		snapshot.UsageType,
 		trigger.Rule.ID,
@@ -1707,7 +1979,7 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 		trigger.Rule.Threshold,
 		usageAlertOptionalFloatIdentity(trigger.Rule.StepPercent),
 		trigger.StateAnchor,
-		usageAlertResetUnixNano(trigger.WindowState.ResetAt),
+		usageAlertWindowGenerationIdentity(trigger.WindowState),
 	)
 	eventHash := sha256.Sum256([]byte(eventIdentity))
 	return UsageAlertWebhookEvent{
@@ -1735,6 +2007,13 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 		ResetAt:          trigger.WindowState.ResetAt,
 		StepPercent:      trigger.Rule.StepPercent,
 	}
+}
+
+func usageAlertWindowGenerationIdentity(window UsageAlertWindowSnapshot) string {
+	if window.Generation > 0 {
+		return fmt.Sprintf("generation:%d", window.Generation)
+	}
+	return fmt.Sprintf("reset:%d", usageAlertResetUnixNano(window.ResetAt))
 }
 
 func usageAlertOptionalFloatIdentity(value *float64) string {

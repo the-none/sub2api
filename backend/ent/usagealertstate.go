@@ -39,6 +39,8 @@ type UsageAlertState struct {
 	LastValue *float64 `json:"last_value,omitempty"`
 	// LastResetAt holds the value of the "last_reset_at" field.
 	LastResetAt *time.Time `json:"last_reset_at,omitempty"`
+	// LastGeneration holds the value of the "last_generation" field.
+	LastGeneration int64 `json:"last_generation,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the UsageAlertStateQuery when eager-loading is set.
 	Edges        UsageAlertStateEdges `json:"edges"`
@@ -85,7 +87,7 @@ func (*UsageAlertState) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagealertstate.FieldLastValue:
 			values[i] = new(sql.NullFloat64)
-		case usagealertstate.FieldID, usagealertstate.FieldRealAccountID, usagealertstate.FieldRuleID:
+		case usagealertstate.FieldID, usagealertstate.FieldRealAccountID, usagealertstate.FieldRuleID, usagealertstate.FieldLastGeneration:
 			values[i] = new(sql.NullInt64)
 		case usagealertstate.FieldUsageType, usagealertstate.FieldWindow, usagealertstate.FieldLastStatus:
 			values[i] = new(sql.NullString)
@@ -175,6 +177,12 @@ func (_m *UsageAlertState) assignValues(columns []string, values []any) error {
 				_m.LastResetAt = new(time.Time)
 				*_m.LastResetAt = value.Time
 			}
+		case usagealertstate.FieldLastGeneration:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field last_generation", values[i])
+			} else if value.Valid {
+				_m.LastGeneration = value.Int64
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -256,6 +264,9 @@ func (_m *UsageAlertState) String() string {
 		builder.WriteString("last_reset_at=")
 		builder.WriteString(v.Format(time.ANSIC))
 	}
+	builder.WriteString(", ")
+	builder.WriteString("last_generation=")
+	builder.WriteString(fmt.Sprintf("%v", _m.LastGeneration))
 	builder.WriteByte(')')
 	return builder.String()
 }

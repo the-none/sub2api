@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -116,6 +117,36 @@ func TestAccountUsageService_ReconcileOpenAIQuotaResetRejects429Snapshot(t *test
 	require.ErrorContains(t, err, "not confirmed")
 	require.Zero(t, repo.updateCalls)
 	require.Empty(t, scheduler.accountIDs)
+}
+
+func TestAccountUsageService_ReconcileOpenAIQuotaResetAcceptsFiveHourSnapshotWithoutCachedWeeklyUsage(t *testing.T) {
+	account := newQuotaResetProbeAccount()
+	repo := &quotaResetUsageRepo{account: account}
+	scheduler := &quotaResetSchedulerRecorder{}
+	probeUpdates := map[string]any{
+		"codex_5h_used_percent": 2.0,
+	}
+	svc := &AccountUsageService{
+		accountRepo:         repo,
+		quotaResetScheduler: scheduler,
+		openAICodexProbeFn: func(context.Context, *Account) (*openAICodexProbeOutcome, error) {
+			return &openAICodexProbeOutcome{
+				StatusCode: 200,
+				Updates:    probeUpdates,
+			}, nil
+		},
+	}
+
+	err := svc.ReconcileOpenAIQuotaReset(context.Background(), account.ID)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.updateCalls)
+	require.Equal(t, []int64{account.ID}, scheduler.accountIDs)
+	require.NotContains(t, repo.lastUpdates, "codex_7d_used_percent")
+	snapshot := usageAlertSnapshotFromCodexExtra(account.ID, UsageAlertSourceOpenAIQuotaReset, probeUpdates, time.Now())
+	require.NotNil(t, snapshot)
+	require.Contains(t, snapshot.Windows, UsageAlertWindow5h)
+	require.NotContains(t, snapshot.Windows, UsageAlertWindow7d)
 }
 
 func TestAccountUsageService_ReconcileOpenAIQuotaResetDoesNotClearWhenSnapshotPersistenceFails(t *testing.T) {
