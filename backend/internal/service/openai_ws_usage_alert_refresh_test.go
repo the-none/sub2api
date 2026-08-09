@@ -43,8 +43,9 @@ func TestOpenAIGatewayService_WSHTTPBridgeUsesFreshUsageHeaders(t *testing.T) {
 	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
 	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 1)}
 	svc := &OpenAIGatewayService{
-		accountRepo:    repo,
-		usageRefresher: refresher,
+		accountRepo:           repo,
+		usageRefresher:        refresher,
+		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 	}
 	freshHeaders := make(http.Header)
 	freshHeaders.Set("x-codex-primary-used-percent", "23")

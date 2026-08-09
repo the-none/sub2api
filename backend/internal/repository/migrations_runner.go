@@ -62,6 +62,8 @@ const usageAlertAccountIndexMigration = "155_usage_alert_accounts_real_account_i
 const usageAlertAccountIndex = "accounts_real_account_id_idx"
 const latestAPIKeyIPIndexMigration = "174_add_usage_logs_api_key_latest_ip_index_notx.sql"
 const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
+const usageLogsUpstreamModelMismatchIndexMigration = "195_add_usage_log_upstream_model_mismatch_index_notx.sql"
+const usageLogsUpstreamModelMismatchIndex = "idx_usage_logs_upstream_model_mismatch_created_at"
 
 type migrationChecksumCompatibilityRule struct {
 	fileChecksum       string
@@ -88,6 +90,36 @@ var migrationChecksumCompatibilityRules = map[string]migrationChecksumCompatibil
 	"159_batch_image_foundation.sql":                          newMigrationChecksumCompatibilityRule("d902b70982025ec519749faf058aab7631e82c3f48167b9a4ae4db718eb72cce", "82da85b5d98e67a0507647b873a40373e84538e4adafdeed6767c0ac8b6570b2"),
 	"161_batch_image_pricing_snapshot.sql":                    newMigrationChecksumCompatibilityRule("4012af3e43636cb6af22e0176d59d1fcc70615c0f310194329461ae462c4fbd6", "96d915c9b7a6941ae99039e0ff3f1a61481eb9bddd933d11c6fadb2274554e87"),
 	"174_usage_alert_usage_type.sql":                          newMigrationChecksumCompatibilityRule("fecdc44366fcedfcb723700c412693aec5b7148982d0a4a320f6b44271c7952d", "ed8430de4aeef247b45ba245d94191af6698b2f572eefd2370e747fe47fbd445"),
+	// 195 originally seeded mode=v2; flipped to v1 (safe default / opt-in v2). Existing DBs
+	// that already applied the v2 seed keep their row and the historical checksum.
+	"195_channel_monitor_mode.sql": newMigrationChecksumCompatibilityRule(
+		"73c39ac374c722253135041466108836845828a6065b499c60e7f27d6b92c21c",
+		"f20366e106e3a54c73d4a67df3ba87734427ed859bc4ae42b0708e4cbcbacb56",
+		"13f3792f3e3e53ee96e26415c884cf8062c77172824b54fcc9a8c0c2b1f185ec",
+		"4c74fe33ef2274cc72e1bb49671e651274532c034b29f5b2982c2a4c88d101a6",
+	),
+	// 220 originally cleared video prices for all non-grok platforms (including composite);
+	// composite is now preserved because it may route to Grok accounts.
+	"220_clear_non_grok_video_generation_config.sql": newMigrationChecksumCompatibilityRule(
+		"cf4dbfa75ac27d93a30a6a14439fe7dccfc911c043358363d5ec47946aa0e28b",
+		"3d08d905a7bca1f56f14b6d2a2a0dcb07480ff52c21393b4e2db1b3a3f83b3d0",
+		"353c8e8e1805f2a6fd61311e03118e7dd8388f264cfd9af9e0cabe2a696388c4",
+		"3da48c8fdffe6390325f43d08b8e353e0a365df43d44a78dbbe655d0deb18402",
+		"e7942a7201f9a0d35e78275fbbe4eca82ac25e4a3741920e45bcd1054e0522a8",
+		"85e320b9ec64f2d3fcd8cf705b2b4e76a7b49f7a57140c14bff97f32691c818b",
+	),
+	"219_group_search_price_per_1k.sql": newMigrationChecksumCompatibilityRule(
+		"430c2e3595342fe22c59e9676e9b18ea376f076324b77174a21e6f181f57f4b5",
+		"833578274d0eed24d39355298d5659b33e5484c869b331ffd815187c221552d2",
+		"e86786ebcc3b14206fd2d321380a4e50e80cdadbfcf4962c639255e6a14008db",
+		"df6ffd71b97e30ec2c8fe7b95e15783042dea58c553e32701ee7c42a5619af80",
+	),
+	"218_group_audio_voice_pricing.sql": newMigrationChecksumCompatibilityRule(
+		"a99ade7d0d464c67bf56814570050cc363ffad64eae2cb1e1ed760065f0b3585",
+		"343a955e52348ce92c35753e78ca3f8e5a76060c20af71061ca5e04c6ed84085",
+		"40ee9f3a2af0e0a5e99dabc878fd0fe98be1011f26bcfcefcac7197f7081f0e7",
+		"c2a5e5b4ffd6968ad1c10593289fbc11192cdea19fec3ed9bce3a84eff9a8351",
+	),
 }
 
 // ApplyMigrations 将嵌入的 SQL 迁移文件应用到指定的数据库。
@@ -297,6 +329,8 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio
 		return dropInvalidIndexIfPresent(ctx, db, usageAlertAccountIndex)
 	case latestAPIKeyIPIndexMigration:
 		return dropInvalidIndexIfPresent(ctx, db, latestAPIKeyIPIndex)
+	case usageLogsUpstreamModelMismatchIndexMigration:
+		return dropInvalidIndexIfPresent(ctx, db, usageLogsUpstreamModelMismatchIndex)
 	default:
 		return nil
 	}

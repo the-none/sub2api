@@ -169,6 +169,50 @@ func TestMigration174ChecksumAcceptsPublishedBrokenOrdering(t *testing.T) {
 	))
 }
 
+func TestMigrationCompatibilityAcceptsPublishedTrimmedVersions(t *testing.T) {
+	tests := []struct {
+		name      string
+		current   string
+		published []string
+	}{
+		{
+			name:      "195_channel_monitor_mode.sql",
+			current:   "73c39ac374c722253135041466108836845828a6065b499c60e7f27d6b92c21c",
+			published: []string{"f20366e106e3a54c73d4a67df3ba87734427ed859bc4ae42b0708e4cbcbacb56"},
+		},
+		{
+			name:      "218_group_audio_voice_pricing.sql",
+			current:   "a99ade7d0d464c67bf56814570050cc363ffad64eae2cb1e1ed760065f0b3585",
+			published: []string{"343a955e52348ce92c35753e78ca3f8e5a76060c20af71061ca5e04c6ed84085"},
+		},
+		{
+			name:      "219_group_search_price_per_1k.sql",
+			current:   "430c2e3595342fe22c59e9676e9b18ea376f076324b77174a21e6f181f57f4b5",
+			published: []string{"833578274d0eed24d39355298d5659b33e5484c869b331ffd815187c221552d2"},
+		},
+		{
+			name:    "220_clear_non_grok_video_generation_config.sql",
+			current: "cf4dbfa75ac27d93a30a6a14439fe7dccfc911c043358363d5ec47946aa0e28b",
+			published: []string{
+				"3d08d905a7bca1f56f14b6d2a2a0dcb07480ff52c21393b4e2db1b3a3f83b3d0",
+				"353c8e8e1805f2a6fd61311e03118e7dd8388f264cfd9af9e0cabe2a696388c4",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, err := os.ReadFile(filepath.Join("../../migrations", tt.name))
+			require.NoError(t, err)
+			current := migrationChecksum(string(content))
+			require.Equal(t, tt.current, current)
+			for _, published := range tt.published {
+				require.True(t, isMigrationChecksumCompatible(tt.name, published, current))
+			}
+		})
+	}
+}
+
 func TestEnsureAtlasBaselineAligned(t *testing.T) {
 	t.Run("skip_when_no_legacy_table", func(t *testing.T) {
 		db, mock, err := sqlmock.New()
