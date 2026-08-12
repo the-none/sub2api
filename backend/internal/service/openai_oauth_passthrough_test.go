@@ -89,6 +89,88 @@ func (u *httpUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, acc
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
+func TestOpenAIGatewayService_FailoverClearsPreviousAccountFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalBody := []byte(`{"model":"gpt-5.4","stream":false,"input":"hi","client_metadata":{"x-codex-installation-id":"client-install"}}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(originalBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("X-Codex-Installation-ID", "client-install")
+
+	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	accountA := &Account{
+		ID:       901,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token-a",
+			"chatgpt_account_id": "chatgpt-a",
+		},
+		Extra: map[string]any{
+			codexFingerprintModeExtraKey: "device",
+			"openai_device_id":           "account-a-device",
+		},
+	}
+	accountB := &Account{
+		ID:       902,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token-b",
+			"chatgpt_account_id": "chatgpt-b",
+		},
+		Extra: map[string]any{codexFingerprintModeExtraKey: "off"},
+	}
+
+	_, err := svc.Forward(context.Background(), c, accountA, originalBody)
+	require.Error(t, err)
+	require.Equal(t, "account-a-device", upstream.lastReq.Header.Get("X-Codex-Installation-ID"))
+
+	_, err = svc.Forward(context.Background(), c, accountB, originalBody)
+	require.Error(t, err)
+	require.Equal(t, "client-install", upstream.lastReq.Header.Get("X-Codex-Installation-ID"),
+		"fingerprint-off failover account must not inherit the previous account's converged ID")
+	require.Equal(t, "client-install", gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
+	stored, ok := c.Get("codex_fingerprint_ids")
+	require.True(t, ok)
+	ids, ok := stored.(*codexFingerprintIDs)
+	require.True(t, ok)
+	require.Nil(t, ids)
+}
+
+func TestOpenAIGatewayService_BuildUpstreamRequestNormalizesBrowserUAThenAppliesFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.4","input":"hi"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+	c.Request.Header.Set("X-Codex-Installation-ID", "client-install")
+	setOpenAICompatMessagesBridgeContext(c, true)
+
+	account := newTestOAuthAccount(903, map[string]any{
+		codexFingerprintModeExtraKey: "device",
+		"openai_device_id":           "converged-device",
+	})
+	account.Credentials = map[string]any{"chatgpt_account_id": "chatgpt-account"}
+	ids := resolveCodexFingerprintIDsFromRequest(account, c.Request.Header)
+	require.NotNil(t, ids)
+	c.Set("codex_fingerprint_ids", ids)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	req, err := svc.buildUpstreamRequest(
+		context.Background(), c, account, []byte(`{"model":"gpt-5.4","input":"hi"}`),
+		"oauth-token", false, "", false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, resolveCodexOutboundIdentity("").userAgent, req.Header.Get("User-Agent"))
+	require.Equal(t, "converged-device", req.Header.Get("X-Codex-Installation-ID"))
+	require.Empty(t, req.Header.Get("originator"), "compat bridge must keep its no-originator contract")
+}
+
 func TestOpenAIGatewayService_ResponsesUnknownModelDoesNotFallbackToGPT54(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1674,6 +1756,69 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PoolModeConfigured5xxRetriesSame
 	require.ErrorAs(t, err, &failoverErr)
 	require.True(t, failoverErr.RetryableOnSameAccount)
 	require.False(t, c.Writer.Written())
+}
+
+func TestOpenAIGatewayService_APIKeyPassthrough_PoolModeAuthErrorsTriggerFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name        string
+		statusCode  int
+		credentials map[string]any
+	}{
+		{
+			name:       "configured_401",
+			statusCode: http.StatusUnauthorized,
+			credentials: map[string]any{
+				"pool_mode_retry_status_codes": []any{float64(http.StatusUnauthorized)},
+			},
+		},
+		{
+			name:        "default_403",
+			statusCode:  http.StatusForbidden,
+			credentials: map[string]any{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+
+			upstreamBody := `{"error":{"message":"upstream credential rejected"}}`
+			svc := &OpenAIGatewayService{
+				cfg:              &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+				rateLimitService: NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil),
+				httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: tt.statusCode,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+				}},
+			}
+			credentials := map[string]any{
+				"api_key":   "sk-test",
+				"base_url":  "https://api.example.test",
+				"pool_mode": true,
+			}
+			for key, value := range tt.credentials {
+				credentials[key] = value
+			}
+			account := &Account{
+				ID: 129, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+				Credentials: credentials,
+				Extra:       map[string]any{"openai_passthrough": true}, Status: StatusActive, Schedulable: true,
+			}
+
+			_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.2","input":"hello"}`))
+
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, tt.statusCode, failoverErr.StatusCode)
+			require.True(t, failoverErr.RetryableOnSameAccount)
+			require.False(t, c.Writer.Written(), "pool-mode auth failure must fail over before committing a response")
+			require.False(t, IsResponseCommitted(c))
+		})
+	}
 }
 
 func TestOpenAIGatewayService_OpenAIPassthrough_CompactNetworkErrorsTriggerFailover(t *testing.T) {

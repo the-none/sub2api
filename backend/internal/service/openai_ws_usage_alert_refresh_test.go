@@ -89,6 +89,35 @@ func TestOpenAIGatewayService_SparkRequestSchedulesAuthoritativeUsageRefresh(t *
 	}
 }
 
+func TestOpenAIGatewayService_SparkHeaderEntrySchedulesRefreshWithoutPersistingHeaders(t *testing.T) {
+	updatesCh := make(chan map[string]any, 1)
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 1)}
+	svc := &OpenAIGatewayService{
+		accountRepo:           repo,
+		usageRefresher:        refresher,
+		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
+	}
+	parentID := int64(89)
+	shadow := &Account{ID: 90, ParentAccountID: &parentID, QuotaDimension: QuotaDimensionSpark}
+	headers := make(http.Header)
+	headers.Set("x-codex-primary-used-percent", "99")
+
+	svc.updateCodexUsageSnapshotFromHeadersForAccount(context.Background(), shadow, headers)
+
+	select {
+	case force := <-refresher.calls:
+		require.False(t, force)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Spark header-entry quota refresh")
+	}
+	select {
+	case <-updatesCh:
+		t.Fatal("Spark shadow must not persist parent x-codex quota headers")
+	default:
+	}
+}
+
 func TestAccountUsageService_WSUsageRefreshIsThrottledAndForceable(t *testing.T) {
 	updatesCh := make(chan map[string]any, 2)
 	repo := &snapshotUpdateAccountRepo{

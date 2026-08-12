@@ -414,6 +414,25 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if !isCompactRequest && applyCodexClientMetadata(decoded, account) {
 			markDecodedModified()
 		}
+		// 指纹收敛：一次性解析收敛 ID，请求体和出站头共享同一份 IDs（保证 turn_id 等随机字段一致）。
+		// fingerprintIDs 在此处解析，后续 buildUpstreamRequest 中使用同一份。
+		var fpIDs *codexFingerprintIDs
+		if !isCompactRequest {
+			var clientHeaders http.Header
+			if c != nil && c.Request != nil {
+				clientHeaders = c.Request.Header
+			}
+			fpIDs = resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+			if fpIDs != nil {
+				if applyCodexFingerprintClientMetadata(decoded, fpIDs) {
+					markDecodedModified()
+				}
+			}
+		}
+		// 每次账号尝试都覆盖 context；typed nil 会清除上一次 failover 账号留下的指纹。
+		if c != nil {
+			c.Set("codex_fingerprint_ids", fpIDs)
+		}
 		if codexResult.NormalizedModel != "" {
 			upstreamModel = codexResult.NormalizedModel
 		}
@@ -1125,6 +1144,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// 因此身份收口会保持 no-op；这里单独避免浏览器 UA 到达 ChatGPT 内部接口并触发 JS 质询。
 	if account.Type == AccountTypeOAuth {
 		normalizeCodexBrowserUserAgent(req.Header)
+	}
+
+	// 指纹收敛：使用 Forward() 中预计算的收敛 ID 改写出站头，与请求体使用同一份 IDs。
+	if account.Type == AccountTypeOAuth && c != nil {
+		if fpIDs, ok := c.Get("codex_fingerprint_ids"); ok {
+			if ids, ok := fpIDs.(*codexFingerprintIDs); ok {
+				applyCodexFingerprintHeaders(req.Header, ids)
+			}
+		}
 	}
 
 	// 终态收口：强制统一 OAuth 出站身份（User-Agent / originator / version 同源自洽）。
