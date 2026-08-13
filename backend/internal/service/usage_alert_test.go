@@ -347,7 +347,9 @@ type usageAlertDeliveryRepoStub struct {
 	mu       sync.Mutex
 	snapshot *UsageAlertSnapshot
 	state    *UsageAlertState
+	states   map[int64]*UsageAlertState
 	rule     *UsageAlertRule
+	rules    []*UsageAlertRule
 	webhook  *UsageAlertWebhook
 	webhooks []*UsageAlertWebhook
 	receipts map[string]bool
@@ -370,6 +372,9 @@ func (s *usageAlertDeliveryRepoStub) UpsertSnapshot(_ context.Context, snapshot 
 }
 
 func (s *usageAlertDeliveryRepoStub) ListEnabledRules(_ context.Context, _ int64, _ string) ([]*UsageAlertRule, error) {
+	if s.rules != nil {
+		return s.rules, nil
+	}
 	return []*UsageAlertRule{s.rule}, nil
 }
 
@@ -384,15 +389,21 @@ func (s *usageAlertDeliveryRepoStub) GetRealAccount(_ context.Context, id int64)
 	return &RealAccount{ID: id, Name: "OpenAI Main", Platform: UsageAlertPlatformOpenAI}, nil
 }
 
-func (s *usageAlertDeliveryRepoStub) GetState(_ context.Context, _, _ int64, _, _ string) (*UsageAlertState, error) {
+func (s *usageAlertDeliveryRepoStub) GetState(_ context.Context, _, ruleID int64, _, _ string) (*UsageAlertState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.states != nil {
+		return s.states[ruleID], nil
+	}
 	return s.state, nil
 }
 
 func (s *usageAlertDeliveryRepoStub) UpsertState(_ context.Context, state *UsageAlertState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.states != nil {
+		s.states[state.RuleID] = state
+	}
 	s.state = state
 	return nil
 }
@@ -428,6 +439,12 @@ func (s *usageAlertDeliveryRepoStub) currentState() *UsageAlertState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.state
+}
+
+func (s *usageAlertDeliveryRepoStub) currentStateForRule(ruleID int64) *UsageAlertState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.states[ruleID]
 }
 
 func TestObserveAsyncRetriesUncommittedTriggerAfterWebhookFailure(t *testing.T) {
@@ -565,6 +582,82 @@ func TestObserveAsyncRetriesOnlyUndeliveredWebhookWithStableEventID(t *testing.T
 	require.Equal(t, eventIDs[0], eventIDs[1])
 	require.Equal(t, eventIDs[1], eventIDs[2])
 	eventIDsMu.Unlock()
+}
+
+func TestObserveAsyncDeduplicatesAccountResetPerWebhookAcrossRules(t *testing.T) {
+	var firstRequests atomic.Int32
+	var secondRequests atomic.Int32
+	var got UsageAlertWebhookEvent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		firstRequests.Add(1)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	secondServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondRequests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer secondServer.Close()
+
+	realAccountID := int64(1)
+	manualAt := time.Date(2026, 8, 13, 0, 11, 12, 0, time.UTC)
+	manualResetAt := manualAt.Add(7 * 24 * time.Hour)
+	officialAt := manualAt.Add(11*time.Hour + 22*time.Minute)
+	officialResetAt := manualResetAt.Add(11*time.Hour + 22*time.Minute)
+	rule20 := &UsageAlertRule{
+		ID: 7, Name: "used 20", Platform: UsageAlertPlatformOpenAI, RealAccountID: &realAccountID,
+		UsageType: UsageAlertTypeOverall, Window: UsageAlertWindow7d, Metric: UsageAlertMetricUsed,
+		Operator: UsageAlertOperatorGTE, Threshold: 20, Enabled: true,
+	}
+	rule80 := &UsageAlertRule{
+		ID: 8, Name: "used 80", Platform: UsageAlertPlatformOpenAI, RealAccountID: &realAccountID,
+		UsageType: UsageAlertTypeOverall, Window: UsageAlertWindow7d, Metric: UsageAlertMetricUsed,
+		Operator: UsageAlertOperatorGTE, Threshold: 80, Enabled: true,
+	}
+	repo := &usageAlertDeliveryRepoStub{
+		snapshot: &UsageAlertSnapshot{
+			AccountID: 2, RealAccountID: realAccountID, UsageType: UsageAlertTypeOverall,
+			Platform: UsageAlertPlatformOpenAI, Source: UsageAlertSourceOpenAIQuotaReset, SampledAt: manualAt,
+			Windows: map[string]UsageAlertWindowSnapshot{
+				UsageAlertWindow7d: {
+					UsedPercent: 0, RemainingPercent: 100, ResetAt: &manualResetAt, SampledAt: &manualAt,
+					Generation: 3, OfficialResetAnchorAt: &manualResetAt, AwaitingOfficialReset: true,
+				},
+			},
+		},
+		states: map[int64]*UsageAlertState{
+			7: {RealAccountID: realAccountID, RuleID: 7, UsageType: UsageAlertTypeOverall, Window: UsageAlertWindow7d, LastStatus: UsageAlertStatusNormal, LastGeneration: 3},
+			8: {RealAccountID: realAccountID, RuleID: 8, UsageType: UsageAlertTypeOverall, Window: UsageAlertWindow7d, LastStatus: UsageAlertStatusNormal, LastGeneration: 3},
+		},
+		rules: []*UsageAlertRule{rule20, rule80},
+		webhooks: []*UsageAlertWebhook{
+			{ID: 1, Name: "json-1", Type: UsageAlertWebhookTypeJSONPost, URL: server.URL, Enabled: true},
+			{ID: 2, Name: "json-2", Type: UsageAlertWebhookTypeJSONPost, URL: secondServer.URL, Enabled: true},
+		},
+	}
+	svc := NewUsageAlertService(repo, nil)
+	svc.httpClient = server.Client()
+
+	retry := svc.observeAsync(UsageAlertSnapshot{
+		AccountID: 2, RealAccountID: realAccountID, UsageType: UsageAlertTypeOverall,
+		Platform: UsageAlertPlatformOpenAI, Source: UsageAlertSourceOpenAICodexUsageAPI, SampledAt: officialAt,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 17, RemainingPercent: 83, ResetAt: &officialResetAt},
+		},
+	})
+
+	require.False(t, retry)
+	require.Equal(t, int32(1), firstRequests.Load())
+	require.Equal(t, int32(1), secondRequests.Load())
+	require.Equal(t, UsageAlertEventReset, got.Event)
+	require.Zero(t, got.RuleID)
+	require.Empty(t, got.RuleName)
+	require.Equal(t, UsageAlertWindow7d, got.Window)
+	require.Equal(t, int64(4), repo.currentStateForRule(7).LastGeneration)
+	require.Equal(t, int64(4), repo.currentStateForRule(8).LastGeneration)
+	require.Equal(t, UsageAlertStatusNormal, repo.currentStateForRule(7).LastStatus)
+	require.Equal(t, UsageAlertStatusNormal, repo.currentStateForRule(8).LastStatus)
 }
 
 func TestObservePreservesFailedTriggerWhenRecoverySampleWakesBackoff(t *testing.T) {
@@ -884,6 +977,52 @@ func TestBuildUsageAlertWebhookEventUsesResolvedType(t *testing.T) {
 	require.Equal(t, event.EventID, retryEvent.EventID, "an uncommitted transition must keep the same id across retries")
 }
 
+func TestBuildUsageAlertWebhookEventDeduplicatesAccountResetAcrossRules(t *testing.T) {
+	snapshot := &UsageAlertSnapshot{RealAccountID: 22, UsageType: UsageAlertTypeOverall, Platform: UsageAlertPlatformOpenAI}
+	resetAt := time.Date(2026, 8, 20, 11, 33, 17, 0, time.UTC)
+	ruleA := validUsageAlertRuleForTest()
+	ruleA.ID = 7
+	ruleB := validUsageAlertRuleForTest()
+	ruleB.ID = 8
+	trigger := UsageAlertTrigger{
+		Rule: ruleA, Window: UsageAlertWindow7d, WindowState: UsageAlertWindowSnapshot{Generation: 4, ResetAt: &resetAt},
+		Resolved: true, AccountReset: true, StateAnchor: "new-generation",
+	}
+
+	eventA := buildUsageAlertWebhookEvent(snapshot, nil, trigger)
+	trigger.Rule = ruleB
+	eventB := buildUsageAlertWebhookEvent(snapshot, nil, trigger)
+
+	require.Equal(t, eventA.EventID, eventB.EventID)
+	require.Equal(t, UsageAlertEventReset, eventA.Event)
+	require.Zero(t, eventA.RuleID)
+	require.Empty(t, eventA.RuleName)
+	payload, err := json.Marshal(eventA)
+	require.NoError(t, err)
+	require.Contains(t, string(payload), `"rule_id":0`)
+	require.Contains(t, string(payload), `"threshold":0`)
+}
+
+func TestFinalUsageAlertStateTriggersKeepsLastTransitionPerRule(t *testing.T) {
+	ruleA := validUsageAlertRuleForTest()
+	ruleA.ID = 7
+	ruleB := validUsageAlertRuleForTest()
+	ruleB.ID = 8
+	triggers := []UsageAlertTrigger{
+		{Rule: ruleA, Resolved: true, AccountReset: true},
+		{Rule: ruleA, Resolved: false},
+		{Rule: ruleB, Resolved: true, AccountReset: true},
+	}
+
+	final := finalUsageAlertStateTriggers(triggers)
+
+	require.Len(t, final, 2)
+	require.Equal(t, int64(7), final[0].Rule.ID)
+	require.False(t, final[0].Resolved)
+	require.Equal(t, int64(8), final[1].Rule.ID)
+	require.True(t, final[1].Resolved)
+}
+
 func TestFormatUsageAlertTelegramMessageUsesLanguageAndTimezone(t *testing.T) {
 	resetAt := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	event := UsageAlertWebhookEvent{
@@ -944,6 +1083,20 @@ func TestFormatUsageAlertTelegramMessageUsesResetTitle(t *testing.T) {
 	})
 	require.Contains(t, en, "[Sub2API] Usage alert reset")
 	require.Contains(t, en, "Reset notified: 2026-06-28 10:30:00")
+}
+
+func TestFormatUsageAlertTelegramMessageUsesAccountResetLayout(t *testing.T) {
+	event := UsageAlertWebhookEvent{
+		Event: UsageAlertEventResolved, TriggeredAt: time.Date(2026, 8, 13, 3, 33, 17, 0, time.UTC),
+		RealAccountName: "OpenAI Main", Platform: UsageAlertPlatformOpenAI, UsageType: UsageAlertTypeOverall,
+		Window: UsageAlertWindow7d, UsedPercent: 17, RemainingPercent: 83, AccountReset: true,
+	}
+
+	message := formatUsageAlertTelegramMessage(event, UsageAlertTelegramConfig{Language: "zh", Timezone: "Asia/Shanghai"})
+
+	require.Contains(t, message, "[Sub2API] 账号用量已重置")
+	require.NotContains(t, message, "规则：")
+	require.NotContains(t, message, "阈值：")
 }
 
 func TestUsageAlertTelegramConfigRejectsInvalidTimezone(t *testing.T) {
@@ -1371,7 +1524,7 @@ func TestPrepareCodex7dRejectsOlderManualResetEvidence(t *testing.T) {
 	require.False(t, refresh)
 }
 
-func TestPrepareCodex7dOfficialResetShortlyAfterManualAdvancesAgain(t *testing.T) {
+func TestPrepareCodex7dOfficialResetWithinOneHourIsIgnored(t *testing.T) {
 	manualAt := time.Date(2026, 8, 7, 11, 0, 0, 0, time.UTC)
 	officialBoundary := manualAt.Add(5 * time.Minute)
 	manualResetAt := manualAt.Add(7 * 24 * time.Hour)
@@ -1405,9 +1558,195 @@ func TestPrepareCodex7dOfficialResetShortlyAfterManualAdvancesAgain(t *testing.T
 
 	require.True(t, accepted)
 	require.False(t, refresh)
-	require.Equal(t, int64(9), weekly.Generation)
+	require.Equal(t, int64(8), weekly.Generation)
+	require.False(t, weekly.AwaitingOfficialReset)
+}
+
+func TestPrepareCodex7dOfficialResetAfterOneHourAdvancesGeneration(t *testing.T) {
+	manualAt := time.Date(2026, 8, 13, 0, 11, 12, 0, time.FixedZone("UTC+8", 8*60*60))
+	frozenBoundary := time.Date(2026, 8, 15, 11, 48, 46, 0, manualAt.Location())
+	manualResetAt := time.Date(2026, 8, 20, 0, 11, 12, 0, manualAt.Location())
+	officialAt := time.Date(2026, 8, 13, 11, 33, 17, 0, manualAt.Location())
+	officialResetAt := time.Date(2026, 8, 20, 11, 33, 17, 0, manualAt.Location())
+	previous := &UsageAlertSnapshot{
+		Platform:  UsageAlertPlatformOpenAI,
+		UsageType: UsageAlertTypeOverall,
+		SampledAt: manualAt,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {
+				ResetAt:               &manualResetAt,
+				SampledAt:             &manualAt,
+				BoundaryAt:            &frozenBoundary,
+				Generation:            3,
+				AwaitingOfficialReset: true,
+			},
+		},
+	}
+	current := UsageAlertSnapshot{
+		Platform:  UsageAlertPlatformOpenAI,
+		UsageType: UsageAlertTypeOverall,
+		Source:    UsageAlertSourceOpenAICodexUsageAPI,
+		SampledAt: officialAt,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 17, RemainingPercent: 83, ResetAt: &officialResetAt},
+		},
+	}
+
+	evaluation, persisted, accepted, refresh := prepareUsageAlertSnapshot(previous, current)
+	weekly := persisted.Windows[UsageAlertWindow7d]
+
+	require.True(t, accepted)
+	require.False(t, refresh)
+	require.Equal(t, 17.0, evaluation.Windows[UsageAlertWindow7d].UsedPercent)
+	require.Equal(t, int64(4), weekly.Generation)
 	require.Equal(t, &officialResetAt, weekly.BoundaryAt)
 	require.False(t, weekly.AwaitingOfficialReset)
+}
+
+func TestPrepareCodex7dOfficialResetOneHourBoundary(t *testing.T) {
+	manualAt := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	manualResetAt := manualAt.Add(7 * 24 * time.Hour)
+	for _, tc := range []struct {
+		name               string
+		delta              time.Duration
+		accepted           bool
+		expectedGeneration int64
+		expectedAwaiting   bool
+	}{
+		{name: "59 minutes", delta: 59 * time.Minute, accepted: true, expectedGeneration: 3, expectedAwaiting: true},
+		{name: "exactly one hour", delta: time.Hour, accepted: true, expectedGeneration: 3, expectedAwaiting: true},
+		{name: "after one hour", delta: time.Hour + time.Second, accepted: true, expectedGeneration: 4, expectedAwaiting: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := UsageAlertWindowSnapshot{
+				ResetAt:               &manualResetAt,
+				SampledAt:             &manualAt,
+				BoundaryAt:            usageAlertTimePtr(manualAt.Add(2 * 24 * time.Hour)),
+				OfficialResetAnchorAt: &manualResetAt,
+				Generation:            3,
+				AwaitingOfficialReset: true,
+			}
+			currentResetAt := manualResetAt.Add(tc.delta)
+			current := UsageAlertWindowSnapshot{ResetAt: &currentResetAt, SampledAt: usageAlertTimePtr(manualAt.Add(tc.delta))}
+
+			got, accepted, refresh := prepareCodex7dWindow(previous, current, UsageAlertSourceOpenAICodexUsageAPI, manualAt.Add(tc.delta))
+
+			require.Equal(t, tc.accepted, accepted)
+			require.False(t, refresh)
+			require.Equal(t, tc.expectedGeneration, got.Generation)
+			require.Equal(t, tc.expectedAwaiting, got.AwaitingOfficialReset)
+		})
+	}
+}
+
+func TestPrepareCodex7dOfficialResetIgnoreWindowDoesNotRatchetWithDrift(t *testing.T) {
+	manualAt := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	manualResetAt := manualAt.Add(7 * 24 * time.Hour)
+	previous := UsageAlertWindowSnapshot{
+		ResetAt:               &manualResetAt,
+		SampledAt:             &manualAt,
+		BoundaryAt:            usageAlertTimePtr(manualAt.Add(2 * 24 * time.Hour)),
+		OfficialResetAnchorAt: &manualResetAt,
+		Generation:            3,
+		AwaitingOfficialReset: true,
+	}
+	firstResetAt := manualResetAt.Add(40 * time.Minute)
+	firstSampleAt := manualAt.Add(40 * time.Minute)
+	first, accepted, refresh := prepareCodex7dWindow(
+		previous,
+		UsageAlertWindowSnapshot{ResetAt: &firstResetAt, SampledAt: &firstSampleAt},
+		UsageAlertSourceOpenAICodexUsageAPI,
+		firstSampleAt,
+	)
+	require.True(t, accepted)
+	require.False(t, refresh)
+	require.Equal(t, int64(3), first.Generation)
+	require.Equal(t, &manualResetAt, first.OfficialResetAnchorAt)
+
+	secondResetAt := manualResetAt.Add(80 * time.Minute)
+	secondSampleAt := manualAt.Add(80 * time.Minute)
+	second, accepted, refresh := prepareCodex7dWindow(
+		first,
+		UsageAlertWindowSnapshot{ResetAt: &secondResetAt, SampledAt: &secondSampleAt},
+		UsageAlertSourceOpenAICodexUsageAPI,
+		secondSampleAt,
+	)
+	require.True(t, accepted)
+	require.False(t, refresh)
+	require.Equal(t, int64(4), second.Generation)
+	require.False(t, second.AwaitingOfficialReset)
+	require.Nil(t, second.OfficialResetAnchorAt)
+}
+
+func TestPrepareCodex7dRejectsOlderAuthorityWhileAwaitingOfficialReset(t *testing.T) {
+	manualAt := time.Date(2026, 8, 13, 0, 11, 12, 0, time.UTC)
+	manualResetAt := manualAt.Add(7 * 24 * time.Hour)
+	previous := UsageAlertWindowSnapshot{
+		ResetAt:               &manualResetAt,
+		SampledAt:             &manualAt,
+		BoundaryAt:            usageAlertTimePtr(manualAt.Add(2 * 24 * time.Hour)),
+		OfficialResetAnchorAt: &manualResetAt,
+		Generation:            3,
+		AwaitingOfficialReset: true,
+	}
+	olderSampleAt := manualAt.Add(-time.Minute)
+	officialResetAt := manualResetAt.Add(11 * time.Hour)
+
+	_, accepted, refresh := prepareCodex7dWindow(
+		previous,
+		UsageAlertWindowSnapshot{ResetAt: &officialResetAt, SampledAt: &olderSampleAt},
+		UsageAlertSourceOpenAICodexUsageAPI,
+		olderSampleAt,
+	)
+
+	require.False(t, accepted)
+	require.False(t, refresh)
+}
+
+func TestPrepareCodex7dAuthorityRecoversAwaitingSnapshotWithoutResetAnchor(t *testing.T) {
+	manualAt := time.Date(2026, 8, 13, 0, 11, 12, 0, time.UTC)
+	previous := UsageAlertWindowSnapshot{
+		SampledAt:             &manualAt,
+		Generation:            3,
+		AwaitingOfficialReset: true,
+	}
+	authoritativeAt := manualAt.Add(2 * time.Hour)
+	officialResetAt := authoritativeAt.Add(7 * 24 * time.Hour)
+
+	got, accepted, refresh := prepareCodex7dWindow(
+		previous,
+		UsageAlertWindowSnapshot{ResetAt: &officialResetAt, SampledAt: &authoritativeAt},
+		UsageAlertSourceOpenAICodexUsageAPI,
+		authoritativeAt,
+	)
+
+	require.True(t, accepted)
+	require.False(t, refresh)
+	require.Equal(t, int64(3), got.Generation)
+	require.Equal(t, &officialResetAt, got.BoundaryAt)
+	require.False(t, got.AwaitingOfficialReset)
+}
+
+func TestPrepareCodex7dRegularBoundaryRejectsShortHorizon(t *testing.T) {
+	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	previous := UsageAlertWindowSnapshot{
+		ResetAt:    &boundary,
+		SampledAt:  usageAlertTimePtr(boundary.Add(-time.Minute)),
+		BoundaryAt: &boundary,
+		Generation: 3,
+	}
+	shortResetAt := boundary.Add(5 * time.Hour)
+	sampledAt := boundary.Add(time.Minute)
+
+	_, accepted, refresh := prepareCodex7dWindow(
+		previous,
+		UsageAlertWindowSnapshot{ResetAt: &shortResetAt, SampledAt: &sampledAt},
+		UsageAlertSourceOpenAICodexUsageAPI,
+		sampledAt,
+	)
+
+	require.False(t, accepted)
+	require.True(t, refresh)
 }
 
 func TestPrepareCodex7dConfirmsOfficialResetWhenAuthorityArrivesDaysLate(t *testing.T) {
@@ -1462,7 +1801,7 @@ func TestPrepareCodex7dRetriesUnconfirmedAuthority(t *testing.T) {
 			Platform:  UsageAlertPlatformOpenAI,
 			UsageType: UsageAlertTypeOverall,
 			Source:    UsageAlertSourceOpenAICodexUsageAPI,
-			SampledAt: boundary.Add(time.Minute),
+			SampledAt: boundary.Add(2 * time.Hour),
 			Windows: map[string]UsageAlertWindowSnapshot{
 				UsageAlertWindow7d: {ResetAt: currentReset},
 			},
@@ -1699,8 +2038,38 @@ func TestEvaluateCodex7dRearmsLegacyStateAfterManualGenerationAdvance(t *testing
 	triggers, err := svc.evaluateRules(context.Background(), previous, current, []*UsageAlertRule{rule})
 
 	require.NoError(t, err)
+	require.Len(t, triggers, 2)
+	require.True(t, triggers[0].AccountReset)
+	require.True(t, triggers[0].Resolved)
+	require.Equal(t, "new-generation", triggers[1].StateAnchor)
+	require.False(t, triggers[1].Resolved)
+}
+
+func TestEvaluateCodex7dLegacyStateKeepsResetTriggerAcrossSnapshotReplay(t *testing.T) {
+	oldReset := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	newReset := oldReset.Add(7 * 24 * time.Hour)
+	repo := &usageAlertGenerationStateRepoStub{state: &UsageAlertState{
+		LastStatus:     UsageAlertStatusNormal,
+		LastResetAt:    &oldReset,
+		LastGeneration: 0,
+	}}
+	svc := NewUsageAlertService(repo, nil)
+	rule := validUsageAlertRuleForTest()
+	rule.ID = 7
+	current := &UsageAlertSnapshot{
+		RealAccountID: 1,
+		Platform:      UsageAlertPlatformOpenAI,
+		UsageType:     UsageAlertTypeOverall,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {RemainingPercent: 90, ResetAt: &newReset, Generation: 2},
+		},
+	}
+
+	triggers, err := svc.evaluateRules(context.Background(), current, current, []*UsageAlertRule{rule})
+
+	require.NoError(t, err)
 	require.Len(t, triggers, 1)
-	require.Equal(t, "new-generation", triggers[0].StateAnchor)
+	require.True(t, triggers[0].AccountReset)
 }
 
 func TestUsageAlertEventIDIsStableAcrossResetAtDriftWithinGeneration(t *testing.T) {
@@ -1804,6 +2173,8 @@ func TestEvaluateRulesTreatsNewResetGenerationAsFresh(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, triggers, 1)
+	require.False(t, triggers[0].AccountReset)
+	require.False(t, triggers[0].Resolved)
 	require.Equal(t, "new-generation", triggers[0].StateAnchor)
 }
 

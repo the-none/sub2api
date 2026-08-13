@@ -642,7 +642,7 @@ func (r *usageAlertRepository) ClaimWebhookDelivery(
 	rows, err := r.sql.QueryContext(ctx, `
 		INSERT INTO usage_alert_deliveries (
 			event_id, real_account_id, rule_id, webhook_id, status, claim_token, claimed_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, 'pending', $5, NOW(), NOW(), NOW())
+		) VALUES ($1, $2, NULLIF($3, 0), $4, 'pending', $5, NOW(), NOW(), NOW())
 		ON CONFLICT (event_id, webhook_id) DO UPDATE SET
 			claim_token = EXCLUDED.claim_token,
 			claimed_at = NOW(),
