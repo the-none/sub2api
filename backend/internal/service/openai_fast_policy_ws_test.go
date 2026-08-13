@@ -51,6 +51,25 @@ func TestWSResponseCreate_DefaultPassesPriorityAndNormalizesFast(t *testing.T) {
 	require.Equal(t, "priority", gjson.GetBytes(updated, "service_tier").String())
 }
 
+func TestWSResponseCreate_NonOpenAIAccountBypassesPolicy(t *testing.T) {
+	settings := &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{{
+			ServiceTier:  OpenAIFastTierPriority,
+			Action:       BetaPolicyActionBlock,
+			Scope:        BetaPolicyScopeOAuth,
+			ErrorMessage: "must not apply to Grok OAuth",
+		}},
+	}
+	svc := newOpenAIGatewayServiceWithSettings(t, settings)
+	account := &Account{Platform: PlatformGrok, Type: AccountTypeOAuth}
+	frame := []byte(`{"type":"response.create","model":"grok-4.6","service_tier":"priority"}`)
+
+	updated, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "grok-4.6", frame)
+	require.NoError(t, err)
+	require.Nil(t, blocked)
+	require.Equal(t, string(frame), string(updated))
+}
+
 func TestWSResponseCreate_ExplicitFilterStripsServiceTier(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, openAIFastFilterPriorityPolicy())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}

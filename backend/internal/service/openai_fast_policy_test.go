@@ -619,6 +619,32 @@ func TestApplyOpenAIFastPolicyToBody_BlockReturnsTypedError(t *testing.T) {
 	require.Equal(t, string(body), string(updated)) // body not mutated on block
 }
 
+func TestApplyOpenAIFastPolicyToBody_NonOpenAIAccountBypassesPolicy(t *testing.T) {
+	settings := &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{
+			{
+				ServiceTier:    OpenAIFastTierPriority,
+				Action:         BetaPolicyActionBlock,
+				Scope:          BetaPolicyScopeOAuth,
+				ModelWhitelist: []string{"grok-4.6"},
+				FallbackAction: BetaPolicyActionPass,
+			},
+			{
+				ServiceTier: OpenAIFastTierAny,
+				Action:      BetaPolicyActionFilter,
+				Scope:       BetaPolicyScopeOAuth,
+			},
+		},
+	}
+	svc := newOpenAIGatewayServiceWithSettings(t, settings)
+	account := &Account{Platform: PlatformGrok, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"grok-4.6","service_tier":"priority"}`)
+
+	updated, err := svc.applyOpenAIFastPolicyToBody(context.Background(), account, "grok-4.6", body)
+	require.NoError(t, err)
+	require.Equal(t, string(body), string(updated))
+}
+
 func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
 	repo := &openAIFastPolicyRepoStub{values: map[string]string{}}
 	svc := NewSettingService(repo, &config.Config{})
