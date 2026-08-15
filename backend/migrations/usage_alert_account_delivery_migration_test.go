@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMigration222DecouplesAccountDeliveryReceiptsFromRules(t *testing.T) {
-	raw, err := FS.ReadFile("222_usage_alert_account_delivery_receipts.sql")
+func TestMigration224DecouplesAccountDeliveryReceiptsFromRules(t *testing.T) {
+	raw, err := FS.ReadFile("224_usage_alert_account_delivery_receipts.sql")
 	require.NoError(t, err)
 
 	sql := string(raw)
