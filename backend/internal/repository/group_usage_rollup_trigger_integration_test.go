@@ -151,6 +151,10 @@ func TestGroupUsageRollupTriggerSerializesInsertTransactionAcrossMidnight(t *tes
 
 	insertTx := beginGroupUsageRollupTriggerTestTx(t, ctx, schema)
 	defer func() { _ = insertTx.Rollback() }()
+	_, err = insertTx.ExecContext(ctx, "SET LOCAL TIME ZONE 'Asia/Shanghai'")
+	require.NoError(t, err)
+	var insertDate string
+	require.NoError(t, insertTx.QueryRowContext(ctx, "SELECT CURRENT_DATE::text").Scan(&insertDate))
 	var insertBackendPID int
 	require.NoError(t, insertTx.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&insertBackendPID))
 
@@ -187,17 +191,13 @@ func TestGroupUsageRollupTriggerSerializesInsertTransactionAcrossMidnight(t *tes
 	}
 	require.NoError(t, insertTx.Commit())
 
-	var currentDate string
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `
-		SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')::date::text
-	`).Scan(&currentDate))
 	var closedBefore string
 	err = integrationDB.QueryRowContext(ctx, fmt.Sprintf(
 		"SELECT closed_before::text FROM %s.usage_group_rollup_state WHERE id = 1",
 		pq.QuoteIdentifier(schema),
 	)).Scan(&closedBefore)
 	require.NoError(t, err)
-	require.Equal(t, currentDate, closedBefore)
+	require.Equal(t, insertDate, closedBefore)
 }
 
 func TestGroupUsageRollupTriggerKeepsWatermarkForTodayInsert(t *testing.T) {
@@ -207,6 +207,7 @@ func TestGroupUsageRollupTriggerKeepsWatermarkForTodayInsert(t *testing.T) {
 	tx := beginGroupUsageRollupTriggerTestTx(t, ctx, schema)
 	defer func() { _ = tx.Rollback() }()
 	_, err := tx.ExecContext(ctx, `
+		SET LOCAL TIME ZONE 'Asia/Shanghai';
 		INSERT INTO groups (id) VALUES (10);
 		INSERT INTO users (id) VALUES (1);
 		UPDATE usage_group_rollup_state
