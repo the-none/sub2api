@@ -441,6 +441,20 @@ func TestUpdateSessionWindow_NoStatusHeader(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionWindow_NilAccountIsIgnored(t *testing.T) {
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.5")
+
+	svc.UpdateSessionWindow(context.Background(), nil, headers)
+
+	if len(repo.sessionWindowCalls) != 0 || len(repo.updateExtraCalls) != 0 {
+		t.Fatalf("nil account must not update session usage: sessions=%d extra=%d", len(repo.sessionWindowCalls), len(repo.updateExtraCalls))
+	}
+}
+
 func TestUpdateSessionWindow_SamplesFableWithoutFiveHourStatus(t *testing.T) {
 	repo := &sessionWindowMockRepo{}
 	svc := newRateLimitServiceForTest(repo)
@@ -457,6 +471,33 @@ func TestUpdateSessionWindow_SamplesFableWithoutFiveHourStatus(t *testing.T) {
 		t.Fatalf("expected one passive sample, got %d", len(repo.updateExtraCalls))
 	}
 	if got := repo.updateExtraCalls[0].Updates["passive_usage_7d_oi_utilization"]; got != 0.42 {
+		t.Fatalf("expected Fable utilization 0.42, got %v", got)
+	}
+}
+
+func TestUpdateSessionWindow_MissingStatusDropsExpiredFiveHourSampleButKeepsWeekly(t *testing.T) {
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	expired := time.Now().Add(-time.Minute)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.99")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix()))
+	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.61")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "0.42")
+
+	svc.UpdateSessionWindow(context.Background(), &Account{ID: 93, SessionWindowEnd: &expired}, headers)
+
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected one weekly passive sample, got %d", len(repo.updateExtraCalls))
+	}
+	updates := repo.updateExtraCalls[0].Updates
+	if _, present := updates["session_window_utilization"]; present {
+		t.Fatalf("expired 5h utilization must not be sampled: %v", updates)
+	}
+	if got := updates["passive_usage_7d_utilization"]; got != 0.61 {
+		t.Fatalf("expected weekly utilization 0.61, got %v", got)
+	}
+	if got := updates["passive_usage_7d_oi_utilization"]; got != 0.42 {
 		t.Fatalf("expected Fable utilization 0.42, got %v", got)
 	}
 }

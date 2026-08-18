@@ -18,9 +18,14 @@ import (
 
 func TestIsOpenAIImageRateLimitError(t *testing.T) {
 	imageBody := []byte(`{"error":{"message":"Rate limit reached for gpt-image-2-codex (for limit gpt-image) in organization org on input-images per min: Limit 4000, Used 4000. Please try again in 467ms."}}`)
+	imageModelOnlyBody := []byte(`{"error":{"message":"Rate limit reached for gpt-image-2-codex. Please try again."}}`)
+	globalBodyWithImageMetadata := []byte(`{"error":{"message":"Spark usage limit reached; response metadata mentions gpt-image-2-codex"}}`)
 	textBody := []byte(`{"error":{"message":"Rate limit reached for gpt-5.4 in organization org on tokens per min: Limit 30000, Used 30000. Please try again in 1s."}}`)
 
 	require.True(t, isOpenAIImageRateLimitError(http.StatusTooManyRequests, imageBody))
+	require.True(t, isOpenAIImageRateLimitError(http.StatusTooManyRequests, imageModelOnlyBody, "gpt-image-2"))
+	require.False(t, isOpenAIImageRateLimitError(http.StatusTooManyRequests, globalBodyWithImageMetadata))
+	require.False(t, isOpenAIImageRateLimitError(http.StatusTooManyRequests, imageModelOnlyBody, "gpt-5.4"))
 	require.False(t, isOpenAIImageRateLimitError(http.StatusTooManyRequests, textBody))
 	require.False(t, isOpenAIImageRateLimitError(http.StatusBadRequest, imageBody))
 }

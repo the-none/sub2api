@@ -34,6 +34,10 @@ type RateLimitService struct {
 	usageAlertService     *UsageAlertService
 	usageCacheMu          sync.RWMutex
 	usageCache            map[int64]*geminiUsageCacheEntry
+
+	// OpenAI Team 联动熔断的进程内去重：teamID → 去重窗口截止时间
+	openaiTeamLinkedMu     sync.Mutex
+	openaiTeamLinkedRecent map[string]time.Time
 }
 
 type AccountRuntimeBlocker interface {
@@ -274,6 +278,9 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
+	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
+	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
+	s.maybeHandleOpenAITeamLinkedError(ctx, account, statusCode, responseBody)
 	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
 
 	// 池模式默认不标记本地账号状态；但管理员显式配置的临时不可调度规则优先。
@@ -447,6 +454,13 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			shouldDisable = true
 		}
 	case 402:
+		// 国产供应商：余额不足是可恢复状态（充值/检测恢复后由周期任务自动解除），
+		// 不能走 handleAuthError 永久置 status=error。改为可恢复的临时停调。
+		if account.IsCNProvider() {
+			s.handleCNProviderInsufficientBalance(ctx, account, upstreamMsg)
+			shouldDisable = true
+			break
+		}
 		// OpenAI: deactivated_workspace 表示工作区已停用，直接标记 error
 		if account.Platform == PlatformOpenAI && gjson.GetBytes(responseBody, "detail.code").String() == "deactivated_workspace" {
 			msg := "Workspace deactivated (402): workspace has been deactivated"
@@ -910,7 +924,10 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.Platform == PlatformAntigravity {
 		return s.handleAntigravity403(ctx, account, upstreamMsg, responseBody)
 	}
-	if account.Platform == PlatformOpenAI {
+	// 国产供应商与 openai 同口径:HTML 403(CDN/代理拦截页)不构成账号失效证据,
+	// 且 403 在 failover 状态集里会被逐账号重放——直接 SetError 会让一个坏请求/
+	// 一层坏代理连环永久禁用整组账号。走 HTML 豁免 + N 次累计 + 临时冷却。
+	if account.Platform == PlatformOpenAI || IsCNProvider(account.Platform) {
 		return s.handleOpenAI403(ctx, account, upstreamMsg, responseBody)
 	}
 	// 非 Antigravity 平台：保持原有行为
@@ -1058,6 +1075,13 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	// QueryUsage→persistOpenAICodexProbeSnapshot 维护,枯竭由调度守卫处理。
 	if account.IsShadow() {
 		return
+	}
+	// 国产供应商（kimi/zhipu/deepseek）的 429 走专用可恢复路径：余额不足 → 临时停调，
+	// Coding Plan 窗口耗尽 → 冷却到快照重置点。未命中则继续默认 429 逻辑。
+	if account.IsCNProvider() {
+		if s.applyCNProviderReactive429(ctx, account, headers, responseBody) {
+			return
+		}
 	}
 	// 1. OpenAI 平台：优先尝试解析 x-codex-* 响应头（用于 rate_limit_exceeded）
 	if account.Platform == PlatformOpenAI {
@@ -1739,12 +1763,22 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 
 // UpdateSessionWindow 从成功响应更新5h窗口状态
 func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Account, headers http.Header) {
+	if account == nil {
+		return
+	}
 	status := headers.Get("anthropic-ratelimit-unified-5h-status")
 	if status == "" {
 		// Weekly counters are useful even when an upstream response omits the 5h
-		// status header.
-		s.samplePassiveUsageFromHeaders(ctx, account, headers)
-		s.observeClaudeUsageHeaders(ctx, account, headers, nil)
+		// status header. Do not let an expired local 5h window make an old 5h
+		// utilization header look current to persistence or usage alerts.
+		passiveHeaders := headers
+		if account.SessionWindowEnd == nil || !account.SessionWindowEnd.After(time.Now()) {
+			passiveHeaders = headers.Clone()
+			passiveHeaders.Del("anthropic-ratelimit-unified-5h-utilization")
+			passiveHeaders.Del("anthropic-ratelimit-unified-5h-reset")
+		}
+		s.samplePassiveUsageFromHeaders(ctx, account, passiveHeaders)
+		s.observeClaudeUsageHeaders(ctx, account, passiveHeaders, nil)
 		return
 	}
 
@@ -2164,7 +2198,7 @@ func (s *RateLimitService) HandleTempUnschedulable(ctx context.Context, account 
 	return s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel))
 }
 
-func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) bool {
+func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) bool {
 	if s == nil || account == nil || s.accountRepo == nil {
 		return false
 	}
@@ -2175,7 +2209,7 @@ func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, accou
 		slog.Info("openai_image_rate_limit_skipped_by_error_code_policy", "account_id", account.ID, "status_code", statusCode)
 		return false
 	}
-	if !isOpenAIImageRateLimitError(statusCode, responseBody) {
+	if !isOpenAIImageRateLimitError(statusCode, responseBody, requestedModel...) {
 		return false
 	}
 
@@ -2188,7 +2222,7 @@ func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, accou
 	return true
 }
 
-func isOpenAIImageRateLimitError(statusCode int, body []byte) bool {
+func isOpenAIImageRateLimitError(statusCode int, body []byte, requestedModel ...string) bool {
 	if statusCode != http.StatusTooManyRequests || len(body) == 0 {
 		return false
 	}
@@ -2196,12 +2230,21 @@ func isOpenAIImageRateLimitError(statusCode int, body []byte) bool {
 	for _, marker := range []string{
 		"for limit gpt-image",
 		"input-images per min",
-		"gpt-image-2-codex",
-		"gpt-image",
 	} {
 		if strings.Contains(lower, marker) {
 			return true
 		}
+	}
+	if !strings.Contains(lower, "gpt-image") {
+		return false
+	}
+	for _, model := range requestedModel {
+		if !strings.Contains(strings.ToLower(strings.TrimSpace(model)), "gpt-image") {
+			continue
+		}
+		return strings.Contains(lower, "rate limit") ||
+			strings.Contains(lower, "rate_limit") ||
+			strings.Contains(lower, "too many requests")
 	}
 	return false
 }

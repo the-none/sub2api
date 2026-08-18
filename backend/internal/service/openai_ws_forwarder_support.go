@@ -619,7 +619,9 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 	s.handleOpenAIAccountUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody)
 	// A reused WS lease only has the original handshake headers. Force an
 	// authoritative quota refresh so the terminal 100% sample reaches alerts.
-	if s.usageRefresher != nil {
+	// Shadow accounts already refresh in handleOpenAIAccountUpstreamError because
+	// their HTTP and WS 429 headers both belong to the global quota dimension.
+	if s.usageRefresher != nil && !account.IsShadow() {
 		s.usageRefresher.RefreshOpenAICodexUsageSnapshot(account.ID, true)
 	}
 }

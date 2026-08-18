@@ -89,6 +89,105 @@ func TestOpenAIGatewayService_SparkRequestSchedulesAuthoritativeUsageRefresh(t *
 	}
 }
 
+func TestOpenAIGatewayService_SparkHTTP429ForcesAuthoritativeUsageRefresh(t *testing.T) {
+	updatesCh := make(chan map[string]any, 1)
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 2)}
+	svc := &OpenAIGatewayService{
+		rateLimitService: &RateLimitService{accountRepo: repo},
+		usageRefresher:   refresher,
+	}
+	parentID := int64(80)
+	shadow := &Account{
+		ID:              81,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		ParentAccountID: &parentID,
+		QuotaDimension:  QuotaDimensionSpark,
+	}
+
+	shouldDisable := svc.handleOpenAIAccountUpstreamError(
+		context.Background(),
+		shadow,
+		http.StatusTooManyRequests,
+		http.Header{"x-codex-primary-used-percent": []string{"100"}},
+		[]byte(`{"error":{"type":"rate_limit_error","message":"Spark usage limit reached; response metadata mentions gpt-image-2-codex"}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(shadow))
+	select {
+	case force := <-refresher.calls:
+		require.True(t, force)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Spark terminal quota refresh")
+	}
+	select {
+	case <-refresher.calls:
+		t.Fatal("Spark terminal 429 must schedule exactly one authoritative refresh")
+	default:
+	}
+	select {
+	case updates := <-updatesCh:
+		t.Fatalf("Spark shadow must not persist global x-codex headers: %v", updates)
+	default:
+	}
+	require.Zero(t, svc.openaiOAuth429WindowCount.Load())
+}
+
+func TestOpenAIGatewayService_SparkHTTP429TempRuleStillForcesAuthoritativeUsageRefresh(t *testing.T) {
+	repo := &tempUnschedulableOpenAIAccountRepo{}
+	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 2)}
+	svc := &OpenAIGatewayService{
+		rateLimitService: &RateLimitService{accountRepo: repo},
+		usageRefresher:   refresher,
+	}
+	parentID := int64(80)
+	shadow := &Account{
+		ID:              82,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		ParentAccountID: &parentID,
+		QuotaDimension:  QuotaDimensionSpark,
+		Credentials: map[string]any{
+			"temp_unschedulable_enabled": true,
+			"temp_unschedulable_rules": []any{
+				map[string]any{
+					"error_code":       float64(http.StatusTooManyRequests),
+					"keywords":         []any{"model quota"},
+					"duration_minutes": float64(10),
+				},
+			},
+		},
+	}
+
+	shouldDisable := svc.handleOpenAIAccountUpstreamError(
+		context.Background(),
+		shadow,
+		http.StatusTooManyRequests,
+		http.Header{"x-codex-primary-used-percent": []string{"100"}},
+		[]byte(`{"error":{"message":"model quota exhausted"}}`),
+		"gpt-5.4",
+	)
+
+	require.True(t, shouldDisable)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(shadow))
+	require.Equal(t, shadow.ID, repo.modelRateLimitAccountID)
+	require.Equal(t, "gpt-5.4", repo.modelRateLimitKey)
+	select {
+	case force := <-refresher.calls:
+		require.True(t, force)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Spark quota refresh before temp-rule return")
+	}
+	select {
+	case <-refresher.calls:
+		t.Fatal("Spark temp-rule 429 must schedule exactly one authoritative refresh")
+	default:
+	}
+	require.Zero(t, svc.openaiOAuth429WindowCount.Load())
+}
+
 func TestOpenAIGatewayService_SparkHeaderEntrySchedulesRefreshWithoutPersistingHeaders(t *testing.T) {
 	updatesCh := make(chan map[string]any, 1)
 	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}

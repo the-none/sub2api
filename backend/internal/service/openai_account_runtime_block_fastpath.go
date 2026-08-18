@@ -62,15 +62,24 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 		return false
 	}
 
-	if isOpenAIImageRateLimitError(statusCode, responseBody) {
+	if isOpenAIImageRateLimitError(statusCode, responseBody, canonicalModel...) {
 		if s != nil && s.rateLimitService != nil {
-			_ = s.rateLimitService.HandleOpenAIImageRateLimit(stateCtx, account, statusCode, headers, responseBody)
+			_ = s.rateLimitService.HandleOpenAIImageRateLimit(stateCtx, account, statusCode, headers, responseBody, canonicalModel...)
 		}
 		return false
 	}
 
 	if s == nil || account == nil {
 		return false
+	}
+	// Spark 429 headers belong to the global quota dimension, so refresh the
+	// authoritative snapshot before any model-scoped error rule can return.
+	if statusCode == http.StatusTooManyRequests && isOpenAIOAuthAccount(account) && account.IsShadow() && s.usageRefresher != nil {
+		s.usageRefresher.RefreshOpenAICodexUsageSnapshot(account.ID, true)
+	}
+	// Team 联动熔断必须先于 model-not-found 与账户级临时不可调度规则的早退。
+	if s.rateLimitService != nil {
+		s.rateLimitService.maybeHandleOpenAITeamLinkedError(stateCtx, account, statusCode, responseBody)
 	}
 	stateCtx = withTempUnschedulableModel(stateCtx, canonicalModel)
 	if s.rateLimitService != nil && len(canonicalModel) > 0 && s.rateLimitService.HandleUpstreamModelNotFound(stateCtx, account, canonicalModel[0], statusCode, responseBody) {
