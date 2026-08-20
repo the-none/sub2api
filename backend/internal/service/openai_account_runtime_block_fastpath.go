@@ -55,6 +55,16 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if s != nil {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)
 	}
+	// Spark 429 headers belong to the global quota dimension, so refresh the
+	// authoritative snapshot before any request- or model-scoped rule can return.
+	if s != nil && statusCode == http.StatusTooManyRequests && isOpenAIOAuthAccount(account) && account.IsShadow() && s.usageRefresher != nil {
+		s.usageRefresher.RefreshOpenAICodexUsageSnapshot(account.ID, true)
+	}
+	// Capacity shedding describes this request, not account health. Keep the
+	// account schedulable while the request-local retry budget handles recovery.
+	if account != nil && account.Platform == PlatformOpenAI && isOpenAIRequestScopedCapacityShed("", responseBody) {
+		return false
+	}
 	stateCtx, cancel := openAIAccountStateContext(ctx)
 	defer cancel()
 
@@ -71,11 +81,6 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 
 	if s == nil || account == nil {
 		return false
-	}
-	// Spark 429 headers belong to the global quota dimension, so refresh the
-	// authoritative snapshot before any model-scoped error rule can return.
-	if statusCode == http.StatusTooManyRequests && isOpenAIOAuthAccount(account) && account.IsShadow() && s.usageRefresher != nil {
-		s.usageRefresher.RefreshOpenAICodexUsageSnapshot(account.ID, true)
 	}
 	// Team 联动熔断必须先于 model-not-found 与账户级临时不可调度规则的早退。
 	if s.rateLimitService != nil {

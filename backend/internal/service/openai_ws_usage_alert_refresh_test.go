@@ -135,6 +135,42 @@ func TestOpenAIGatewayService_SparkHTTP429ForcesAuthoritativeUsageRefresh(t *tes
 	require.Zero(t, svc.openaiOAuth429WindowCount.Load())
 }
 
+func TestOpenAIGatewayService_SparkHTTP429CapacityShedStillForcesAuthoritativeUsageRefresh(t *testing.T) {
+	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 2)}
+	svc := &OpenAIGatewayService{usageRefresher: refresher}
+	parentID := int64(80)
+	shadow := &Account{
+		ID:              83,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		ParentAccountID: &parentID,
+		QuotaDimension:  QuotaDimensionSpark,
+	}
+
+	shouldDisable := svc.handleOpenAIAccountUpstreamError(
+		context.Background(),
+		shadow,
+		http.StatusTooManyRequests,
+		http.Header{},
+		[]byte(`{"error":{"type":"rate_limit_exceeded","message":"Our servers are currently overloaded. Please try again later."}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(shadow))
+	select {
+	case force := <-refresher.calls:
+		require.True(t, force)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Spark capacity-shed quota refresh")
+	}
+	select {
+	case <-refresher.calls:
+		t.Fatal("Spark capacity-shed 429 must schedule exactly one authoritative refresh")
+	default:
+	}
+	require.Zero(t, svc.openaiOAuth429WindowCount.Load())
+}
+
 func TestOpenAIGatewayService_SparkHTTP429TempRuleStillForcesAuthoritativeUsageRefresh(t *testing.T) {
 	repo := &tempUnschedulableOpenAIAccountRepo{}
 	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 2)}
