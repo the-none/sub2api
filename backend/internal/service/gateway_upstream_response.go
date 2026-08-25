@@ -1220,6 +1220,7 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 		}
 
 		patch := &sseUsagePatch{}
+		hasPositiveCacheCreationAggregate := false
 		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok && v > 0 {
 			patch.inputTokens = v
 			patch.hasInputTokens = true
@@ -1231,19 +1232,26 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 		if v, ok := parseSSEUsageInt(usageObj["cache_creation_input_tokens"]); ok && v > 0 {
 			patch.cacheCreationInputTokens = v
 			patch.hasCacheCreationInput = true
+			hasPositiveCacheCreationAggregate = true
 		}
 		if v, ok := parseSSEUsageInt(usageObj["cache_read_input_tokens"]); ok && v > 0 {
 			patch.cacheReadInputTokens = v
 			patch.hasCacheReadInput = true
 		}
 		if cc, ok := usageObj["cache_creation"].(map[string]any); ok {
-			if v, exists := parseSSEUsageInt(cc["ephemeral_5m_input_tokens"]); exists && v > 0 {
-				patch.cacheCreation5mTokens = v
-				patch.hasCacheCreation5m = true
-			}
-			if v, exists := parseSSEUsageInt(cc["ephemeral_1h_input_tokens"]); exists && v > 0 {
-				patch.cacheCreation1hTokens = v
-				patch.hasCacheCreation1h = true
+			cacheCreation5mTokens, hasCacheCreation5m := parseSSEUsageInt(cc["ephemeral_5m_input_tokens"])
+			cacheCreation1hTokens, hasCacheCreation1h := parseSSEUsageInt(cc["ephemeral_1h_input_tokens"])
+			hasPositiveBreakdown := (hasCacheCreation5m && cacheCreation5mTokens > 0) ||
+				(hasCacheCreation1h && cacheCreation1hTokens > 0)
+			if hasPositiveCacheCreationAggregate || hasPositiveBreakdown {
+				if hasCacheCreation5m {
+					patch.cacheCreation5mTokens = cacheCreation5mTokens
+					patch.hasCacheCreation5m = true
+				}
+				if hasCacheCreation1h {
+					patch.cacheCreation1hTokens = cacheCreation1hTokens
+					patch.hasCacheCreation1h = true
+				}
 			}
 		}
 		return patch

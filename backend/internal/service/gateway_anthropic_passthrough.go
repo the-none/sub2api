@@ -654,6 +654,7 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 	case "message_delta":
 		deltaUsage := parsed.Get("usage")
 		if deltaUsage.Exists() {
+			hasPositiveCacheCreationAggregate := false
 			if v := deltaUsage.Get("input_tokens").Int(); v > 0 {
 				usage.InputTokens = int(v)
 			}
@@ -662,6 +663,7 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 			}
 			if v := deltaUsage.Get("cache_creation_input_tokens").Int(); v > 0 {
 				usage.CacheCreationInputTokens = int(v)
+				hasPositiveCacheCreationAggregate = true
 			}
 			if v := deltaUsage.Get("cache_read_input_tokens").Int(); v > 0 {
 				usage.CacheReadInputTokens = int(v)
@@ -669,11 +671,14 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 
 			cc5m := deltaUsage.Get("cache_creation.ephemeral_5m_input_tokens")
 			cc1h := deltaUsage.Get("cache_creation.ephemeral_1h_input_tokens")
-			if cc5m.Exists() && cc5m.Int() > 0 {
-				usage.CacheCreation5mTokens = int(cc5m.Int())
-			}
-			if cc1h.Exists() && cc1h.Int() > 0 {
-				usage.CacheCreation1hTokens = int(cc1h.Int())
+			hasPositiveBreakdown := (cc5m.Exists() && cc5m.Int() > 0) || (cc1h.Exists() && cc1h.Int() > 0)
+			if hasPositiveCacheCreationAggregate || hasPositiveBreakdown {
+				if cc5m.Exists() {
+					usage.CacheCreation5mTokens = int(cc5m.Int())
+				}
+				if cc1h.Exists() {
+					usage.CacheCreation1hTokens = int(cc1h.Int())
+				}
 			}
 		}
 	}
