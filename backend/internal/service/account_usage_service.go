@@ -815,10 +815,13 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 				// parent account.  The result is written to the shadow row's own codex_*
 				// Extra keys and immediately reflected in the returned UsageInfo.
 				if s.openAIQuotaService != nil {
-					if quotaUsage, err := s.openAIQuotaService.QueryUsage(ctx, account.ID); err == nil {
+					if quotaUsage, err := s.openAIQuotaService.QueryUsageSnapshot(ctx, account.ID); err == nil {
 						if updates := buildCodexSparkWindowExtraUpdates(quotaUsage, now); len(updates) > 0 {
 							mergeAccountExtra(account, updates)
 							s.persistOpenAICodexProbeSnapshot(account.ID, updates)
+							if account.ParentAccountID != nil {
+								notifyOpenAIAutoReset(*account.ParentAccountID)
+							}
 							if usage.UpdatedAt == nil {
 								usage.UpdatedAt = &now
 							}
@@ -1108,7 +1111,9 @@ func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, u
 	go func() {
 		updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer updateCancel()
-		_ = s.accountRepo.UpdateExtra(updateCtx, accountID, updates)
+		if err := s.accountRepo.UpdateExtra(updateCtx, accountID, updates); err == nil {
+			notifyOpenAIAutoReset(accountID)
+		}
 	}()
 }
 

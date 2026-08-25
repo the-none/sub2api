@@ -253,6 +253,34 @@ func TestOpenAIGatewayService_SparkHeaderEntrySchedulesRefreshWithoutPersistingH
 	}
 }
 
+func TestOpenAIGatewayService_OrdinaryHeaderEntryPersistsWithoutSchedulingRefresh(t *testing.T) {
+	updatesCh := make(chan map[string]any, 1)
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updatesCh}
+	refresher := &codexUsageSnapshotRefreshRecorder{calls: make(chan bool, 1)}
+	svc := &OpenAIGatewayService{
+		accountRepo:           repo,
+		usageRefresher:        refresher,
+		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
+	}
+	account := &Account{ID: 91}
+	headers := make(http.Header)
+	headers.Set("x-codex-primary-used-percent", "37")
+
+	svc.updateCodexUsageSnapshotFromHeadersForAccount(context.Background(), account, headers)
+
+	select {
+	case updates := <-updatesCh:
+		require.Equal(t, 37.0, updates["codex_primary_used_percent"])
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ordinary header-entry quota snapshot to persist")
+	}
+	select {
+	case <-refresher.calls:
+		t.Fatal("ordinary header entry must not schedule an authoritative refresh")
+	default:
+	}
+}
+
 func TestAccountUsageService_WSUsageRefreshIsThrottledAndForceable(t *testing.T) {
 	updatesCh := make(chan map[string]any, 2)
 	repo := &snapshotUpdateAccountRepo{

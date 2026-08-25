@@ -87,6 +87,7 @@ type OpenAIQuotaUsage struct {
 	AdditionalRateLimits  []OpenAIAdditionalRateLimit  `json:"additional_rate_limits,omitempty"`
 	RateLimitResetCredits *OpenAIRateLimitResetCredits `json:"rate_limit_reset_credits,omitempty"`
 	FetchedAt             int64                        `json:"fetched_at"`
+	autoResetCandidates   []openAIAutoResetCreditCandidate
 }
 
 // OpenAIQuotaResetCredit captures the redeemed credit metadata returned by the
@@ -211,6 +212,10 @@ func (s *OpenAIQuotaService) queryUsage(ctx context.Context, accountID int64, in
 				continue
 			}
 			status := resp.StatusCode
+			if isOpenAIAutoResetContext(ctx) {
+				slog.Warn("openai_quota_query_failed", "account_id", accountID, "status", status, "source", "auto_reset")
+				return nil, infraerrors.Newf(mapUpstreamStatus(status), "OPENAI_QUOTA_UPSTREAM_ERROR", "upstream returned %d", status)
+			}
 			body := truncate(s.redactQuotaErrorBody(ctx, accountID, resp.String()), 240)
 			slog.Warn("openai_quota_query_failed", "account_id", accountID, "status", status, "body", body)
 			return nil, infraerrors.Newf(mapUpstreamStatus(status), "OPENAI_QUOTA_UPSTREAM_ERROR", "upstream returned %d: %s", status, body)
@@ -224,6 +229,7 @@ func (s *OpenAIQuotaService) queryUsage(ctx context.Context, accountID int64, in
 		if details == nil {
 			return &payload, nil
 		}
+		payload.autoResetCandidates = details.AutoResetCandidates
 		hasDetailCount := details.AvailableCount != nil
 		if payload.RateLimitResetCredits == nil {
 			payload.RateLimitResetCredits = &OpenAIRateLimitResetCredits{}
@@ -308,6 +314,25 @@ func (s *OpenAIQuotaService) queryResetCreditDetails(ctx context.Context, client
 // The redeem_request_id is auto-generated (uuid-like) — upstream uses it for
 // idempotency. Returns the consumed credit metadata so the UI can refresh.
 func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (*OpenAIQuotaResetResult, error) {
+	redeemRequestID, err := generateRedeemRequestID()
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_QUOTA_REDEEM_ID_FAILED", "failed to generate redeem id: %v", err)
+	}
+	return s.resetCredit(ctx, accountID, "", redeemRequestID, false)
+}
+
+// ResetCreditTargeted 使用固定卡 ID 与兑换 ID执行自动消费。调用方必须在重试时
+// 复用同一组参数；本方法不会回退到不带 credit_id 的旧消费方式。
+func (s *OpenAIQuotaService) ResetCreditTargeted(ctx context.Context, accountID int64, creditID, redeemRequestID string) (*OpenAIQuotaResetResult, error) {
+	creditID = strings.TrimSpace(creditID)
+	redeemRequestID = strings.TrimSpace(redeemRequestID)
+	if creditID == "" || redeemRequestID == "" {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_QUOTA_TARGETED_RESET_INVALID", "credit_id and redeem_request_id are required")
+	}
+	return s.resetCredit(ctx, accountID, creditID, redeemRequestID, true)
+}
+
+func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, creditID, redeemRequestID string, targeted bool) (*OpenAIQuotaResetResult, error) {
 	// Shadow guard: resetting credits via a shadow account would silently
 	// operate on the parent's quota; that is surprising and unwanted. Callers
 	// must reset the parent account directly.
@@ -331,11 +356,6 @@ func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (
 		return nil, err
 	}
 
-	redeemRequestID, err := generateRedeemRequestID()
-	if err != nil {
-		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_QUOTA_REDEEM_ID_FAILED", "failed to generate redeem id: %v", err)
-	}
-
 	client, err := s.privacyClientFactory(proxyURL)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_QUOTA_CLIENT_ERROR", "failed to build upstream client: %v", err)
@@ -352,10 +372,14 @@ func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_QUOTA_AUTH_FAILED", "failed to build upstream authentication: %v", headerErr)
 		}
 		headers["content-type"] = "application/json"
+		body := map[string]string{"redeem_request_id": redeemRequestID}
+		if targeted {
+			body["credit_id"] = creditID
+		}
 		resp, err := client.R().
 			SetContext(callCtx).
 			SetHeaders(headers).
-			SetBody(map[string]string{"redeem_request_id": redeemRequestID}).
+			SetBody(body).
 			SetSuccessResult(&payload).
 			Post(chatGPTRateLimitResetURL)
 		if err != nil {
@@ -370,6 +394,10 @@ func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (
 				continue
 			}
 			status := resp.StatusCode
+			if targeted {
+				slog.Warn("openai_quota_targeted_reset_failed", "account_id", accountID, "status", status)
+				return nil, infraerrors.Newf(mapUpstreamStatus(status), "OPENAI_QUOTA_RESET_UPSTREAM_ERROR", "upstream returned %d", status)
+			}
 			body := truncate(s.redactQuotaErrorBody(callCtx, accountID, resp.String()), 240)
 			slog.Warn("openai_quota_reset_failed", "account_id", accountID, "status", status, "body", body)
 			return nil, infraerrors.Newf(mapUpstreamStatus(status), "OPENAI_QUOTA_RESET_UPSTREAM_ERROR", "upstream returned %d: %s", status, body)
@@ -382,7 +410,10 @@ func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (
 		"code", payload.Code,
 		"windows_reset", payload.WindowsReset,
 	)
-	if s.resetReconciler != nil {
+	// Targeted consumption is the auto-reset path. Its caller runs the shared
+	// post-process after the idempotent consume completes, so invoking the legacy
+	// manual reconciler here would duplicate probes and scheduler recovery.
+	if s.resetReconciler != nil && !targeted {
 		if reconcileErr := s.resetReconciler.ReconcileOpenAIQuotaReset(ctx, accountID); reconcileErr != nil {
 			slog.Error("openai_quota_reset_local_reconcile_failed",
 				"account_id", accountID,

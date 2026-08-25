@@ -89,9 +89,17 @@ func TestGetOpenAIUsage_SparkShadow_WritesExtraAndReturnsNonEmptyWindows(t *test
 	// httptest server: records the chatgpt-account-id header and returns a
 	// synthetic OpenAIQuotaUsage with codex_bengalfox 5h+7d windows.
 	var capturedAccountID string
+	var usageCalls int
+	var resetCreditDetailCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedAccountID = r.Header.Get("chatgpt-account-id")
 		w.Header().Set("content-type", "application/json")
+		if r.URL.Path == "/backend-api/wham/rate-limit-reset-credits" {
+			resetCreditDetailCalls++
+			http.Error(w, "unexpected reset-credit detail request", http.StatusInternalServerError)
+			return
+		}
+		usageCalls++
 		resp := OpenAIQuotaUsage{
 			AdditionalRateLimits: []OpenAIAdditionalRateLimit{
 				{
@@ -128,7 +136,9 @@ func TestGetOpenAIUsage_SparkShadow_WritesExtraAndReturnsNonEmptyWindows(t *test
 
 	// Assertion A-1: upstream received the PARENT's chatgpt-account-id.
 	require.Equal(t, "org-spark-parent", capturedAccountID,
-		"QueryUsage must use parent's chatgpt-account-id for spark shadow accounts")
+		"QueryUsageSnapshot must use parent's chatgpt-account-id for spark shadow accounts")
+	require.Equal(t, 1, usageCalls)
+	require.Zero(t, resetCreditDetailCalls, "Spark snapshot refresh must not fetch reset-credit details")
 
 	// Assertion A-2: shadow Extra was persisted with codex_5h_used_percent.
 	select {
@@ -148,4 +158,73 @@ func TestGetOpenAIUsage_SparkShadow_WritesExtraAndReturnsNonEmptyWindows(t *test
 		"returned UsageInfo.FiveHour must be non-nil (rebuild from merged Extra must happen)")
 	require.NotNil(t, usage.SevenDay,
 		"returned UsageInfo.SevenDay must be non-nil (rebuild from merged Extra must happen)")
+}
+
+func TestRefreshOpenAICodexUsageSnapshot_SparkShadowSkipsResetCreditDetails(t *testing.T) {
+	t.Parallel()
+
+	parentID := int64(300)
+	shadow := &Account{
+		ID:              301,
+		ParentAccountID: &parentID,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		Status:          StatusActive,
+		QuotaDimension:  QuotaDimensionSpark,
+	}
+	parent := &Account{
+		ID:       parentID,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "org-refresh-parent",
+		},
+	}
+	updatesCh := make(chan map[string]any, 1)
+	repo := &sparkShadowUsageTestRepo{
+		accounts:      map[int64]*Account{shadow.ID: shadow, parent.ID: parent},
+		updateExtraCh: updatesCh,
+	}
+	tokenProvider := NewOpenAITokenProvider(repo, &stubQuotaTokenCache{tokens: map[string]string{
+		OpenAITokenCacheKey(parent): "fake-access-token",
+	}}, nil)
+
+	var usageCalls int
+	var resetCreditDetailCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		if r.URL.Path == "/backend-api/wham/rate-limit-reset-credits" {
+			resetCreditDetailCalls++
+			http.Error(w, "unexpected reset-credit detail request", http.StatusInternalServerError)
+			return
+		}
+		usageCalls++
+		_ = json.NewEncoder(w).Encode(OpenAIQuotaUsage{
+			AdditionalRateLimits: []OpenAIAdditionalRateLimit{{
+				MeteredFeature: "codex_bengalfox",
+				RateLimit: &OpenAIRateLimit{PrimaryWindow: &OpenAIRateLimitWindow{
+					UsedPercent:        61,
+					LimitWindowSeconds: 5 * 60 * 60,
+				}},
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	svc := &AccountUsageService{
+		accountRepo:        repo,
+		openAIQuotaService: NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv)),
+		cache:              NewUsageCache(),
+	}
+	svc.RefreshOpenAICodexUsageSnapshot(shadow.ID, false)
+
+	select {
+	case updates := <-updatesCh:
+		require.Equal(t, 61.0, updates["codex_5h_used_percent"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Spark fallback snapshot persistence")
+	}
+	require.Equal(t, 1, usageCalls)
+	require.Zero(t, resetCreditDetailCalls, "WS fallback refresh must not fetch reset-credit details")
 }

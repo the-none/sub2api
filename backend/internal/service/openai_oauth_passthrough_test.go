@@ -132,9 +132,12 @@ func TestOpenAIGatewayService_FailoverClearsPreviousAccountFingerprint(t *testin
 
 	_, err = svc.Forward(context.Background(), c, accountB, originalBody)
 	require.Error(t, err)
-	require.Equal(t, "client-install", upstream.lastReq.Header.Get("X-Codex-Installation-ID"),
+	accountBInstallationID := scopeCodexAccountIdentityValue(accountB, 0, "installation", "client-install")
+	require.Equal(t, accountBInstallationID, upstream.lastReq.Header.Get("X-Codex-Installation-ID"),
+		"fingerprint-off failover account must use its own credential-scoped ID")
+	require.NotEqual(t, "account-a-device", accountBInstallationID,
 		"fingerprint-off failover account must not inherit the previous account's converged ID")
-	require.Equal(t, "client-install", gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, accountBInstallationID, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	stored, ok := c.Get("codex_fingerprint_ids")
 	require.True(t, ok)
 	ids, ok := stored.(*codexFingerprintIDs)
@@ -749,7 +752,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_NamespaceNonStreamingResponse(t *
 	setOpenAIResponsesNamespaceNames(c, names)
 
 	result, err := (&OpenAIGatewayService{cfg: &config.Config{}}).handleNonStreamingResponsePassthrough(
-		context.Background(), resp, c, "gpt-5.5", "",
+		context.Background(), resp, c, &Account{ID: 91}, "gpt-5.5", "",
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result)

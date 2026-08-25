@@ -177,6 +177,7 @@ export default {
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
     usageAlerts: 'Usage Alerts',
+    plugins: 'Plugins',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
