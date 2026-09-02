@@ -39,7 +39,13 @@ func (s *openAIFastPolicyRepoStub) Set(ctx context.Context, key, value string) e
 }
 
 func (s *openAIFastPolicyRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
-	panic("unexpected GetMultiple call")
+	result := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := s.values[key]; ok {
+			result[key] = value
+		}
+	}
+	return result, nil
 }
 
 func (s *openAIFastPolicyRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
@@ -529,6 +535,85 @@ func TestApplyOpenAIFastPolicyToBody_MissingTierKeepsFirstMatchOrderAndWhitelist
 	require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(updated, "service_tier").String())
 
 	updated, err = whitelisted.applyOpenAIFastPolicyToBody(context.Background(), account, "gpt-5.4", body)
+	require.NoError(t, err)
+	require.Equal(t, string(body), string(updated))
+}
+
+func TestApplyOpenAIFastPolicyToBody_GroupForceInjectsAndOverridesTier(t *testing.T) {
+	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
+		ID: 7, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, ForceOpenAIFast: true,
+	})
+
+	for _, body := range [][]byte{
+		[]byte(`{"model":"gpt-5.6-sol","input":"hi"}`),
+		[]byte(`{"model":"gpt-5.6-sol","service_tier":"default"}`),
+		[]byte(`{"model":"gpt-5.6-sol","service_tier":"flex"}`),
+		[]byte(`{"model":"gpt-5.6-sol","service_tier":"client-unknown"}`),
+	} {
+		updated, err := svc.applyOpenAIFastPolicyToBody(ctx, account, "gpt-5.6-sol", body)
+		require.NoError(t, err)
+		require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(updated, "service_tier").String())
+	}
+}
+
+func TestApplyOpenAIFastPolicyToBody_GroupForceStillHonorsGlobalPolicy(t *testing.T) {
+	svc := newOpenAIGatewayServiceWithSettings(t, openAIFastFilterPriorityPolicy())
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
+		ID: 7, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, ForceOpenAIFast: true,
+	})
+
+	updated, err := svc.applyOpenAIFastPolicyToBody(ctx, account, "gpt-5.6-sol", []byte(`{"model":"gpt-5.6-sol"}`))
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(updated, "service_tier").Exists(),
+		"the global filter remains authoritative after the group requests priority")
+}
+
+func TestApplyOpenAIFastPolicyToBody_GroupForceRequiresHydratedGroup(t *testing.T) {
+	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"gpt-5.6-sol"}`)
+	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
+		ID: 7, Platform: PlatformOpenAI, Status: StatusActive, ForceOpenAIFast: true,
+	})
+
+	updated, err := svc.applyOpenAIFastPolicyToBody(ctx, account, "gpt-5.6-sol", body)
+	require.NoError(t, err)
+	require.Equal(t, string(body), string(updated))
+}
+
+func TestApplyOpenAIFastPolicyToBody_GroupForceOnlyTargetsOpenAIAccounts(t *testing.T) {
+	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
+	body := []byte(`{"model":"grok-4.1"}`)
+	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
+		ID: 7, Platform: PlatformComposite, Status: StatusActive, Hydrated: true, ForceOpenAIFast: true,
+	})
+
+	updated, err := svc.applyOpenAIFastPolicyToBody(
+		ctx,
+		&Account{Platform: PlatformGrok, Type: AccountTypeOAuth},
+		"grok-4.1",
+		body,
+	)
+	require.NoError(t, err)
+	require.Equal(t, string(body), string(updated))
+}
+
+func TestApplyOpenAIFastPolicyToBody_GroupForceRequiresSupportedGroupPlatform(t *testing.T) {
+	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
+	body := []byte(`{"model":"gpt-5.6-sol"}`)
+	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
+		ID: 7, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true, ForceOpenAIFast: true,
+	})
+
+	updated, err := svc.applyOpenAIFastPolicyToBody(
+		ctx,
+		&Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		"gpt-5.6-sol",
+		body,
+	)
 	require.NoError(t, err)
 	require.Equal(t, string(body), string(updated))
 }

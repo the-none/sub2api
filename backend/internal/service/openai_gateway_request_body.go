@@ -119,12 +119,12 @@ func deleteOpenAIResponsesNoneReasoningEffortFromObject(account *Account, body m
 	}
 }
 
-// normalizeDeepSeekResponsesRequestBody 适配 DeepSeek 无状态 Responses 端点：
-// 强制 store=false 并清除 previous_response_id（官方 /responses 不支持服务端
-// 状态存储，携带这些字段会被拒绝）。非 deepseek responses 协议账号原样返回。
+// normalizeDeepSeekResponsesRequestBody 适配无状态 CN Responses 端点：
+// 强制 store=false 并清除 previous_response_id（DeepSeek / Kimi 官方
+// Responses 均不支持服务端状态存储，携带这些字段会被拒绝）。
+// 非原生 Responses 协议账号原样返回。
 func normalizeDeepSeekResponsesRequestBody(account *Account, body []byte) []byte {
-	if account == nil || account.Platform != PlatformDeepseek ||
-		(account.GetAPIProtocol() != APIProtocolResponses && !account.IsAdaptiveAPIProtocol()) {
+	if account == nil || !account.UsesNativeCNResponses() {
 		return body
 	}
 	normalized, err := sjson.SetBytes(body, "store", false)
@@ -1701,13 +1701,25 @@ func openAIFastPolicySettingsFromContext(ctx context.Context) *OpenAIFastPolicyS
 	return nil
 }
 
+func openAIGroupForcesFast(ctx context.Context, account *Account) bool {
+	if ctx == nil || account == nil || account.Platform != PlatformOpenAI {
+		return false
+	}
+	group, _ := ctx.Value(ctxkey.Group).(*Group)
+	return IsGroupContextValid(group) && groupSupportsOpenAIFast(group.Platform) && group.ForceOpenAIFast
+}
+
 // applyOpenAIFastPolicyToBody applies the OpenAI fast policy to a raw request
 // body. When action=filter it removes the service_tier field; when
 // action=block it returns (body, *OpenAIFastBlockedError). On pass it
 // normalizes the service_tier value (e.g. client alias "fast" → "priority").
 // action=force_priority rewrites any matched known tier to "priority". When an
 // all-tier force rule explicitly enables inject_priority_if_missing, a missing
-// field is added as "priority".
+// field is added as "priority". Before the global policy is evaluated, a
+// trusted request Group with
+// ForceOpenAIFast enabled unconditionally sets service_tier to "priority".
+// The global policy remains authoritative and may still pass, filter, or block
+// that final value.
 //
 // Rationale for normalize-on-pass: chat-completions / messages 入口在调用本
 // 函数之前已经通过 normalizeResponsesBodyServiceTier 把 service_tier 归一化
@@ -1736,6 +1748,13 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToNormalizedBody(
 ) ([]byte, error) {
 	if len(body) == 0 || account == nil || account.Platform != PlatformOpenAI {
 		return body, nil
+	}
+	if openAIGroupForcesFast(ctx, account) {
+		updated, err := sjson.SetBytes(body, "service_tier", OpenAIFastTierPriority)
+		if err != nil {
+			return body, fmt.Errorf("force group service_tier priority on body: %w", err)
+		}
+		body = updated
 	}
 	tierResult := gjson.GetBytes(body, "service_tier")
 	if !tierResult.Exists() {
@@ -1825,6 +1844,7 @@ func writeOpenAIFastPolicyBlockedResponse(c *gin.Context, err *OpenAIFastBlocked
 //   - force_priority: keeps service_tier and rewrites it to "priority"; an
 //     all-tier rule with inject_priority_if_missing also adds a missing field
 //   - block: returns (frame, *OpenAIFastBlockedError)
+//   - Group ForceOpenAIFast: sets priority first, then applies the global rule
 //
 // Only frames whose "type" field strictly equals "response.create" are
 // inspected/mutated. Any other frame type — including the empty string —
@@ -1862,6 +1882,13 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToWSResponseCreate(
 	// upstream reject it rather than guessing at our layer.
 	if frameType != "response.create" {
 		return frame, nil, nil
+	}
+	if openAIGroupForcesFast(ctx, account) {
+		updated, err := sjson.SetBytes(frame, "service_tier", OpenAIFastTierPriority)
+		if err != nil {
+			return frame, nil, fmt.Errorf("force group service_tier priority in ws frame: %w", err)
+		}
+		frame = updated
 	}
 	tierResult := gjson.GetBytes(frame, "service_tier")
 	if !tierResult.Exists() {
