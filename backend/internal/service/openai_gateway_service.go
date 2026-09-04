@@ -158,11 +158,14 @@ func (s *OpenAICodexUsageSnapshot) Normalize() *NormalizedCodexLimits {
 	hasPrimaryWindow := false
 	hasSecondaryWindow := false
 
-	if s.PrimaryWindowMinutes != nil {
+	// A non-positive window length carries no classification signal. Treating it
+	// as known would skew the primary/secondary comparison below and silently
+	// route the shorter window into the 7d slot.
+	if s.PrimaryWindowMinutes != nil && *s.PrimaryWindowMinutes > 0 {
 		primaryMins = *s.PrimaryWindowMinutes
 		hasPrimaryWindow = true
 	}
-	if s.SecondaryWindowMinutes != nil {
+	if s.SecondaryWindowMinutes != nil && *s.SecondaryWindowMinutes > 0 {
 		secondaryMins = *s.SecondaryWindowMinutes
 		hasSecondaryWindow = true
 	}

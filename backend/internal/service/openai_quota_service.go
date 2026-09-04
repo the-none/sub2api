@@ -713,18 +713,22 @@ func openAIRateLimitToCodexSnapshot(rateLimit *OpenAIRateLimit, now time.Time) *
 	if window := rateLimit.PrimaryWindow; window != nil {
 		used := window.UsedPercent
 		resetAfter := openAIRateLimitWindowResetAfterSeconds(window, now)
-		windowMinutes := int(window.LimitWindowSeconds / 60)
 		snapshot.PrimaryUsedPercent = &used
 		snapshot.PrimaryResetAfterSeconds = &resetAfter
-		snapshot.PrimaryWindowMinutes = &windowMinutes
+		if window.LimitWindowSeconds > 0 {
+			windowMinutes := int(window.LimitWindowSeconds / 60)
+			snapshot.PrimaryWindowMinutes = &windowMinutes
+		}
 	}
 	if window := rateLimit.SecondaryWindow; window != nil {
 		used := window.UsedPercent
 		resetAfter := openAIRateLimitWindowResetAfterSeconds(window, now)
-		windowMinutes := int(window.LimitWindowSeconds / 60)
 		snapshot.SecondaryUsedPercent = &used
 		snapshot.SecondaryResetAfterSeconds = &resetAfter
-		snapshot.SecondaryWindowMinutes = &windowMinutes
+		if window.LimitWindowSeconds > 0 {
+			windowMinutes := int(window.LimitWindowSeconds / 60)
+			snapshot.SecondaryWindowMinutes = &windowMinutes
+		}
 	}
 	return snapshot
 }
@@ -780,16 +784,20 @@ func buildCodexSparkWindowExtraUpdates(usage *OpenAIQuotaUsage, now time.Time) m
 		snap.PrimaryUsedPercent = &p
 		ra := int(w.ResetAfterSeconds)
 		snap.PrimaryResetAfterSeconds = &ra
-		wm := int(w.LimitWindowSeconds / 60)
-		snap.PrimaryWindowMinutes = &wm
+		if w.LimitWindowSeconds > 0 {
+			wm := int(w.LimitWindowSeconds / 60)
+			snap.PrimaryWindowMinutes = &wm
+		}
 	}
 	if w := spark.SecondaryWindow; w != nil {
 		p := w.UsedPercent
 		snap.SecondaryUsedPercent = &p
 		ra := int(w.ResetAfterSeconds)
 		snap.SecondaryResetAfterSeconds = &ra
-		wm := int(w.LimitWindowSeconds / 60)
-		snap.SecondaryWindowMinutes = &wm
+		if w.LimitWindowSeconds > 0 {
+			wm := int(w.LimitWindowSeconds / 60)
+			snap.SecondaryWindowMinutes = &wm
+		}
 	}
 
 	normalized := snap.Normalize()

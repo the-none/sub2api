@@ -565,15 +565,19 @@ func buildOpenAIAutoResetUsageUpdates(usage *OpenAIQuotaUsage, now time.Time) ma
 		}
 		used := window.UsedPercent
 		resetAfter := int(window.ResetAfterSeconds)
-		windowMinutes := int(window.LimitWindowSeconds / 60)
+		var windowMinutes *int
+		if window.LimitWindowSeconds > 0 {
+			minutes := int(window.LimitWindowSeconds / 60)
+			windowMinutes = &minutes
+		}
 		if primary {
 			snapshot.PrimaryUsedPercent = &used
 			snapshot.PrimaryResetAfterSeconds = &resetAfter
-			snapshot.PrimaryWindowMinutes = &windowMinutes
+			snapshot.PrimaryWindowMinutes = windowMinutes
 		} else {
 			snapshot.SecondaryUsedPercent = &used
 			snapshot.SecondaryResetAfterSeconds = &resetAfter
-			snapshot.SecondaryWindowMinutes = &windowMinutes
+			snapshot.SecondaryWindowMinutes = windowMinutes
 		}
 	}
 	applyWindow(rateLimit.PrimaryWindow, true)

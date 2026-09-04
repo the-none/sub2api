@@ -54,11 +54,8 @@ const (
 	usageAlertRetryMinDelay     = 30 * time.Second
 	usageAlertRetryMaxDelay     = 5 * time.Minute
 	codex7dBoundaryRefreshDelay = 30 * time.Second
-	// Manual-reset reconciliation and regular boundary drift have separate
-	// tolerances even though both currently use the same duration.
-	codex7dResetIgnoreWindow    = time.Hour
-	codex7dRegularDriftWindow   = time.Hour
-	codex7dMinimumCycleDuration = 6 * 24 * time.Hour
+	codex7dResetDriftWindow     = time.Hour
+	codex7dUsageRollbackPoints  = 1.0
 
 	UsageAlertSourceOpenAICodexHeaders  = "openai_codex_headers"
 	UsageAlertSourceOpenAICodexProbe    = "openai_codex_probe"
@@ -158,14 +155,18 @@ type UsageAlertState struct {
 }
 
 type UsageAlertWindowSnapshot struct {
-	UsedPercent           float64    `json:"used_percent"`
-	RemainingPercent      float64    `json:"remaining_percent"`
-	ResetAt               *time.Time `json:"reset_at,omitempty"`
-	SampledAt             *time.Time `json:"sampled_at,omitempty"`
-	Generation            int64      `json:"generation,omitempty"`
-	BoundaryAt            *time.Time `json:"boundary_at,omitempty"`
-	OfficialResetAnchorAt *time.Time `json:"official_reset_anchor_at,omitempty"`
-	AwaitingOfficialReset bool       `json:"awaiting_official_reset,omitempty"`
+	UsedPercent      float64    `json:"used_percent"`
+	RemainingPercent float64    `json:"remaining_percent"`
+	ResetAt          *time.Time `json:"reset_at,omitempty"`
+	SampledAt        *time.Time `json:"sampled_at,omitempty"`
+	Generation       int64      `json:"generation,omitempty"`
+	BoundaryAt       *time.Time `json:"boundary_at,omitempty"`
+	// AuthoritativeUsedPercent is the last percentage reported by the Usage API.
+	// Headers are sampled from the live request path and can run ahead of the
+	// authority, so rollover detection compares authority against authority.
+	AuthoritativeUsedPercent *float64   `json:"authoritative_used_percent,omitempty"`
+	OfficialResetAnchorAt    *time.Time `json:"official_reset_anchor_at,omitempty"`
+	AwaitingOfficialReset    bool       `json:"awaiting_official_reset,omitempty"`
 }
 
 type UsageAlertSnapshot struct {
@@ -1014,13 +1015,17 @@ func prepareCodex7dWindow(previous, current UsageAlertWindowSnapshot, source str
 	if current.BoundaryAt == nil {
 		current.BoundaryAt = previous.ResetAt
 	}
+	current.AuthoritativeUsedPercent = previous.AuthoritativeUsedPercent
 
 	if source == UsageAlertSourceOpenAIQuotaReset {
 		if usageAlertWindowSampleIsOlder(previous, current) {
 			return UsageAlertWindowSnapshot{}, false, false
 		}
-		if !previous.AwaitingOfficialReset {
+		if !codex7dSamePendingReset(previous, current) {
 			current.Generation++
+		}
+		if current.ResetAt != nil {
+			current.BoundaryAt = current.ResetAt
 		}
 		current.OfficialResetAnchorAt = current.ResetAt
 		current.AwaitingOfficialReset = true
@@ -1030,41 +1035,29 @@ func prepareCodex7dWindow(previous, current UsageAlertWindowSnapshot, source str
 		return UsageAlertWindowSnapshot{}, false, false
 	}
 	if previous.AwaitingOfficialReset && source == UsageAlertSourceOpenAICodexUsageAPI {
-		if codex7dOfficialResetAnchor(previous) == nil && current.ResetAt != nil {
-			current.BoundaryAt = current.ResetAt
-			current.OfficialResetAnchorAt = nil
-			current.AwaitingOfficialReset = false
-			return current, true, false
+		if current.ResetAt == nil || !current.ResetAt.After(sampledAt) {
+			return UsageAlertWindowSnapshot{}, false, true
 		}
-		if codex7dOfficialRolloverConfirmed(previous, current) {
-			current.Generation++
-			current.BoundaryAt = current.ResetAt
-			current.OfficialResetAnchorAt = nil
-			current.AwaitingOfficialReset = false
-			return current, true, false
+		anchor := codex7dOfficialResetAnchor(previous)
+		if anchor != nil && current.ResetAt.Before(anchor.Add(-codex7dResetDriftWindow)) {
+			return UsageAlertWindowSnapshot{}, false, true
 		}
-		if codex7dOfficialRolloverIgnored(previous, current) {
-			if current.ResetAt == nil || !current.ResetAt.After(sampledAt) {
-				return UsageAlertWindowSnapshot{}, false, true
-			}
-			current.OfficialResetAnchorAt = codex7dOfficialResetAnchor(previous)
-			current.AwaitingOfficialReset = true
-			if current.BoundaryAt != nil && !sampledAt.Before(*current.BoundaryAt) {
-				current.BoundaryAt = current.ResetAt
-				current.OfficialResetAnchorAt = nil
-				current.AwaitingOfficialReset = false
-			}
-			return current, true, false
+		if anchor != nil && !codex7dResetTimesWithinWindow(anchor, current.ResetAt, codex7dResetDriftWindow) &&
+			codex7dUsageRolledBack(previous, current) {
+			return advanceCodex7dGeneration(current), true, false
 		}
+		return reconcileCodex7dAuthority(current), true, false
+	}
+
+	if source == UsageAlertSourceOpenAICodexUsageAPI && current.ResetAt != nil && current.ResetAt.After(sampledAt) {
+		if codex7dUsageRolledBack(previous, current) {
+			return advanceCodex7dGeneration(current), true, false
+		}
+		return reconcileCodex7dAuthority(current), true, false
 	}
 
 	boundaryDue := current.BoundaryAt != nil && !sampledAt.Before(*current.BoundaryAt)
 	if boundaryDue {
-		if source == UsageAlertSourceOpenAICodexUsageAPI {
-			if prepared, ok := prepareCodex7dRegularBoundary(previous, current, sampledAt); ok {
-				return prepared, true, false
-			}
-		}
 		return UsageAlertWindowSnapshot{}, false, true
 	}
 
@@ -1078,15 +1071,15 @@ func prepareCodex7dWindow(previous, current UsageAlertWindowSnapshot, source str
 	return current, true, false
 }
 
-func codex7dOfficialRolloverConfirmed(previous, current UsageAlertWindowSnapshot) bool {
+func codex7dSamePendingReset(previous, current UsageAlertWindowSnapshot) bool {
+	if !previous.AwaitingOfficialReset {
+		return false
+	}
 	anchor := codex7dOfficialResetAnchor(previous)
-	return anchor != nil && current.ResetAt != nil &&
-		current.ResetAt.After(anchor.Add(codex7dResetIgnoreWindow))
-}
-
-func codex7dOfficialRolloverIgnored(previous, current UsageAlertWindowSnapshot) bool {
-	anchor := codex7dOfficialResetAnchor(previous)
-	return codex7dResetTimesWithinWindow(anchor, current.ResetAt, codex7dResetIgnoreWindow)
+	if anchor == nil || current.ResetAt == nil {
+		return true
+	}
+	return codex7dResetTimesWithinWindow(anchor, current.ResetAt, codex7dResetDriftWindow)
 }
 
 func codex7dOfficialResetAnchor(window UsageAlertWindowSnapshot) *time.Time {
@@ -1096,40 +1089,29 @@ func codex7dOfficialResetAnchor(window UsageAlertWindowSnapshot) *time.Time {
 	return window.ResetAt
 }
 
-func prepareCodex7dRegularBoundary(previous, current UsageAlertWindowSnapshot, sampledAt time.Time) (UsageAlertWindowSnapshot, bool) {
-	if previous.AwaitingOfficialReset || current.BoundaryAt == nil || current.ResetAt == nil {
-		return UsageAlertWindowSnapshot{}, false
+func codex7dUsageRolledBack(previous, current UsageAlertWindowSnapshot) bool {
+	baseline := previous.UsedPercent
+	if previous.AuthoritativeUsedPercent != nil {
+		baseline = *previous.AuthoritativeUsedPercent
 	}
-	if !current.ResetAt.After(sampledAt) {
-		return UsageAlertWindowSnapshot{}, false
-	}
+	return baseline-current.UsedPercent > codex7dUsageRollbackPoints
+}
 
-	// A nearly complete horizon is strong rollover evidence even when the
-	// authority announced it before the frozen boundary became due.
-	if current.ResetAt.After(current.BoundaryAt.Add(codex7dMinimumCycleDuration)) {
-		return advanceCodex7dGeneration(current), true
-	}
-
-	// A projected reset that still matches the last authoritative horizon means
-	// the frozen boundary drifted; re-anchor it without inventing a generation.
-	if codex7dResetTimesWithinWindow(previous.ResetAt, current.ResetAt, codex7dRegularDriftWindow) {
-		current.BoundaryAt = current.ResetAt
-		current.OfficialResetAnchorAt = nil
-		current.AwaitingOfficialReset = false
-		return current, true
-	}
-	if !current.ResetAt.After(current.BoundaryAt.Add(codex7dRegularDriftWindow)) {
-		return UsageAlertWindowSnapshot{}, false
-	}
-	return advanceCodex7dGeneration(current), true
+// reconcileCodex7dAuthority accepts an authoritative sample: the boundary tracks
+// the reported horizon again and the usage baseline is refreshed so the next
+// rollback check compares against this authority rather than a header sample.
+func reconcileCodex7dAuthority(current UsageAlertWindowSnapshot) UsageAlertWindowSnapshot {
+	current.BoundaryAt = current.ResetAt
+	used := current.UsedPercent
+	current.AuthoritativeUsedPercent = &used
+	current.OfficialResetAnchorAt = nil
+	current.AwaitingOfficialReset = false
+	return current
 }
 
 func advanceCodex7dGeneration(current UsageAlertWindowSnapshot) UsageAlertWindowSnapshot {
 	current.Generation++
-	current.BoundaryAt = current.ResetAt
-	current.OfficialResetAnchorAt = nil
-	current.AwaitingOfficialReset = false
-	return current
+	return reconcileCodex7dAuthority(current)
 }
 
 func codex7dResetTimesWithinWindow(anchor, current *time.Time, window time.Duration) bool {
@@ -1267,7 +1249,7 @@ func usageAlertWindowStateGenerationIsNewer(
 	}
 	if codex7d && state.LastGeneration == 0 && window.Generation > 0 {
 		if state.LastResetAt != nil && window.ResetAt != nil {
-			return window.ResetAt.After(state.LastResetAt.Add(codex7dResetIgnoreWindow))
+			return window.ResetAt.After(state.LastResetAt.Add(codex7dResetDriftWindow))
 		}
 		return window.Generation > 1
 	}

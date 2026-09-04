@@ -230,3 +230,62 @@ func TestBuildCodexUsageExtraUpdates_WithoutNormalizedWindowFields(t *testing.T)
 		t.Fatalf("did not expect codex_7d_reset_at in updates: %v", updates["codex_7d_reset_at"])
 	}
 }
+
+// TestNormalizeTreatsZeroWindowMinutesAsUnknown locks in that a window whose
+// length is missing (serialized as 0) cannot act as a classification signal.
+// Counting it as "known" made the primary/secondary comparison pick the wrong
+// branch and routed the 5h window into the 7d slot, where its five-hourly reset
+// looks like a weekly rollover.
+func TestNormalizeTreatsZeroWindowMinutesAsUnknown(t *testing.T) {
+	primaryUsed := 42.0
+	primaryReset := 3600
+	primaryWindow := 300 // 5h
+	secondaryUsed := 88.0
+	secondaryReset := 86400
+	zeroWindow := 0
+
+	snapshot := &OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent:         &primaryUsed,
+		PrimaryResetAfterSeconds:   &primaryReset,
+		PrimaryWindowMinutes:       &primaryWindow,
+		SecondaryUsedPercent:       &secondaryUsed,
+		SecondaryResetAfterSeconds: &secondaryReset,
+		SecondaryWindowMinutes:     &zeroWindow,
+	}
+
+	normalized := snapshot.Normalize()
+	if normalized == nil {
+		t.Fatal("expected non-nil normalized limits")
+		return
+	}
+	if normalized.Used5hPercent == nil || *normalized.Used5hPercent != primaryUsed {
+		t.Fatalf("Used5hPercent = %v, want %v", normalized.Used5hPercent, primaryUsed)
+	}
+	if normalized.Used7dPercent == nil || *normalized.Used7dPercent != secondaryUsed {
+		t.Fatalf("Used7dPercent = %v, want %v", normalized.Used7dPercent, secondaryUsed)
+	}
+	if normalized.Reset7dSeconds == nil || *normalized.Reset7dSeconds != secondaryReset {
+		t.Fatalf("Reset7dSeconds = %v, want %v", normalized.Reset7dSeconds, secondaryReset)
+	}
+}
+
+// TestOpenAIRateLimitToCodexSnapshotOmitsUnknownWindowMinutes keeps a missing
+// limit_window_seconds out of the snapshot entirely instead of persisting a
+// misleading zero into codex_*_window_minutes.
+func TestOpenAIRateLimitToCodexSnapshotOmitsUnknownWindowMinutes(t *testing.T) {
+	now := time.Date(2026, 2, 16, 10, 0, 0, 0, time.UTC)
+	snapshot := openAIRateLimitToCodexSnapshot(&OpenAIRateLimit{
+		PrimaryWindow:   &OpenAIRateLimitWindow{UsedPercent: 42, LimitWindowSeconds: 5 * 60 * 60, ResetAfterSeconds: 3600},
+		SecondaryWindow: &OpenAIRateLimitWindow{UsedPercent: 88, ResetAfterSeconds: 86400},
+	}, now)
+	if snapshot == nil {
+		t.Fatal("expected non-nil snapshot")
+		return
+	}
+	if snapshot.PrimaryWindowMinutes == nil || *snapshot.PrimaryWindowMinutes != 300 {
+		t.Fatalf("PrimaryWindowMinutes = %v, want 300", snapshot.PrimaryWindowMinutes)
+	}
+	if snapshot.SecondaryWindowMinutes != nil {
+		t.Fatalf("SecondaryWindowMinutes = %v, want nil", *snapshot.SecondaryWindowMinutes)
+	}
+}

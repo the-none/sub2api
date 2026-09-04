@@ -620,8 +620,10 @@ func TestObserveAsyncDeduplicatesAccountResetPerWebhookAcrossRules(t *testing.T)
 			AccountID: 2, RealAccountID: realAccountID, UsageType: UsageAlertTypeOverall,
 			Platform: UsageAlertPlatformOpenAI, Source: UsageAlertSourceOpenAIQuotaReset, SampledAt: manualAt,
 			Windows: map[string]UsageAlertWindowSnapshot{
+				// The manual redemption had not taken effect yet when it was
+				// probed, so the official reset is what actually rolls usage back.
 				UsageAlertWindow7d: {
-					UsedPercent: 0, RemainingPercent: 100, ResetAt: &manualResetAt, SampledAt: &manualAt,
+					UsedPercent: 88, RemainingPercent: 12, ResetAt: &manualResetAt, SampledAt: &manualAt,
 					Generation: 3, OfficialResetAnchorAt: &manualResetAt, AwaitingOfficialReset: true,
 				},
 			},
@@ -1464,7 +1466,7 @@ func TestPrepareCodex7dAcceptsResetAtDriftWithoutAdvancingGeneration(t *testing.
 	require.Equal(t, &driftedReset, persisted.Windows[UsageAlertWindow7d].ResetAt)
 }
 
-func TestPrepareCodex7dManualResetAdvancesGenerationAndKeepsOfficialBoundary(t *testing.T) {
+func TestPrepareCodex7dManualResetAdvancesGenerationAndReanchorsBoundary(t *testing.T) {
 	sampledAt := time.Date(2026, 8, 7, 11, 0, 0, 0, time.UTC)
 	officialBoundary := sampledAt.Add(5 * time.Minute)
 	manualResetAt := sampledAt.Add(7 * 24 * time.Hour)
@@ -1492,7 +1494,7 @@ func TestPrepareCodex7dManualResetAdvancesGenerationAndKeepsOfficialBoundary(t *
 	require.True(t, accepted)
 	require.False(t, refresh)
 	require.Equal(t, int64(8), weekly.Generation)
-	require.Equal(t, &officialBoundary, weekly.BoundaryAt)
+	require.Equal(t, &manualResetAt, weekly.BoundaryAt)
 	require.Equal(t, &manualResetAt, weekly.ResetAt)
 	require.True(t, weekly.AwaitingOfficialReset)
 
@@ -1559,10 +1561,11 @@ func TestPrepareCodex7dOfficialResetWithinOneHourIsIgnored(t *testing.T) {
 	require.True(t, accepted)
 	require.False(t, refresh)
 	require.Equal(t, int64(8), weekly.Generation)
+	require.Equal(t, &officialResetAt, weekly.BoundaryAt)
 	require.False(t, weekly.AwaitingOfficialReset)
 }
 
-func TestPrepareCodex7dOfficialResetAfterOneHourAdvancesGeneration(t *testing.T) {
+func TestPrepareCodex7dOfficialResetAfterOneHourReanchorsWithoutDuplicateGeneration(t *testing.T) {
 	manualAt := time.Date(2026, 8, 13, 0, 11, 12, 0, time.FixedZone("UTC+8", 8*60*60))
 	frozenBoundary := time.Date(2026, 8, 15, 11, 48, 46, 0, manualAt.Location())
 	manualResetAt := time.Date(2026, 8, 20, 0, 11, 12, 0, manualAt.Location())
@@ -1598,7 +1601,7 @@ func TestPrepareCodex7dOfficialResetAfterOneHourAdvancesGeneration(t *testing.T)
 	require.True(t, accepted)
 	require.False(t, refresh)
 	require.Equal(t, 17.0, evaluation.Windows[UsageAlertWindow7d].UsedPercent)
-	require.Equal(t, int64(4), weekly.Generation)
+	require.Equal(t, int64(3), weekly.Generation)
 	require.Equal(t, &officialResetAt, weekly.BoundaryAt)
 	require.False(t, weekly.AwaitingOfficialReset)
 }
@@ -1607,15 +1610,12 @@ func TestPrepareCodex7dOfficialResetOneHourBoundary(t *testing.T) {
 	manualAt := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
 	manualResetAt := manualAt.Add(7 * 24 * time.Hour)
 	for _, tc := range []struct {
-		name               string
-		delta              time.Duration
-		accepted           bool
-		expectedGeneration int64
-		expectedAwaiting   bool
+		name  string
+		delta time.Duration
 	}{
-		{name: "59 minutes", delta: 59 * time.Minute, accepted: true, expectedGeneration: 3, expectedAwaiting: true},
-		{name: "exactly one hour", delta: time.Hour, accepted: true, expectedGeneration: 3, expectedAwaiting: true},
-		{name: "after one hour", delta: time.Hour + time.Second, accepted: true, expectedGeneration: 4, expectedAwaiting: false},
+		{name: "59 minutes", delta: 59 * time.Minute},
+		{name: "exactly one hour", delta: time.Hour},
+		{name: "after one hour", delta: time.Hour + time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			previous := UsageAlertWindowSnapshot{
@@ -1631,15 +1631,16 @@ func TestPrepareCodex7dOfficialResetOneHourBoundary(t *testing.T) {
 
 			got, accepted, refresh := prepareCodex7dWindow(previous, current, UsageAlertSourceOpenAICodexUsageAPI, manualAt.Add(tc.delta))
 
-			require.Equal(t, tc.accepted, accepted)
+			require.True(t, accepted)
 			require.False(t, refresh)
-			require.Equal(t, tc.expectedGeneration, got.Generation)
-			require.Equal(t, tc.expectedAwaiting, got.AwaitingOfficialReset)
+			require.Equal(t, int64(3), got.Generation)
+			require.False(t, got.AwaitingOfficialReset)
+			require.Equal(t, &currentResetAt, got.BoundaryAt)
 		})
 	}
 }
 
-func TestPrepareCodex7dOfficialResetIgnoreWindowDoesNotRatchetWithDrift(t *testing.T) {
+func TestPrepareCodex7dOfficialResetReconciliationDoesNotDuplicateGeneration(t *testing.T) {
 	manualAt := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
 	manualResetAt := manualAt.Add(7 * 24 * time.Hour)
 	previous := UsageAlertWindowSnapshot{
@@ -1661,7 +1662,9 @@ func TestPrepareCodex7dOfficialResetIgnoreWindowDoesNotRatchetWithDrift(t *testi
 	require.True(t, accepted)
 	require.False(t, refresh)
 	require.Equal(t, int64(3), first.Generation)
-	require.Equal(t, &manualResetAt, first.OfficialResetAnchorAt)
+	require.False(t, first.AwaitingOfficialReset)
+	require.Nil(t, first.OfficialResetAnchorAt)
+	require.Equal(t, &firstResetAt, first.BoundaryAt)
 
 	secondResetAt := manualResetAt.Add(80 * time.Minute)
 	secondSampleAt := manualAt.Add(80 * time.Minute)
@@ -1673,9 +1676,10 @@ func TestPrepareCodex7dOfficialResetIgnoreWindowDoesNotRatchetWithDrift(t *testi
 	)
 	require.True(t, accepted)
 	require.False(t, refresh)
-	require.Equal(t, int64(4), second.Generation)
+	require.Equal(t, int64(3), second.Generation)
 	require.False(t, second.AwaitingOfficialReset)
 	require.Nil(t, second.OfficialResetAnchorAt)
+	require.Equal(t, &secondResetAt, second.BoundaryAt)
 }
 
 func TestPrepareCodex7dRejectsOlderAuthorityWhileAwaitingOfficialReset(t *testing.T) {
@@ -1727,7 +1731,7 @@ func TestPrepareCodex7dAuthorityRecoversAwaitingSnapshotWithoutResetAnchor(t *te
 	require.False(t, got.AwaitingOfficialReset)
 }
 
-func TestPrepareCodex7dRegularBoundaryUsesOneHourResetDriftWindow(t *testing.T) {
+func TestPrepareCodex7dRegularBoundaryReanchorsWithoutTimeBasedGeneration(t *testing.T) {
 	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
 	previous := UsageAlertWindowSnapshot{
 		ResetAt:    &boundary,
@@ -1736,13 +1740,12 @@ func TestPrepareCodex7dRegularBoundaryUsesOneHourResetDriftWindow(t *testing.T) 
 		Generation: 3,
 	}
 	for _, tc := range []struct {
-		name               string
-		delta              time.Duration
-		expectedGeneration int64
+		name  string
+		delta time.Duration
 	}{
-		{name: "59 minutes", delta: 59 * time.Minute, expectedGeneration: 3},
-		{name: "exactly one hour", delta: time.Hour, expectedGeneration: 3},
-		{name: "after one hour", delta: time.Hour + time.Second, expectedGeneration: 4},
+		{name: "59 minutes", delta: 59 * time.Minute},
+		{name: "exactly one hour", delta: time.Hour},
+		{name: "after one hour", delta: time.Hour + time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetAt := boundary.Add(tc.delta)
@@ -1757,7 +1760,7 @@ func TestPrepareCodex7dRegularBoundaryUsesOneHourResetDriftWindow(t *testing.T) 
 
 			require.True(t, accepted)
 			require.False(t, refresh)
-			require.Equal(t, tc.expectedGeneration, got.Generation)
+			require.Equal(t, int64(3), got.Generation)
 			require.Equal(t, &resetAt, got.BoundaryAt)
 		})
 	}
@@ -1842,7 +1845,7 @@ func TestPrepareCodex7dRegularBoundaryAcceptsProductionResetHorizon(t *testing.T
 	require.Equal(t, 88.0, triggers[0].Value)
 }
 
-func TestPrepareCodex7dRegularBoundaryAdvancesPreannouncedFullCycle(t *testing.T) {
+func TestPrepareCodex7dRegularBoundaryAdvancesOnUsageRollback(t *testing.T) {
 	boundary := time.Date(2026, 9, 7, 10, 26, 36, 0, time.UTC)
 	preannouncedResetAt := boundary.Add(7 * 24 * time.Hour)
 	previousSampledAt := boundary.Add(-time.Hour)
@@ -1916,6 +1919,213 @@ func TestPrepareCodex7dRegularBoundaryAdvancesPreannouncedFullCycle(t *testing.T
 	require.Equal(t, "new-generation", triggers[0].StateAnchor)
 }
 
+func TestCodex7dUsageRollbackNeedsMoreThanOnePoint(t *testing.T) {
+	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	previousSampledAt := boundary.Add(-2 * time.Hour)
+	previous := UsageAlertWindowSnapshot{
+		UsedPercent: 88,
+		ResetAt:     &boundary,
+		SampledAt:   &previousSampledAt,
+		BoundaryAt:  &boundary,
+		Generation:  3,
+	}
+	for _, tc := range []struct {
+		name               string
+		usedPercent        float64
+		expectedGeneration int64
+	}{
+		{name: "below one point", usedPercent: 87.1, expectedGeneration: 3},
+		{name: "exactly one point", usedPercent: 87, expectedGeneration: 3},
+		{name: "above one point", usedPercent: 86.9, expectedGeneration: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sampledAt := boundary.Add(-time.Hour)
+			resetAt := boundary.Add(7 * 24 * time.Hour)
+
+			got, accepted, refresh := prepareCodex7dWindow(
+				previous,
+				UsageAlertWindowSnapshot{
+					UsedPercent: tc.usedPercent,
+					ResetAt:     &resetAt,
+					SampledAt:   &sampledAt,
+				},
+				UsageAlertSourceOpenAICodexUsageAPI,
+				sampledAt,
+			)
+
+			require.True(t, accepted)
+			require.False(t, refresh)
+			require.Equal(t, tc.expectedGeneration, got.Generation)
+			require.Equal(t, &resetAt, got.BoundaryAt)
+		})
+	}
+}
+
+// A reset that lands while the account is barely used still rolls the usage
+// back, so generation must advance on the relative drop rather than on the
+// absolute level.
+func TestCodex7dUsageRollbackDetectsLowUsageReset(t *testing.T) {
+	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	previousSampledAt := boundary.Add(-2 * time.Hour)
+	for _, tc := range []struct {
+		name               string
+		previousUsed       float64
+		currentUsed        float64
+		expectedGeneration int64
+	}{
+		{name: "three percent to zero", previousUsed: 3.2, currentUsed: 0, expectedGeneration: 4},
+		{name: "just above the threshold", previousUsed: 1.5, currentUsed: 0.4, expectedGeneration: 4},
+		{name: "within the threshold", previousUsed: 1.2, currentUsed: 0.4, expectedGeneration: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := UsageAlertWindowSnapshot{
+				UsedPercent: tc.previousUsed,
+				ResetAt:     &boundary,
+				SampledAt:   &previousSampledAt,
+				BoundaryAt:  &boundary,
+				Generation:  3,
+			}
+			sampledAt := boundary.Add(-time.Hour)
+			resetAt := boundary.Add(7 * 24 * time.Hour)
+
+			got, accepted, refresh := prepareCodex7dWindow(
+				previous,
+				UsageAlertWindowSnapshot{
+					UsedPercent: tc.currentUsed,
+					ResetAt:     &resetAt,
+					SampledAt:   &sampledAt,
+				},
+				UsageAlertSourceOpenAICodexUsageAPI,
+				sampledAt,
+			)
+
+			require.True(t, accepted)
+			require.False(t, refresh)
+			require.Equal(t, tc.expectedGeneration, got.Generation)
+		})
+	}
+}
+
+// Header and probe percentages are sampled from a different pipeline than the
+// Usage API, so a drop they report must never mint a generation or re-anchor
+// the boundary.
+func TestCodex7dUsageRollbackIgnoresNonAuthoritativeSources(t *testing.T) {
+	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	previousResetAt := boundary.Add(-time.Hour)
+	previousSampledAt := boundary.Add(-3 * time.Hour)
+	previous := UsageAlertWindowSnapshot{
+		UsedPercent: 88,
+		ResetAt:     &previousResetAt,
+		SampledAt:   &previousSampledAt,
+		BoundaryAt:  &boundary,
+		Generation:  3,
+	}
+	for _, source := range []string{
+		UsageAlertSourceOpenAICodexHeaders,
+		UsageAlertSourceOpenAICodexProbe,
+	} {
+		t.Run(source, func(t *testing.T) {
+			sampledAt := boundary.Add(-2 * time.Hour)
+			resetAt := boundary.Add(7 * 24 * time.Hour)
+
+			got, accepted, refresh := prepareCodex7dWindow(
+				previous,
+				UsageAlertWindowSnapshot{
+					UsedPercent:      0,
+					RemainingPercent: 100,
+					ResetAt:          &resetAt,
+					SampledAt:        &sampledAt,
+				},
+				source,
+				sampledAt,
+			)
+
+			require.True(t, accepted)
+			require.False(t, refresh)
+			require.Equal(t, int64(3), got.Generation)
+			require.Equal(t, &boundary, got.BoundaryAt)
+		})
+	}
+}
+
+// Headers run ahead of the Usage API under load, so a header percentage must
+// never become the baseline an authoritative sample is measured against.
+func TestCodex7dUsageRollbackComparesAgainstAuthoritativeBaseline(t *testing.T) {
+	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	previousSampledAt := boundary.Add(-2 * time.Hour)
+	authoritativeBaseline := 88.0
+	for _, tc := range []struct {
+		name               string
+		usedPercent        float64
+		expectedGeneration int64
+	}{
+		{name: "authority still climbing", usedPercent: 88.2, expectedGeneration: 3},
+		{name: "authority rolled back", usedPercent: 5, expectedGeneration: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := UsageAlertWindowSnapshot{
+				// The header sample overshot the authority by two points.
+				UsedPercent:              90,
+				AuthoritativeUsedPercent: &authoritativeBaseline,
+				ResetAt:                  &boundary,
+				SampledAt:                &previousSampledAt,
+				BoundaryAt:               &boundary,
+				Generation:               3,
+			}
+			sampledAt := boundary.Add(-time.Hour)
+			resetAt := boundary.Add(7 * 24 * time.Hour)
+
+			got, accepted, refresh := prepareCodex7dWindow(
+				previous,
+				UsageAlertWindowSnapshot{
+					UsedPercent: tc.usedPercent,
+					ResetAt:     &resetAt,
+					SampledAt:   &sampledAt,
+				},
+				UsageAlertSourceOpenAICodexUsageAPI,
+				sampledAt,
+			)
+
+			require.True(t, accepted)
+			require.False(t, refresh)
+			require.Equal(t, tc.expectedGeneration, got.Generation)
+			require.NotNil(t, got.AuthoritativeUsedPercent)
+			require.Equal(t, tc.usedPercent, *got.AuthoritativeUsedPercent)
+		})
+	}
+}
+
+func TestCodex7dNonAuthoritativeSampleKeepsAuthoritativeBaseline(t *testing.T) {
+	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	previousResetAt := boundary.Add(-time.Hour)
+	previousSampledAt := boundary.Add(-3 * time.Hour)
+	authoritativeBaseline := 88.0
+	previous := UsageAlertWindowSnapshot{
+		UsedPercent:              88,
+		AuthoritativeUsedPercent: &authoritativeBaseline,
+		ResetAt:                  &previousResetAt,
+		SampledAt:                &previousSampledAt,
+		BoundaryAt:               &boundary,
+		Generation:               3,
+	}
+	sampledAt := boundary.Add(-2 * time.Hour)
+	resetAt := boundary.Add(7 * 24 * time.Hour)
+
+	got, accepted, refresh := prepareCodex7dWindow(
+		previous,
+		UsageAlertWindowSnapshot{UsedPercent: 90, ResetAt: &resetAt, SampledAt: &sampledAt},
+		UsageAlertSourceOpenAICodexHeaders,
+		sampledAt,
+	)
+
+	require.True(t, accepted)
+	require.False(t, refresh)
+	require.Equal(t, int64(3), got.Generation)
+	require.Equal(t, 90.0, got.UsedPercent)
+	require.NotNil(t, got.AuthoritativeUsedPercent)
+	require.Equal(t, 88.0, *got.AuthoritativeUsedPercent)
+}
+
 func TestPrepareCodex7dRegularBoundaryRejectsInvalidAuthority(t *testing.T) {
 	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
 	previousSampledAt := boundary.Add(2 * time.Hour)
@@ -1968,7 +2178,7 @@ func TestPrepareCodex7dConfirmsOfficialResetWhenAuthorityArrivesDaysLate(t *test
 		UsageType: UsageAlertTypeOverall,
 		SampledAt: boundary.Add(-time.Minute),
 		Windows: map[string]UsageAlertWindowSnapshot{
-			UsageAlertWindow7d: {ResetAt: &previousReset, BoundaryAt: &boundary, Generation: 4},
+			UsageAlertWindow7d: {UsedPercent: 88, ResetAt: &previousReset, BoundaryAt: &boundary, Generation: 4},
 		},
 	}
 	current := UsageAlertSnapshot{
@@ -1977,7 +2187,7 @@ func TestPrepareCodex7dConfirmsOfficialResetWhenAuthorityArrivesDaysLate(t *test
 		Source:    UsageAlertSourceOpenAICodexUsageAPI,
 		SampledAt: authoritativeAt,
 		Windows: map[string]UsageAlertWindowSnapshot{
-			UsageAlertWindow7d: {ResetAt: &officialResetAt},
+			UsageAlertWindow7d: {UsedPercent: 0, RemainingPercent: 100, ResetAt: &officialResetAt},
 		},
 	}
 
