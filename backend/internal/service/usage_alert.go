@@ -161,12 +161,9 @@ type UsageAlertWindowSnapshot struct {
 	SampledAt        *time.Time `json:"sampled_at,omitempty"`
 	Generation       int64      `json:"generation,omitempty"`
 	BoundaryAt       *time.Time `json:"boundary_at,omitempty"`
-	// AuthoritativeUsedPercent is the last percentage reported by the Usage API.
-	// Headers are sampled from the live request path and can run ahead of the
-	// authority, so rollover detection compares authority against authority.
-	AuthoritativeUsedPercent *float64   `json:"authoritative_used_percent,omitempty"`
-	OfficialResetAnchorAt    *time.Time `json:"official_reset_anchor_at,omitempty"`
-	AwaitingOfficialReset    bool       `json:"awaiting_official_reset,omitempty"`
+
+	OfficialResetAnchorAt *time.Time `json:"official_reset_anchor_at,omitempty"`
+	AwaitingOfficialReset bool       `json:"awaiting_official_reset,omitempty"`
 }
 
 type UsageAlertSnapshot struct {
@@ -1015,7 +1012,6 @@ func prepareCodex7dWindow(previous, current UsageAlertWindowSnapshot, source str
 	if current.BoundaryAt == nil {
 		current.BoundaryAt = previous.ResetAt
 	}
-	current.AuthoritativeUsedPercent = previous.AuthoritativeUsedPercent
 
 	if source == UsageAlertSourceOpenAIQuotaReset {
 		if usageAlertWindowSampleIsOlder(previous, current) {
@@ -1029,7 +1025,11 @@ func prepareCodex7dWindow(previous, current UsageAlertWindowSnapshot, source str
 		}
 		current.OfficialResetAnchorAt = current.ResetAt
 		current.AwaitingOfficialReset = true
-		return current, true, false
+		// The boundary now sits a full cycle out and header samples are rejected
+		// while awaiting the official reset, so nothing else would pull an
+		// authoritative sample before then. Force the refresh that resolves the
+		// awaiting state instead of going dark until the manual horizon expires.
+		return current, true, true
 	}
 	if usageAlertWindowSampleIsOlder(previous, current) {
 		return UsageAlertWindowSnapshot{}, false, false
@@ -1061,13 +1061,16 @@ func prepareCodex7dWindow(previous, current UsageAlertWindowSnapshot, source str
 		return UsageAlertWindowSnapshot{}, false, true
 	}
 
+	// Authoritative samples were all handled above, so anything still awaiting
+	// the official reset here is a header or probe sample: drop it without
+	// asking for a refresh the manual branch has already scheduled.
 	if previous.AwaitingOfficialReset {
-		return UsageAlertWindowSnapshot{}, false, source == UsageAlertSourceOpenAICodexUsageAPI && current.ResetAt == nil
+		return UsageAlertWindowSnapshot{}, false, false
 	}
 	if current.ResetAt != nil && !current.ResetAt.After(sampledAt) {
 		return UsageAlertWindowSnapshot{}, false, false
 	}
-	current.AwaitingOfficialReset = previous.AwaitingOfficialReset
+	current.AwaitingOfficialReset = false
 	return current, true, false
 }
 
@@ -1089,21 +1092,22 @@ func codex7dOfficialResetAnchor(window UsageAlertWindowSnapshot) *time.Time {
 	return window.ResetAt
 }
 
+// codex7dUsageRolledBack compares against the most recent accepted sample of any
+// source rather than the last authoritative one. Accounts without websocket
+// traffic only reach the Usage API once per cycle, at the boundary refresh, so
+// an authority-only baseline would go a full week stale and end up comparing one
+// post-reset reading against the next — a difference of roughly zero that never
+// clears the threshold. Headers track usage as it accrues, and a header running
+// slightly ahead of the authority at most costs one spurious generation bump,
+// which re-arms alerting; a missed bump silently disables it.
 func codex7dUsageRolledBack(previous, current UsageAlertWindowSnapshot) bool {
-	baseline := previous.UsedPercent
-	if previous.AuthoritativeUsedPercent != nil {
-		baseline = *previous.AuthoritativeUsedPercent
-	}
-	return baseline-current.UsedPercent > codex7dUsageRollbackPoints
+	return previous.UsedPercent-current.UsedPercent > codex7dUsageRollbackPoints
 }
 
 // reconcileCodex7dAuthority accepts an authoritative sample: the boundary tracks
-// the reported horizon again and the usage baseline is refreshed so the next
-// rollback check compares against this authority rather than a header sample.
+// the reported horizon again and any pending official reset is settled.
 func reconcileCodex7dAuthority(current UsageAlertWindowSnapshot) UsageAlertWindowSnapshot {
 	current.BoundaryAt = current.ResetAt
-	used := current.UsedPercent
-	current.AuthoritativeUsedPercent = &used
 	current.OfficialResetAnchorAt = nil
 	current.AwaitingOfficialReset = false
 	return current

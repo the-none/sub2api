@@ -1492,7 +1492,9 @@ func TestPrepareCodex7dManualResetAdvancesGenerationAndReanchorsBoundary(t *test
 	weekly := persisted.Windows[UsageAlertWindow7d]
 
 	require.True(t, accepted)
-	require.False(t, refresh)
+	// The boundary moved a full cycle out, so an authoritative sample has to be
+	// pulled now; nothing else would reach the Usage API before it expires.
+	require.True(t, refresh)
 	require.Equal(t, int64(8), weekly.Generation)
 	require.Equal(t, &manualResetAt, weekly.BoundaryAt)
 	require.Equal(t, &manualResetAt, weekly.ResetAt)
@@ -2050,80 +2052,37 @@ func TestCodex7dUsageRollbackIgnoresNonAuthoritativeSources(t *testing.T) {
 
 // Headers run ahead of the Usage API under load, so a header percentage must
 // never become the baseline an authoritative sample is measured against.
-func TestCodex7dUsageRollbackComparesAgainstAuthoritativeBaseline(t *testing.T) {
+// Accounts without websocket traffic only reach the Usage API once per cycle, at
+// the boundary refresh. Every other sample in between is a header, so the
+// rollback baseline has to follow the header stream: comparing the authoritative
+// reading taken just after one reset against the one taken just after the next
+// leaves a difference of roughly zero and would never advance the generation.
+func TestCodex7dUsageRollbackUsesLatestAcceptedSampleAfterAWeekOfHeaders(t *testing.T) {
 	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
-	previousSampledAt := boundary.Add(-2 * time.Hour)
-	authoritativeBaseline := 88.0
-	for _, tc := range []struct {
-		name               string
-		usedPercent        float64
-		expectedGeneration int64
-	}{
-		{name: "authority still climbing", usedPercent: 88.2, expectedGeneration: 3},
-		{name: "authority rolled back", usedPercent: 5, expectedGeneration: 4},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			previous := UsageAlertWindowSnapshot{
-				// The header sample overshot the authority by two points.
-				UsedPercent:              90,
-				AuthoritativeUsedPercent: &authoritativeBaseline,
-				ResetAt:                  &boundary,
-				SampledAt:                &previousSampledAt,
-				BoundaryAt:               &boundary,
-				Generation:               3,
-			}
-			sampledAt := boundary.Add(-time.Hour)
-			resetAt := boundary.Add(7 * 24 * time.Hour)
-
-			got, accepted, refresh := prepareCodex7dWindow(
-				previous,
-				UsageAlertWindowSnapshot{
-					UsedPercent: tc.usedPercent,
-					ResetAt:     &resetAt,
-					SampledAt:   &sampledAt,
-				},
-				UsageAlertSourceOpenAICodexUsageAPI,
-				sampledAt,
-			)
-
-			require.True(t, accepted)
-			require.False(t, refresh)
-			require.Equal(t, tc.expectedGeneration, got.Generation)
-			require.NotNil(t, got.AuthoritativeUsedPercent)
-			require.Equal(t, tc.usedPercent, *got.AuthoritativeUsedPercent)
-		})
-	}
-}
-
-func TestCodex7dNonAuthoritativeSampleKeepsAuthoritativeBaseline(t *testing.T) {
-	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
-	previousResetAt := boundary.Add(-time.Hour)
-	previousSampledAt := boundary.Add(-3 * time.Hour)
-	authoritativeBaseline := 88.0
+	previousSampledAt := boundary.Add(-time.Minute)
 	previous := UsageAlertWindowSnapshot{
-		UsedPercent:              88,
-		AuthoritativeUsedPercent: &authoritativeBaseline,
-		ResetAt:                  &previousResetAt,
-		SampledAt:                &previousSampledAt,
-		BoundaryAt:               &boundary,
-		Generation:               3,
+		// A week of header samples climbed to 95 since the boundary refresh that
+		// last produced an authoritative reading of about 2 percent.
+		UsedPercent: 95,
+		ResetAt:     &boundary,
+		SampledAt:   &previousSampledAt,
+		BoundaryAt:  &boundary,
+		Generation:  3,
 	}
-	sampledAt := boundary.Add(-2 * time.Hour)
+	sampledAt := boundary.Add(time.Minute)
 	resetAt := boundary.Add(7 * 24 * time.Hour)
 
 	got, accepted, refresh := prepareCodex7dWindow(
 		previous,
-		UsageAlertWindowSnapshot{UsedPercent: 90, ResetAt: &resetAt, SampledAt: &sampledAt},
-		UsageAlertSourceOpenAICodexHeaders,
+		UsageAlertWindowSnapshot{UsedPercent: 3, RemainingPercent: 97, ResetAt: &resetAt, SampledAt: &sampledAt},
+		UsageAlertSourceOpenAICodexUsageAPI,
 		sampledAt,
 	)
 
 	require.True(t, accepted)
 	require.False(t, refresh)
-	require.Equal(t, int64(3), got.Generation)
-	require.Equal(t, 90.0, got.UsedPercent)
-	require.NotNil(t, got.AuthoritativeUsedPercent)
-	require.Equal(t, 88.0, *got.AuthoritativeUsedPercent)
+	require.Equal(t, int64(4), got.Generation)
+	require.Equal(t, &resetAt, got.BoundaryAt)
 }
 
 func TestPrepareCodex7dRegularBoundaryRejectsInvalidAuthority(t *testing.T) {
