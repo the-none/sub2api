@@ -2085,6 +2085,92 @@ func TestCodex7dUsageRollbackUsesLatestAcceptedSampleAfterAWeekOfHeaders(t *test
 	require.Equal(t, &resetAt, got.BoundaryAt)
 }
 
+// A single boundary proves nothing about the cycle after it: an authority-only
+// baseline gets the first one right and every one afterwards wrong. Walk two
+// full cycles the way an account without websocket traffic sees them, where the
+// only authoritative samples are the two boundary refreshes.
+func TestPrepareCodex7dAdvancesGenerationOnConsecutiveBoundaries(t *testing.T) {
+	firstBoundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	firstSampledAt := firstBoundary.Add(-time.Minute)
+	window := UsageAlertWindowSnapshot{
+		UsedPercent: 95,
+		ResetAt:     &firstBoundary,
+		SampledAt:   &firstSampledAt,
+		BoundaryAt:  &firstBoundary,
+		Generation:  3,
+	}
+
+	secondBoundary := firstBoundary.Add(7 * 24 * time.Hour)
+	sampledAt := firstBoundary.Add(time.Minute)
+	window, accepted, _ := prepareCodex7dWindow(
+		window,
+		UsageAlertWindowSnapshot{UsedPercent: 2, RemainingPercent: 98, ResetAt: &secondBoundary, SampledAt: &sampledAt},
+		UsageAlertSourceOpenAICodexUsageAPI,
+		sampledAt,
+	)
+	require.True(t, accepted)
+	require.Equal(t, int64(4), window.Generation)
+	require.Equal(t, &secondBoundary, window.BoundaryAt)
+
+	// A week of header samples climbs back up without touching the generation.
+	sampledAt = firstBoundary.Add(3 * 24 * time.Hour)
+	window, accepted, _ = prepareCodex7dWindow(
+		window,
+		UsageAlertWindowSnapshot{UsedPercent: 95, RemainingPercent: 5, ResetAt: &secondBoundary, SampledAt: &sampledAt},
+		UsageAlertSourceOpenAICodexHeaders,
+		sampledAt,
+	)
+	require.True(t, accepted)
+	require.Equal(t, int64(4), window.Generation)
+	require.Equal(t, 95.0, window.UsedPercent)
+
+	thirdBoundary := secondBoundary.Add(7 * 24 * time.Hour)
+	sampledAt = secondBoundary.Add(time.Minute)
+	window, accepted, _ = prepareCodex7dWindow(
+		window,
+		UsageAlertWindowSnapshot{UsedPercent: 3, RemainingPercent: 97, ResetAt: &thirdBoundary, SampledAt: &sampledAt},
+		UsageAlertSourceOpenAICodexUsageAPI,
+		sampledAt,
+	)
+	require.True(t, accepted)
+	require.Equal(t, int64(5), window.Generation)
+	require.Equal(t, &thirdBoundary, window.BoundaryAt)
+}
+
+// The manual branch gets one best-effort refresh, which /wham/usage can lose to
+// the throttle or a transient failure. Header samples arriving while the window
+// awaits the official reset have to keep asking, or the account stays dark until
+// the manual horizon expires a cycle later.
+func TestPrepareCodex7dAwaitingOfficialResetKeepsRequestingAuthority(t *testing.T) {
+	manualResetAt := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	previousSampledAt := manualResetAt.Add(-7 * 24 * time.Hour)
+	previous := UsageAlertWindowSnapshot{
+		UsedPercent:           0,
+		RemainingPercent:      100,
+		ResetAt:               &manualResetAt,
+		SampledAt:             &previousSampledAt,
+		BoundaryAt:            &manualResetAt,
+		Generation:            8,
+		OfficialResetAnchorAt: &manualResetAt,
+		AwaitingOfficialReset: true,
+	}
+	sampledAt := previousSampledAt.Add(time.Hour)
+
+	for _, source := range []string{UsageAlertSourceOpenAICodexHeaders, UsageAlertSourceOpenAICodexProbe} {
+		t.Run(source, func(t *testing.T) {
+			_, accepted, refresh := prepareCodex7dWindow(
+				previous,
+				UsageAlertWindowSnapshot{UsedPercent: 5, RemainingPercent: 95, ResetAt: &manualResetAt, SampledAt: &sampledAt},
+				source,
+				sampledAt,
+			)
+
+			require.False(t, accepted)
+			require.True(t, refresh)
+		})
+	}
+}
+
 func TestPrepareCodex7dRegularBoundaryRejectsInvalidAuthority(t *testing.T) {
 	boundary := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
 	previousSampledAt := boundary.Add(2 * time.Hour)
@@ -2295,7 +2381,9 @@ func TestPrepareCodex7dRejectsLatePreManualSample(t *testing.T) {
 	_, _, accepted, refresh := prepareUsageAlertSnapshot(previous, current)
 
 	require.False(t, accepted)
-	require.False(t, refresh)
+	// Rejecting the sample is not enough: only an authoritative one can settle
+	// the awaiting state, and nothing else will ask for it.
+	require.True(t, refresh)
 }
 
 func TestPrepareCodex7dRejectsDriftedOldHorizonWhileAwaitingOfficialReset(t *testing.T) {
@@ -2329,7 +2417,7 @@ func TestPrepareCodex7dRejectsDriftedOldHorizonWhileAwaitingOfficialReset(t *tes
 	_, _, accepted, refresh := prepareUsageAlertSnapshot(previous, current)
 
 	require.False(t, accepted)
-	require.False(t, refresh)
+	require.True(t, refresh)
 }
 
 func TestEvaluateCodex7dUsesGenerationInsteadOfResetAtDrift(t *testing.T) {

@@ -1044,14 +1044,14 @@ func prepareCodex7dWindow(previous, current UsageAlertWindowSnapshot, source str
 		}
 		if anchor != nil && !codex7dResetTimesWithinWindow(anchor, current.ResetAt, codex7dResetDriftWindow) &&
 			codex7dUsageRolledBack(previous, current) {
-			return advanceCodex7dGeneration(current), true, false
+			return advanceCodex7dGeneration(previous, current), true, false
 		}
 		return reconcileCodex7dAuthority(current), true, false
 	}
 
 	if source == UsageAlertSourceOpenAICodexUsageAPI && current.ResetAt != nil && current.ResetAt.After(sampledAt) {
 		if codex7dUsageRolledBack(previous, current) {
-			return advanceCodex7dGeneration(current), true, false
+			return advanceCodex7dGeneration(previous, current), true, false
 		}
 		return reconcileCodex7dAuthority(current), true, false
 	}
@@ -1061,11 +1061,16 @@ func prepareCodex7dWindow(previous, current UsageAlertWindowSnapshot, source str
 		return UsageAlertWindowSnapshot{}, false, true
 	}
 
-	// Authoritative samples were all handled above, so anything still awaiting
-	// the official reset here is a header or probe sample: drop it without
-	// asking for a refresh the manual branch has already scheduled.
+	// Authoritative samples were all handled above, so anything still awaiting the
+	// official reset here is a header or probe sample. Drop it, but keep asking
+	// for an authoritative one: the manual branch only gets a single best-effort
+	// refresh, and /wham/usage can lose it to a throttle, a transient upstream
+	// failure, or a redemption the upstream has not applied yet. Without this the
+	// account stays dark until the manual horizon expires a cycle later. Retries
+	// are bounded by the 30s refresh throttle and stop at the first accepted
+	// authoritative sample.
 	if previous.AwaitingOfficialReset {
-		return UsageAlertWindowSnapshot{}, false, false
+		return UsageAlertWindowSnapshot{}, false, true
 	}
 	if current.ResetAt != nil && !current.ResetAt.After(sampledAt) {
 		return UsageAlertWindowSnapshot{}, false, false
@@ -1113,8 +1118,21 @@ func reconcileCodex7dAuthority(current UsageAlertWindowSnapshot) UsageAlertWindo
 	return current
 }
 
-func advanceCodex7dGeneration(current UsageAlertWindowSnapshot) UsageAlertWindowSnapshot {
+// advanceCodex7dGeneration logs the evidence it acted on. The baseline is the
+// last accepted sample, which may come from headers rather than the Usage API,
+// so a small drop paired with a horizon that barely moved would mean the two
+// sources disagree instead of a real reset. That case is not expected, but it is
+// only distinguishable from the field.
+func advanceCodex7dGeneration(previous, current UsageAlertWindowSnapshot) UsageAlertWindowSnapshot {
 	current.Generation++
+	attrs := []any{
+		"generation", current.Generation,
+		"used_percent_drop", previous.UsedPercent - current.UsedPercent,
+	}
+	if previous.BoundaryAt != nil && current.ResetAt != nil {
+		attrs = append(attrs, "horizon_shift_seconds", int64(current.ResetAt.Sub(*previous.BoundaryAt).Seconds()))
+	}
+	slog.Info("codex_7d_generation_advanced", attrs...)
 	return reconcileCodex7dAuthority(current)
 }
 
