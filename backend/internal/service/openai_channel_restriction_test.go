@@ -243,6 +243,8 @@ func TestIsUpstreamModelRestrictedByChannel_PassthroughFlagWithRawChatFallbackMa
 		}
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			// Model mapping caches are mutable and belong to each account instance.
+			localAccount := *account
 
 			channelSvc := newTestChannelService(makeStandardRepo(Channel{
 				ID:                 1,
@@ -265,7 +267,7 @@ func TestIsUpstreamModelRestrictedByChannel_PassthroughFlagWithRawChatFallbackMa
 			)
 
 			require.False(t, svc.isUpstreamModelRestrictedByChannel(
-				ctx, 10, account, "gpt-5.4", true,
+				ctx, 10, &localAccount, "gpt-5.4", true,
 			))
 		})
 	}
