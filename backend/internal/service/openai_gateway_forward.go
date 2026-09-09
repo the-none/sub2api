@@ -891,7 +891,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				wsLastFailureReason,
 				&agentTaskRecoveryTried,
 			)
-			if wsErr == nil {
+			if wsErr == nil || (wsResult != nil && wsResult.ClientDisconnect) {
 				break
 			}
 			if c != nil && c.Writer != nil && c.Writer.Written() {
@@ -972,7 +972,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			break
 		}
-		if wsErr == nil {
+		if wsErr == nil || (wsResult != nil && wsResult.ClientDisconnect) {
 			firstTokenMs := int64(0)
 			hasFirstTokenMs := wsResult != nil && wsResult.FirstTokenMs != nil
 			if hasFirstTokenMs {
@@ -983,7 +983,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				requestID = strings.TrimSpace(wsResult.RequestID)
 			}
 			logOpenAIWSModeDebug(
-				"forward_succeeded account_id=%d request_id=%s stream=%v has_first_token_ms=%v first_token_ms=%d ws_attempts=%d",
+				"forward_result account_id=%d request_id=%s stream=%v has_first_token_ms=%v first_token_ms=%d ws_attempts=%d",
 				account.ID,
 				requestID,
 				reqStream,
@@ -1000,7 +1000,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				wsResult.ImageInputSize = imageInputSize
 				wsResult.BillingModel = imageBillingModel
 			}
-			return wsResult, nil
+			return wsResult, wsErr
 		}
 		s.writeOpenAIWSFallbackErrorResponse(c, account, wsErr)
 		return nil, wsErr
