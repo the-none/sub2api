@@ -1,5 +1,11 @@
 export default {
     accounts: {
+      deleteUsageRetry: '重试',
+      deleteUsageChecking: '正在检查关联的用量告警与通知配置…',
+      deleteUsageCheckFailed: '无法检查通知配置，暂不能确认删除。请重试。',
+      deleteUsageRetained: '关联的 {rules} 条告警规则和 {bindings} 个通知绑定会保留，不会随账号删除。',
+      deleteUsageLastAccount: '这将删除该真实账户的最后一个账号（含级联删除的 Spark 影子账号），之后将无法采集新用量或触发新的用量告警。',
+      deleteUsageSharedAccount: '仍有 {count} 个关联账号，通知配置会继续用于这些账号。',
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',

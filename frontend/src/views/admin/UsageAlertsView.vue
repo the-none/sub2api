@@ -16,9 +16,17 @@
       </div>
 
       <template v-else>
+        <div v-if="retiredNotificationAccounts.length" role="alert" data-testid="retired-notification-warning" class="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+          <p class="font-semibold">{{ text.retainedNotificationWarning }}</p>
+          <p class="mt-1">{{ retiredNotificationAccounts.map((item) => item.name).join(', ') }}</p>
+        </div>
         <section class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ text.realAccounts }}</h2>
+            <label v-if="retiredRealAccounts.length" class="mt-2 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <input v-model="showRetiredRealAccounts" data-testid="show-retired-real-accounts" type="checkbox" class="rounded border-gray-300 text-primary-600" />
+              {{ text.showRetiredRealAccounts }} ({{ retiredRealAccounts.length }})
+            </label>
           </div>
 
           <div class="grid gap-6 p-6 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
@@ -66,9 +74,10 @@
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                      <tr v-for="item in realAccounts" :key="item.id">
+                      <tr v-for="item in displayedRealAccounts" :key="item.id" data-testid="real-account-row" :class="{ 'bg-amber-50 dark:bg-amber-950/40': item.has_only_deleted_accounts }">
                         <td class="px-4 py-3">
                           <div class="font-medium text-gray-900 dark:text-white">{{ item.name }}</div>
+                          <p v-if="item.has_only_deleted_accounts" class="mt-1 font-medium text-amber-800 dark:text-amber-200">{{ text.linkedAccountsDeleted }}</p>
                           <div v-if="item.identifier" class="mt-0.5 max-w-[180px] truncate text-xs text-gray-500 dark:text-gray-400">{{ item.identifier }}</div>
                         </td>
                         <td class="px-4 py-3 text-gray-600 dark:text-gray-300">{{ platformLabel(item.platform) }}</td>
@@ -104,7 +113,7 @@
                           </div>
                         </td>
                       </tr>
-                      <tr v-if="realAccounts.length === 0">
+                      <tr v-if="displayedRealAccounts.length === 0">
                         <td colspan="5" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">{{ text.empty }}</td>
                       </tr>
                     </tbody>
@@ -116,7 +125,7 @@
                 <div class="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_auto]">
                   <select v-model.number="attachRealAccountID" class="input">
                     <option :value="0">{{ text.selectRealAccount }}</option>
-                    <option v-for="item in realAccounts" :key="item.id" :value="item.id">{{ item.name }}</option>
+                    <option v-for="item in displayedRealAccounts" :key="item.id" :value="item.id">{{ item.name }}</option>
                   </select>
                   <div class="max-h-[124px] overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 dark:border-dark-600 dark:bg-dark-800">
                     <label
@@ -153,7 +162,7 @@
                 <span class="input-label">{{ text.realAccount }}</span>
                 <select v-model.number="ruleForm.realAccountID" class="input" required>
                   <option :value="0">{{ text.selectRealAccount }}</option>
-                  <option v-for="item in realAccounts" :key="item.id" :value="item.id">{{ item.name }} · {{ platformLabel(item.platform) }}</option>
+                  <option v-for="item in realAccountOptions(ruleForm.realAccountID)" :key="item.id" :value="item.id" :disabled="item.has_only_deleted_accounts">{{ item.name }} · {{ platformLabel(item.platform) }}{{ item.has_only_deleted_accounts ? ` (${text.linkedAccountsDeleted})` : '' }}</option>
                 </select>
               </label>
               <label class="block">
@@ -221,9 +230,10 @@
               </div>
             </form>
             <div class="border-t border-gray-100 dark:border-dark-700">
-              <div v-for="rule in rules" :key="rule.id" class="flex items-center justify-between gap-3 px-6 py-3 text-sm">
+              <div v-for="rule in rules" :key="rule.id" data-testid="usage-alert-rule" class="flex items-center justify-between gap-3 px-6 py-3 text-sm" :class="{ 'border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-950/40': isRetiredRealAccount(rule.real_account_id) }">
                 <div class="min-w-0">
                   <div class="break-words font-medium text-gray-900 dark:text-white">{{ rule.name }}</div>
+                  <p v-if="isRetiredRealAccount(rule.real_account_id)" role="alert" class="mt-1 font-semibold text-amber-800 dark:text-amber-200">{{ text.retainedNotificationWarning }}</p>
                   <div class="mt-2 flex flex-wrap gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                     <span
                       v-for="detail in ruleDetailItems(rule)"
@@ -333,7 +343,7 @@
               <form class="grid gap-3 p-6 md:grid-cols-[1fr_1fr_auto]" @submit.prevent="saveBinding">
                 <select v-model.number="bindingForm.realAccountID" class="input">
                   <option :value="0">{{ text.selectRealAccount }}</option>
-                  <option v-for="item in realAccounts" :key="item.id" :value="item.id">{{ item.name }}</option>
+                  <option v-for="item in realAccountOptions(bindingForm.realAccountID)" :key="item.id" :value="item.id" :disabled="item.has_only_deleted_accounts">{{ item.name }}{{ item.has_only_deleted_accounts ? ` (${text.linkedAccountsDeleted})` : '' }}</option>
                 </select>
                 <select v-model.number="bindingForm.webhookID" class="input">
                   <option :value="0">{{ text.selectWebhook }}</option>
@@ -348,11 +358,12 @@
                 </label>
               </form>
               <div class="border-t border-gray-100 dark:border-dark-700">
-                <div v-for="binding in bindings" :key="binding.id" class="flex items-center justify-between gap-3 px-6 py-3 text-sm">
+                <div v-for="binding in bindings" :key="binding.id" data-testid="usage-alert-binding" class="flex items-center justify-between gap-3 px-6 py-3 text-sm" :class="{ 'border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-950/40': isRetiredRealAccount(binding.real_account_id) }">
                   <div class="min-w-0">
                     <div class="truncate font-medium text-gray-900 dark:text-white">
                       {{ binding.real_account?.name || realAccountName(binding.real_account_id) }} -> {{ binding.webhook?.name || webhookName(binding.webhook_id) }}
                     </div>
+                    <p v-if="isRetiredRealAccount(binding.real_account_id)" role="alert" class="mt-1 font-semibold text-amber-800 dark:text-amber-200">{{ text.retainedNotificationWarning }}</p>
                     <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ binding.enabled ? text.enabled : text.disabled }}</div>
                   </div>
                   <div class="flex flex-shrink-0 gap-2">
@@ -403,6 +414,10 @@ const zhText = {
   refresh: '刷新',
   loading: '加载中',
   realAccounts: '真实账户',
+  showRetiredRealAccounts: '显示当前关联账号均已删除的真实账户',
+  linkedAccountsDeleted: '当前关联账号均已删除',
+  realAccountHasNotifications: '该真实账户仍有告警规则或通知绑定，请先迁移或删除这些配置，再删除真实账户。',
+  retainedNotificationWarning: '当前关联账号均已删除，通知配置仍保留且无法获得新的用量。请重新绑定有效账号或删除该配置。',
   realAccount: '真实账户',
   rules: '规则',
   webhooks: '通知渠道',
@@ -470,6 +485,10 @@ const enText: typeof zhText = {
   refresh: 'Refresh',
   loading: 'Loading',
   realAccounts: 'Real Accounts',
+  showRetiredRealAccounts: 'Show real accounts whose linked accounts are all deleted',
+  linkedAccountsDeleted: 'All currently linked accounts are deleted',
+  realAccountHasNotifications: 'This real account still has alert rules or notification bindings. Move or remove those settings before deleting the real account.',
+  retainedNotificationWarning: 'All currently linked accounts are deleted. Notification settings are retained but cannot receive new usage. Rebind to a valid account or delete this configuration.',
   realAccount: 'Real Account',
   rules: 'Rules',
   webhooks: 'Notification Channels',
@@ -538,11 +557,36 @@ const realAccounts = ref<RealAccount[]>([])
 const rules = ref<UsageAlertRule[]>([])
 const webhooks = ref<UsageAlertWebhook[]>([])
 const bindings = ref<UsageAlertBinding[]>([])
+const showRetiredRealAccounts = ref(false)
+const retiredRealAccounts = computed(() => realAccounts.value.filter((item) => item.has_only_deleted_accounts))
+const displayedRealAccounts = computed(() => realAccounts.value.filter((item) => showRetiredRealAccounts.value || !item.has_only_deleted_accounts))
+const retiredNotificationAccounts = computed(() => {
+  const configured = new Set([
+    ...rules.value.map((rule) => rule.real_account_id),
+    ...bindings.value.map((binding) => binding.real_account_id)
+  ])
+  return retiredRealAccounts.value.filter((item) => configured.has(item.id))
+})
+
+function isRetiredRealAccount(id: number | null | undefined): boolean {
+  return realAccounts.value.some((item) => item.id === id && item.has_only_deleted_accounts)
+}
+
+function realAccountOptions(selectedID: number): RealAccount[] {
+  return realAccounts.value.filter((item) => !item.has_only_deleted_accounts || item.id === selectedID)
+}
+
 const accounts = ref<Account[]>([])
 const snapshots = reactive<Record<string, UsageAlertSnapshot | null>>({})
 const snapshotLoaded = reactive<Record<number, boolean>>({})
 const attachRealAccountID = ref(0)
 const attachAccountIDs = ref<number[]>([])
+watch(displayedRealAccounts, (items) => {
+  if (attachRealAccountID.value && !items.some((item) => item.id === attachRealAccountID.value)) {
+    attachRealAccountID.value = 0
+    attachAccountIDs.value = []
+  }
+})
 
 const saving = reactive({
   realAccount: false,
@@ -720,6 +764,10 @@ function resetRealAccountForm() {
 }
 
 async function deleteRealAccount(id: number) {
+  if (rules.value.some((rule) => rule.real_account_id === id) || bindings.value.some((binding) => binding.real_account_id === id)) {
+    appStore.showError(text.value.realAccountHasNotifications)
+    return
+  }
   if (!window.confirm(text.value.confirmDelete)) return
   try {
     await usageAlertAPI.deleteRealAccount(id)

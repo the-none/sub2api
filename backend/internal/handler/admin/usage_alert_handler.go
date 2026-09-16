@@ -41,14 +41,15 @@ type usageAlertAccountResponse struct {
 }
 
 type usageAlertRealAccountResponse struct {
-	ID         int64                        `json:"id"`
-	Name       string                       `json:"name"`
-	Platform   string                       `json:"platform"`
-	Identifier *string                      `json:"identifier,omitempty"`
-	Notes      *string                      `json:"notes,omitempty"`
-	Accounts   []*usageAlertAccountResponse `json:"accounts,omitempty"`
-	CreatedAt  time.Time                    `json:"created_at"`
-	UpdatedAt  time.Time                    `json:"updated_at"`
+	ID                     int64                        `json:"id"`
+	Name                   string                       `json:"name"`
+	Platform               string                       `json:"platform"`
+	Identifier             *string                      `json:"identifier,omitempty"`
+	Notes                  *string                      `json:"notes,omitempty"`
+	Accounts               []*usageAlertAccountResponse `json:"accounts,omitempty"`
+	HasOnlyDeletedAccounts bool                         `json:"has_only_deleted_accounts"`
+	CreatedAt              time.Time                    `json:"created_at"`
+	UpdatedAt              time.Time                    `json:"updated_at"`
 }
 
 type usageAlertRuleRequest struct {
@@ -132,13 +133,14 @@ func usageAlertRealAccountResponseFromService(item *service.RealAccount) *usageA
 		return nil
 	}
 	out := &usageAlertRealAccountResponse{
-		ID:         item.ID,
-		Name:       item.Name,
-		Platform:   item.Platform,
-		Identifier: item.Identifier,
-		Notes:      item.Notes,
-		CreatedAt:  item.CreatedAt,
-		UpdatedAt:  item.UpdatedAt,
+		ID:                     item.ID,
+		Name:                   item.Name,
+		Platform:               item.Platform,
+		Identifier:             item.Identifier,
+		Notes:                  item.Notes,
+		CreatedAt:              item.CreatedAt,
+		UpdatedAt:              item.UpdatedAt,
+		HasOnlyDeletedAccounts: item.HasOnlyDeletedAccounts,
 	}
 	if len(item.Accounts) > 0 {
 		out.Accounts = make([]*usageAlertAccountResponse, 0, len(item.Accounts))

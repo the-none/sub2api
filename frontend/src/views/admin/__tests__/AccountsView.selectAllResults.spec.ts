@@ -7,6 +7,8 @@ const {
   listAccounts,
   listWithEtag,
   batchRefresh,
+  batchDelete,
+  deleteAccount,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
   getAllProxies,
@@ -16,6 +18,8 @@ const {
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   batchRefresh: vi.fn(),
+  batchDelete: vi.fn(),
+  deleteAccount: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
@@ -30,7 +34,8 @@ vi.mock('@/api/admin', () => ({
       listWithEtag,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings,
-      batchDelete: vi.fn(),
+      batchDelete,
+      delete: deleteAccount,
       batchClearError: vi.fn(),
       batchRefresh,
       bulkUpdate: vi.fn()
@@ -81,7 +86,7 @@ const makeAccounts = (count: number) => Array.from({ length: count }, (_, index)
 
 const AccountBulkActionsBarStub = {
   props: ['selectedIds', 'totalResults', 'selectingAll', 'allResultsSelected'],
-  emits: ['select-all-results', 'select-page', 'clear', 'refresh-token'],
+  emits: ['select-all-results', 'select-page', 'clear', 'refresh-token', 'delete'],
   template: `
     <div>
       <span data-test="selected-count">{{ selectedIds.length }}</span>
@@ -90,6 +95,7 @@ const AccountBulkActionsBarStub = {
       <button data-test="select-page" @click="$emit('select-page')">select page</button>
       <button data-test="select-all-results" @click="$emit('select-all-results')">select all</button>
       <button data-test="clear" @click="$emit('clear')">clear</button>
+      <button data-test="delete-selected" @click="$emit('delete')">delete selected</button>
       <button data-test="refresh-token" @click="$emit('refresh-token')">refresh token</button>
     </div>
   `
@@ -109,10 +115,14 @@ const mountView = () => mount(AccountsView, {
       },
       DataTable: {
         props: ['data'],
-        template: '<div data-test="data-table"><div v-for="row in data" :key="row.id"><slot name="cell-select" :row="row" /></div></div>'
+        template: '<div data-test="data-table"><div v-for="row in data" :key="row.id"><slot name="cell-select" :row="row" /><slot name="cell-actions" :row="row" /></div></div>'
       },
       Pagination: true,
       ConfirmDialog: true,
+      AccountDeletionDialog: {
+        props: ['show', 'accountIds'], emits: ['confirm', 'cancel'],
+        template: '<div v-if="show" data-test="account-deletion"><span>{{ accountIds.join(",") }}</span><button data-test="confirm-deletion" @click="$emit(\'confirm\')">confirm</button><button data-test="cancel-deletion" @click="$emit(\'cancel\')">cancel</button></div>'
+      },
       AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
       AccountTableFilters: AccountTableFiltersStub,
       AccountBulkActionsBar: AccountBulkActionsBarStub,
@@ -146,6 +156,8 @@ describe('admin AccountsView select all filtered results', () => {
     listAccounts.mockReset()
     listWithEtag.mockReset()
     batchRefresh.mockReset()
+    batchDelete.mockReset()
+    deleteAccount.mockReset()
     getBatchTodayStats.mockReset()
     getUpstreamBillingProbeSettings.mockReset()
     getAllProxies.mockReset()
@@ -165,6 +177,41 @@ describe('admin AccountsView select all filtered results', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('waits for the notification-aware dialog before deleting a single account', async () => {
+    listAccounts.mockResolvedValue({ items: makeAccounts(3), total: 3, page: 1, page_size: 20, pages: 1 })
+    deleteAccount.mockResolvedValue({})
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="data-table"]').findAll('button').find((button) => button.text() === 'common.delete')!.trigger('click')
+    expect(wrapper.get('[data-test="account-deletion"] span').text()).toBe('1')
+    expect(deleteAccount).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="cancel-deletion"]').trigger('click')
+    expect(deleteAccount).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="data-table"]').findAll('button').find((button) => button.text() === 'common.delete')!.trigger('click')
+    await wrapper.get('[data-test="confirm-deletion"]').trigger('click')
+    await flushPromises()
+    expect(deleteAccount).toHaveBeenCalledWith(1)
+    wrapper.unmount()
+  })
+
+  it('uses the reviewed bulk selection and preserves failed IDs after confirmation', async () => {
+    listAccounts.mockResolvedValue({ items: makeAccounts(3), total: 3, page: 1, page_size: 20, pages: 1 })
+    batchDelete.mockResolvedValue({ success: 2, failed: 1, failed_ids: [2] })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="select-page"]').trigger('click')
+    await wrapper.get('[data-test="delete-selected"]').trigger('click')
+    expect(wrapper.get('[data-test="account-deletion"] span').text()).toBe('1,2,3')
+    expect(batchDelete).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="clear"]').trigger('click')
+    await wrapper.get('[data-test="confirm-deletion"]').trigger('click')
+    await flushPromises()
+    expect(batchDelete).toHaveBeenCalledWith([1, 2, 3])
+    expect(wrapper.getComponent(AccountBulkActionsBarStub).props('selectedIds')).toEqual([2])
+    expect(showError).toHaveBeenCalledWith('admin.accounts.bulkActions.partialSuccess')
+    wrapper.unmount()
   })
 
   it.each([

@@ -83,6 +83,8 @@ type RealAccount struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	Accounts   []*Account `json:"accounts,omitempty"`
+	// HasOnlyDeletedAccounts distinguishes retired sources from new, unbound ones.
+	HasOnlyDeletedAccounts bool `json:"has_only_deleted_accounts,omitempty"`
 }
 
 type UsageAlertRule struct {

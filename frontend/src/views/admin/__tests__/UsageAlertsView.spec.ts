@@ -9,13 +9,15 @@ const {
   listBindings,
   listRealAccounts,
   listRules,
-  listWebhooks
+  listWebhooks,
+  showError
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listBindings: vi.fn(),
   listRealAccounts: vi.fn(),
   listRules: vi.fn(),
-  listWebhooks: vi.fn()
+  listWebhooks: vi.fn(),
+  showError: vi.fn()
 }))
 
 vi.mock('@/api/admin/accounts', () => ({
@@ -35,7 +37,7 @@ vi.mock('@/api/admin/usageAlert', () => ({
 
 vi.mock('@/stores', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError,
     showSuccess: vi.fn()
   })
 }))
@@ -52,11 +54,91 @@ vi.mock('vue-i18n', async () => {
 
 describe('admin UsageAlertsView', () => {
   beforeEach(() => {
+    showError.mockReset()
     listAccounts.mockResolvedValue({ items: [] })
     listBindings.mockResolvedValue([])
     listRealAccounts.mockResolvedValue([])
     listRules.mockResolvedValue([])
     listWebhooks.mockResolvedValue([])
+  })
+
+  it('hides deleted sources by default while retaining new unbound sources and a history toggle', async () => {
+    listRealAccounts.mockResolvedValue([
+      { id: 3, name: 'Retired source', platform: 'openai', has_only_deleted_accounts: true, accounts: [] },
+      { id: 9, name: 'Current source', platform: 'openai', has_only_deleted_accounts: false, accounts: [{ id: 13, name: 'Current account' }] },
+      { id: 10, name: 'New unbound source', platform: 'openai', has_only_deleted_accounts: false, accounts: [] }
+    ])
+    const wrapper = mount(UsageAlertsView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } }
+    })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-testid="real-account-row"]').map((row) => row.text()).join(' ')).not.toContain('Retired source')
+    expect(wrapper.findAll('[data-testid="real-account-row"]')).toHaveLength(2)
+    expect(wrapper.find('table').text()).toContain('New unbound source')
+    expect(wrapper.find('[data-testid="retired-notification-warning"]').exists()).toBe(false)
+    expect(wrapper.findAll('option').some((option) => option.text().includes('Retired source'))).toBe(false)
+
+    await wrapper.get('[data-testid="show-retired-real-accounts"]').setValue(true)
+    expect(wrapper.findAll('[data-testid="real-account-row"]')).toHaveLength(3)
+    const retiredRow = wrapper.findAll('[data-testid="real-account-row"]').find((row) => row.text().includes('Retired source'))!
+    expect(retiredRow.text()).toContain('当前关联账号均已删除')
+    expect(retiredRow.classes()).toContain('bg-amber-50')
+    const attachSelect = wrapper.findAll('select').find((select) => select.find('option[value="3"]').exists())!
+    await attachSelect.setValue('3')
+    await wrapper.get('[data-testid="show-retired-real-accounts"]').setValue(false)
+    expect(attachSelect.element.value).toBe('0')
+    wrapper.unmount()
+  })
+
+  it('highlights retained rules and notification bindings and preserves their selected source when editing', async () => {
+    const retired = { id: 3, name: 'Retired source', platform: 'openai', has_only_deleted_accounts: true, accounts: [] }
+    const current = { id: 9, name: 'Current source', platform: 'openai', has_only_deleted_accounts: false, accounts: [] }
+    listRealAccounts.mockResolvedValue([retired, current])
+    listRules.mockResolvedValue([{
+      id: 7, name: 'Retained weekly rule', real_account_id: 3, platform: 'openai', usage_type: 'overall',
+      window: '7d', metric: 'used_percent', operator: '>=', threshold: 20, step_percent: 20,
+      cooldown_minutes: 240, enabled: true
+    }])
+    listBindings.mockResolvedValue([{ id: 1, real_account_id: 3, webhook_id: 1, enabled: true }])
+    listWebhooks.mockResolvedValue([{ id: 1, name: 'Telegram', type: 'telegram', enabled: true }])
+    const wrapper = mount(UsageAlertsView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="retired-notification-warning"]').text()).toContain('Retired source')
+    for (const selector of ['usage-alert-rule', 'usage-alert-binding']) {
+      const row = wrapper.get(`[data-testid="${selector}"]`)
+      expect(row.classes()).toContain('border-amber-500')
+      expect(row.get('[role="alert"]').text()).toContain('通知配置仍保留')
+      await row.findAll('button').find((button) => button.text() === '编辑')!.trigger('click')
+    }
+    expect(wrapper.get('[data-testid="usage-alert-rule"]').text()).toContain('Retained weekly rule')
+    expect(wrapper.get('[data-testid="usage-alert-binding"]').text()).toContain('Retired source -> Telegram')
+    const selectedRetired = wrapper.findAll('select').filter((select) => select.element.value === '3')
+    expect(selectedRetired).toHaveLength(2)
+    for (const select of selectedRetired) {
+      expect(select.get('option[value="3"]').attributes('disabled')).toBeDefined()
+      expect(select.get('option[value="9"]').exists()).toBe(true)
+    }
+
+    await wrapper.get('[data-testid="show-retired-real-accounts"]').setValue(true)
+    const retiredRow = wrapper.findAll('[data-testid="real-account-row"]').find((row) => row.text().includes('Retired source'))!
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await retiredRow.findAll('button').find((button) => button.text() === '删除')!.trigger('click')
+    expect(showError).toHaveBeenCalledWith('该真实账户仍有告警规则或通知绑定，请先迁移或删除这些配置，再删除真实账户。')
+    expect(confirmSpy).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
+
+    listRealAccounts.mockResolvedValue([{ ...retired, has_only_deleted_accounts: false }, current])
+    await wrapper.findAll('button').find((button) => button.text() === '刷新')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="retired-notification-warning"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="usage-alert-rule"]').find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="usage-alert-binding"]').find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.find('table').text()).toContain('Retired source')
+    wrapper.unmount()
   })
 
   it('switches to the standard operator when the metric changes', async () => {

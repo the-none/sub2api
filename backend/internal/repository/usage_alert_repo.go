@@ -39,7 +39,42 @@ func (r *usageAlertRepository) ListRealAccounts(ctx context.Context) ([]*service
 	for _, row := range rows {
 		out = append(out, realAccountEntityToService(row, true))
 	}
+	if err := r.markRealAccountsWithOnlyDeletedAccounts(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// Keep retired sources in the response so retained alert configuration can be
+// identified and repaired. The UI hides them from the default account list.
+func (r *usageAlertRepository) markRealAccountsWithOnlyDeletedAccounts(ctx context.Context, accounts []*service.RealAccount) error {
+	var unlinkedIDs []int64
+	for _, account := range accounts {
+		if len(account.Accounts) == 0 {
+			unlinkedIDs = append(unlinkedIDs, account.ID)
+		}
+	}
+	if len(unlinkedIDs) == 0 {
+		return nil
+	}
+	// Edge predicates are SQL subqueries: explicitly check deleted_at here,
+	// since Account's soft-delete traversal interceptor does not apply to them.
+	ids, err := r.client.RealAccount.Query().Where(
+		dbrealaccount.IDIn(unlinkedIDs...),
+		dbrealaccount.HasAccountsWith(dbaccount.DeletedAtNotNil()),
+		dbrealaccount.Not(dbrealaccount.HasAccountsWith(dbaccount.DeletedAtIsNil())),
+	).IDs(ctx)
+	if err != nil {
+		return err
+	}
+	retired := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		retired[id] = true
+	}
+	for _, account := range accounts {
+		account.HasOnlyDeletedAccounts = retired[account.ID]
+	}
+	return nil
 }
 
 func (r *usageAlertRepository) GetRealAccount(ctx context.Context, id int64) (*service.RealAccount, error) {
@@ -53,7 +88,11 @@ func (r *usageAlertRepository) GetRealAccount(ctx context.Context, id int64) (*s
 		}
 		return nil, err
 	}
-	return realAccountEntityToService(row, true), nil
+	out := realAccountEntityToService(row, true)
+	if err := r.markRealAccountsWithOnlyDeletedAccounts(ctx, []*service.RealAccount{out}); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *usageAlertRepository) CreateRealAccount(ctx context.Context, account *service.RealAccount) (*service.RealAccount, error) {
@@ -85,7 +124,7 @@ func (r *usageAlertRepository) UpdateRealAccount(ctx context.Context, account *s
 	if err != nil {
 		return nil, err
 	}
-	return realAccountEntityToService(row, false), nil
+	return r.GetRealAccount(ctx, row.ID)
 }
 
 func (r *usageAlertRepository) DeleteRealAccount(ctx context.Context, id int64) error {

@@ -1,5 +1,11 @@
 export default {
     accounts: {
+      deleteUsageRetry: 'Retry',
+      deleteUsageChecking: 'Checking linked usage alerts and notification settings…',
+      deleteUsageCheckFailed: 'Notification settings could not be checked. Retry before confirming deletion.',
+      deleteUsageRetained: 'The {rules} linked alert rules and {bindings} notification bindings will be retained when these accounts are deleted.',
+      deleteUsageLastAccount: 'This removes the last account for this real account, including any Spark shadows deleted with their parent. New usage cannot be collected and new usage alerts cannot be triggered afterwards.',
+      deleteUsageSharedAccount: '{count} linked accounts will remain. The notification settings will continue to apply to them.',
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',

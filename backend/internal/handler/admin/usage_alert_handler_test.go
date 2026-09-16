@@ -57,3 +57,21 @@ func TestUsageAlertRuleRequestAcceptsLegacyQuotaDimension(t *testing.T) {
 	require.Equal(t, "global", (usageAlertRuleRequest{QuotaDimension: "global"}).resolvedUsageType())
 	require.Equal(t, "fable", (usageAlertRuleRequest{UsageType: "fable", QuotaDimension: "global"}).resolvedUsageType())
 }
+
+func TestUsageAlertRealAccountResponsePreservesDeletedSourceWarning(t *testing.T) {
+	raw, err := json.Marshal(usageAlertRealAccountResponseFromService(&service.RealAccount{
+		ID: 3, Name: "Retired source", HasOnlyDeletedAccounts: true,
+	}))
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	require.Equal(t, true, decoded["has_only_deleted_accounts"])
+}
+
+func TestUsageAlertNestedRealAccountOmitsUncomputedDeletionStatus(t *testing.T) {
+	raw, err := json.Marshal(&service.UsageAlertRule{
+		RealAccount: &service.RealAccount{ID: 3, Name: "Retired source"},
+	})
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "has_only_deleted_accounts")
+}

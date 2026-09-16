@@ -27,6 +27,7 @@ export interface RealAccount {
   identifier?: string | null
   notes?: string | null
   accounts?: RealAccountLinkedAccount[]
+  has_only_deleted_accounts?: boolean
   created_at: string
   updated_at: string
 }
