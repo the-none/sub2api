@@ -151,6 +151,35 @@ describe('account editor with the real ticket panel', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
+  it('locks all account fields through both save requests and unlocks them after failure', async () => {
+    let resolveTicket!: (value: TicketAccountView) => void
+    let rejectAccount!: (reason: unknown) => void
+    mocks.saveTicket.mockImplementationOnce(() => new Promise(resolve => { resolveTicket = resolve }))
+    mocks.updateAccount.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectAccount = reject }))
+    const wrapper = mountEditor(); await flushPromises()
+    const name = wrapper.get<HTMLInputElement>('[data-tour="edit-account-form-name"]')
+    const fields = wrapper.get<HTMLFieldSetElement>('[data-testid="account-edit-fields"]')
+    expect(name.element.matches(':disabled')).toBe(false)
+    expect(fields.attributes('inert')).toBeUndefined()
+    await name.setValue('saved name')
+    await wrapper.getComponent(CodexTicketAccountPanel).find('select').setValue('off')
+    await bottomSave(wrapper).trigger('click'); await flushPromises()
+    expect(name.element.matches(':disabled')).toBe(true)
+    expect(fields.attributes('inert')).toBeDefined()
+    expect(mocks.updateAccount).not.toHaveBeenCalled()
+    current = { ...current, revision: 'v2', policy: { enabled: false }, enabled: false, tickets: null }
+    resolveTicket(current); await flushPromises()
+    expect(mocks.updateAccount).toHaveBeenCalledWith(41, expect.objectContaining({ name: 'saved name' }))
+    expect(name.element.matches(':disabled')).toBe(true)
+    expect(fields.attributes('inert')).toBeDefined()
+    rejectAccount({ message: 'Account update failed' }); await flushPromises()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(name.element.matches(':disabled')).toBe(false)
+    expect(fields.attributes('inert')).toBeUndefined()
+    await name.setValue('retry name')
+    expect(name.element.value).toBe('retry name')
+  })
+
   it('can edit an initially disabled policy without overriding the global master switch', async () => {
     current = { ...current, global_enabled: false, enabled: false, policy: { enabled: false }, tickets: null }
     const wrapper = mountEditor(); await flushPromises()

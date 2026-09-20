@@ -10,7 +10,14 @@
       id="edit-account-form"
       @submit.prevent="handleSubmit"
       class="space-y-5"
+      :aria-busy="submitting"
     >
+      <fieldset
+        :disabled="submitting"
+        :inert="submitting ? true : undefined"
+        class="min-w-0 space-y-5 border-0 p-0"
+        data-testid="account-edit-fields"
+      >
       <div>
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
@@ -2972,6 +2979,7 @@
         data-tour="account-form-groups"
       />
 
+      </fieldset>
     </form>
 
     <template #footer>
