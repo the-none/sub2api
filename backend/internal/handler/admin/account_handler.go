@@ -66,6 +66,7 @@ type AccountHandler struct {
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	codexTicketSettings     *service.SettingService
+	codexTicketGateway      *service.OpenAIGatewayService
 	cfg                     *config.Config
 }
 
@@ -366,7 +367,7 @@ func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *
 	if h != nil && h.cfg != nil && out != nil {
 		cfg := h.cfg.Gateway.OpenAICodexTicket
 		if h.codexTicketSettings != nil {
-			cfg.Enabled = h.codexTicketSettings.GetOpenAICodexTicketEnabled(context.Background(), cfg.Enabled)
+			cfg = h.codexTicketSettings.GetCodexTicketConfig(context.Background(), cfg)
 		}
 		out.CodexTurnTickets = service.OpenAICodexTicketStatuses(account, cfg, time.Now())
 	}

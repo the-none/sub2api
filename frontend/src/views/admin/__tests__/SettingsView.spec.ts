@@ -6,6 +6,7 @@ import enCommon from "@/i18n/locales/en/common";
 import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
+vi.mock('@/components/account/CodexTicketSettingsPanel.vue', () => ({ default: { template: '<div data-testid="ticket-settings-panel" />' } }));
 import SettingsView from "../SettingsView.vue";
 
 const {
@@ -720,37 +721,16 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
-  it("submits the Codex ticket harvest toggle", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      openai_codex_ticket_enabled: false,
-    });
+  it("saves general settings without overwriting separately saved ticket settings", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, openai_codex_ticket_enabled: false,
+      openai_codex_ticket_harvest_proxy_url: "http://user:***@old.example.com:8080" });
     const wrapper = mountView();
     await flushPromises();
-    const toggle = wrapper.get("#codex-ticket-enabled");
-    await toggle.setValue(true);
+    expect(wrapper.find('[data-testid="ticket-settings-panel"]').exists()).toBe(true);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0].openai_codex_ticket_enabled).toBe(true);
-    wrapper.unmount();
-  });
-
-  it("loads the masked Codex harvest proxy and submits a replacement URL", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      openai_codex_ticket_harvest_proxy_url: "http://user:***@old.example.com:8080",
-      openai_codex_ticket_harvest_proxy_configured: true,
-    });
-    const wrapper = mountView();
-    await flushPromises();
-    const input = wrapper.get<HTMLInputElement>("#codex-ticket-harvest-proxy");
-    expect(input.element.value).toBe("http://user:***@old.example.com:8080");
-    await input.setValue("socks5h://user:new-secret@new.example.com:1080");
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0].openai_codex_ticket_harvest_proxy_url)
-      .toBe("socks5h://user:new-secret@new.example.com:1080");
-    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_configured");
+    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_enabled");
+    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_url");
     wrapper.unmount();
   });
 

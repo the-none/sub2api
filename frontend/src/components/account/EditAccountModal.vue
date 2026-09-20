@@ -2251,28 +2251,10 @@
         </div>
       </div>
 
-      <!-- Codex 292 门票状态（仅 OpenAI OAuth） -->
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && codexTurnTickets.length"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTurnTicket') }}</label>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {{ t('admin.accounts.openai.codexTurnTicketDesc') }}
-        </p>
-        <div class="mt-3 space-y-1.5">
-          <div v-for="ticket in codexTurnTickets" :key="ticket.model" class="flex items-center justify-between text-sm">
-            <span class="font-medium">{{ ticket.model }}</span>
-            <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">
-              {{ t('admin.accounts.openai.codexTurnTicketReady', { time: formatCodexTicketRemaining(ticket.remaining_seconds) }) }}
-            </span>
-            <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">
-              {{ t('admin.accounts.openai.codexTurnTicketPaused') }}
-            </span>
-            <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
-          </div>
-        </div>
-      </div>
+      <CodexTicketAccountPanel
+        v-if="show && account?.platform === 'openai' && ['oauth', 'setup-token'].includes(account.type) && !account.parent_account_id"
+        :account-id="account.id" @saved="ticketPolicySaved = $event"
+      />
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
       <div
@@ -3042,6 +3024,8 @@
 </template>
 
 <script setup lang="ts">
+import CodexTicketAccountPanel from './CodexTicketAccountPanel.vue'
+import type { TicketPolicy } from '@/api/admin/codexTickets'
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3168,14 +3152,8 @@ const selectableGroups = computed(() => {
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
-const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
-
-function formatCodexTicketRemaining(seconds: number) {
-  const total = Math.max(0, Math.floor(seconds || 0))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}m${String(s).padStart(2, '0')}s`
-}
+const ticketPolicySaved = ref<{ accountId: number; policy: TicketPolicy } | null>(null)
+watch([() => props.account?.id, () => props.show], () => { ticketPolicySaved.value = null })
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -5712,6 +5690,10 @@ const handleSubmit = async () => {
         delete newExtra.upstream_request_id_header
       }
       updatePayload.extra = newExtra
+    }
+
+    if (ticketPolicySaved.value?.accountId === accountID) {
+      updatePayload.extra = { ...((updatePayload.extra || props.account.extra || {}) as Record<string, unknown>), codex_ticket_policy: ticketPolicySaved.value.policy, codex_ticket_enabled: ticketPolicySaved.value.policy.enabled }
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

@@ -411,6 +411,9 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if err := ValidateCodexTicketPolicyExtra(accountExtra); err != nil {
+		return nil, err
+	}
 	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
@@ -592,6 +595,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		normalizedExtra, err = normalizeOpenAIAutoResetCreditExtra(account.Platform, effectiveType, account.IsShadow(), normalizedExtra)
 		if err != nil {
+			return nil, err
+		}
+		if err := ValidateCodexTicketPolicyExtra(normalizedExtra); err != nil {
 			return nil, err
 		}
 		if err := ValidateUpstreamRequestIDHeaderExtra(normalizedExtra); err != nil {
@@ -907,6 +913,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if err := ValidateCodexTicketPolicyExtra(updates); err != nil {
+		return err
+	}
 	updates = MergeOpenAICodexTicketExtra(updates, nil)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
@@ -935,6 +944,9 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	if err := ValidateCodexTicketPolicyExtra(input.Extra); err != nil {
+		return nil, err
+	}
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)

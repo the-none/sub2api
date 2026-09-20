@@ -49,14 +49,14 @@ func TestApplyOpenAICodexTicket_ReplacesHeader(t *testing.T) {
 		FailClosed:   true,
 	}, nil)
 	account := ticketTestAccount(41)
-	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
+	require.NoError(t, svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
 		State:      state,
 		Length:     292,
 		CapturedAt: time.Now(),
 		ExpiresAt:  time.Now().Add(time.Hour),
-	})
+	}))
 
 	h := http.Header{}
 	h.Set(openAICodexTurnStateHeader, fakeCodexTicketState(312))
@@ -77,14 +77,14 @@ func TestApplyOpenAICodexTicket_DoesNotReuseOtherModelOrAccount(t *testing.T) {
 	a := ticketTestAccount(41)
 	b := ticketTestAccount(42)
 	astra := fakeCodexTicketState(292)
-	svc.storeOpenAICodexTicket(context.Background(), a, &openAICodexTicket{
+	require.NoError(t, svc.storeOpenAICodexTicket(context.Background(), a, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
 		State:      astra,
 		Length:     292,
 		CapturedAt: time.Now(),
 		ExpiresAt:  time.Now().Add(time.Hour),
-	})
+	}))
 
 	h := http.Header{}
 	h.Set(openAICodexTurnStateHeader, "keep-ungated")
@@ -106,14 +106,14 @@ func TestLookupOpenAICodexTicket_PrefersNewerExtra(t *testing.T) {
 	account := ticketTestAccount(41)
 	oldState := fakeCodexTicketState(292)
 	newState := openAICodexTicketStatePrefix + strings.Repeat("C", 286)
-	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
+	require.NoError(t, svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
 		State:      oldState,
 		Length:     292,
 		CapturedAt: time.Now().Add(-30 * time.Minute),
 		ExpiresAt:  time.Now().Add(-time.Minute),
-	})
+	}))
 	account.Extra = map[string]any{openAICodexTicketExtraKey("gpt-6-astra"): &openAICodexTicket{
 		Model:      "gpt-6-astra",
 		State:      newState,
@@ -137,14 +137,14 @@ func TestApplyOpenAICodexTicket_ExpiredNotInjected(t *testing.T) {
 		HarvestProxyURL: "socks5h://harvest",
 	}, &httpUpstreamRecorder{err: io.EOF})
 	account := ticketTestAccount(41)
-	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
+	require.NoError(t, svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
 		State:      fakeCodexTicketState(292),
 		Length:     292,
 		CapturedAt: time.Now().Add(-2 * time.Hour),
 		ExpiresAt:  time.Now().Add(-time.Minute),
-	})
+	}))
 	h := http.Header{}
 	err := svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h)
 	require.ErrorIs(t, err, ErrOpenAICodexTicketUnavailable)
@@ -159,14 +159,14 @@ func TestApplyOpenAICodexTicket_WrongLengthNotInjected(t *testing.T) {
 		FailClosed:   true,
 	}, nil)
 	account := ticketTestAccount(41)
-	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
+	require.NoError(t, svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
 		State:      fakeCodexTicketState(312),
 		Length:     312,
 		CapturedAt: time.Now(),
 		ExpiresAt:  time.Now().Add(time.Hour),
-	})
+	}))
 	h := http.Header{}
 	err := svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h)
 	require.ErrorIs(t, err, ErrOpenAICodexTicketUnavailable)

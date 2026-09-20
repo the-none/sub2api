@@ -1225,15 +1225,20 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 // 打票走 harvest_proxy_url（SOCKS），业务出站仍用账号住宅 proxy_id，只替换该请求头。
 // 门票默认有效 3600 秒，临近过期前 refresh_before_seconds 重新打票。
 type OpenAICodexTicketConfig struct {
-	Enabled                      bool     `mapstructure:"enabled"`
-	TargetLength                 int      `mapstructure:"target_length"`
-	TTLSeconds                   int      `mapstructure:"ttl_seconds"`
-	RefreshBeforeSeconds         int      `mapstructure:"refresh_before_seconds"`
-	HarvestProxyURL              string   `mapstructure:"harvest_proxy_url"`
-	HarvestProbeIntervalSeconds  int      `mapstructure:"harvest_probe_interval_seconds"`
-	HarvestAttemptTimeoutSeconds int      `mapstructure:"harvest_attempt_timeout_seconds"`
-	FailClosed                   bool     `mapstructure:"fail_closed"`
-	Models                       []string `mapstructure:"models"`
+	Enabled                      bool     `mapstructure:"enabled" json:"enabled"`
+	TargetLength                 int      `mapstructure:"target_length" json:"target_length"`
+	TTLSeconds                   int      `mapstructure:"ttl_seconds" json:"ttl_seconds"`
+	RefreshBeforeSeconds         int      `mapstructure:"refresh_before_seconds" json:"refresh_before_seconds"`
+	HarvestProxyURL              string   `mapstructure:"harvest_proxy_url" json:"harvest_proxy_url"`
+	HarvestProbeIntervalSeconds  int      `mapstructure:"harvest_probe_interval_seconds" json:"harvest_probe_interval_seconds"`
+	HarvestAttemptTimeoutSeconds int      `mapstructure:"harvest_attempt_timeout_seconds" json:"harvest_attempt_timeout_seconds"`
+	FailClosed                   bool     `mapstructure:"fail_closed" json:"fail_closed"`
+	Models                       []string `mapstructure:"models" json:"models"`
+	DefaultAccountEnabled        *bool    `mapstructure:"default_account_enabled" json:"default_account_enabled,omitempty"`
+	Instructions                 string   `mapstructure:"instructions" json:"instructions"`
+	UserPrompt                   string   `mapstructure:"user_prompt" json:"user_prompt"`
+	MaxConcurrency               int      `mapstructure:"max_concurrency" json:"max_concurrency"`
+	MaxBackoffSeconds            int      `mapstructure:"max_backoff_seconds" json:"max_backoff_seconds"`
 }
 
 // DefaultOpenAIWSClientFirstMessageTimeoutSeconds preserves the legacy ingress deadline.
@@ -2400,6 +2405,11 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
 	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
+	viper.SetDefault("gateway.openai_codex_ticket.default_account_enabled", true)
+	viper.SetDefault("gateway.openai_codex_ticket.max_concurrency", 4)
+	viper.SetDefault("gateway.openai_codex_ticket.max_backoff_seconds", 300)
+	viper.SetDefault("gateway.openai_codex_ticket.instructions", "Reply with exactly: pong")
+	viper.SetDefault("gateway.openai_codex_ticket.user_prompt", "ping")
 	viper.SetDefault("gateway.openai_codex_ticket.target_length", 292)
 	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 3600)
 	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", 600)

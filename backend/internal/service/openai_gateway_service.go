@@ -523,6 +523,11 @@ type OpenAIGatewayService struct {
 	openaiCodexTurnStateWrites  atomic.Uint64
 	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
 	openaiCodexTickets           sync.Map
+	ticketJobsMu                 sync.Mutex
+	ticketJobs                   map[string]*codexTicketJob
+	ticketActive                 int
+	ticketWorkers                sync.WaitGroup
+	ticketContext                context.Context
 	openaiCodexTicketFlight      singleflight.Group
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc
