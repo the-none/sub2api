@@ -401,9 +401,12 @@ func (s *OpenAIGatewayService) StartOpenAICodexTicketHarvester() {
 		return
 	}
 	control := s.ticketCoordinator()
-	control.mu.Lock()
+	releaseControl, err := control.acquire(context.Background(), ticketWriteWeight)
+	if err != nil {
+		return
+	}
 	control.cancel = s.cancelTicketJobs
-	control.mu.Unlock()
+	releaseControl()
 	s.openaiCodexTicketLifecycleMu.Lock()
 	defer s.openaiCodexTicketLifecycleMu.Unlock()
 	if s.openaiCodexTicketStopped || s.openaiCodexTicketDone != nil {

@@ -389,7 +389,10 @@ func (s *OpenAIGatewayService) SaveCodexTicketPolicy(ctx context.Context, accoun
 	return s.SaveCodexTicketPolicyIfCurrent(ctx, accountID, policy, "")
 }
 func (s *OpenAIGatewayService) SaveCodexTicketPolicyIfCurrent(ctx context.Context, accountID int64, policy CodexTicketPolicy, expectedRevision string) error {
-	finish := s.ticketCoordinator().beginMutation(accountID)
+	finish, err := s.ticketCoordinator().beginMutation(ctx, accountID)
+	if err != nil {
+		return err
+	}
 	defer finish()
 	b, _ := json.Marshal(policy)
 	var raw map[string]any
@@ -437,6 +440,9 @@ func (s *OpenAIGatewayService) TriggerCodexTicket(ctx context.Context, accountID
 	if err != nil {
 		return "", err
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	cfg := resolveCodexTicketPolicy(account, s.ticketConfigContext(ctx))
 	if !ticketModelEnabled(cfg, model) || account.Status != StatusActive {
 		return "", errors.New("ticket harvesting is disabled for this account or model")
@@ -444,6 +450,9 @@ func (s *OpenAIGatewayService) TriggerCodexTicket(ctx context.Context, accountID
 	proxy, err := s.ticketProxy(ctx, account, cfg)
 	if err != nil || proxy == "" {
 		return "", errors.New("harvest proxy is not configured or unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	s.openaiCodexTicketLifecycleMu.Lock()
 	workCtx := s.ticketContext

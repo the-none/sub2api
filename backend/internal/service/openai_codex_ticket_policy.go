@@ -198,13 +198,19 @@ type cachedCodexTicketConfig struct {
 // authoritative so old admin clients and environment fallbacks keep working.
 func (s *SettingService) codexTicketBaseConfig(ctx context.Context, fallback config.OpenAICodexTicketConfig) config.OpenAICodexTicketConfig {
 	fallback = normalizeCodexTicketConfig(fallback)
-	if s == nil || s.settingRepo == nil || ctx.Err() != nil {
+	if s == nil || s.settingRepo == nil {
 		return fallback
 	}
 	s.codexTicketConfigMu.Lock()
 	cached := s.codexTicketConfigCache
 	generation := s.codexTicketConfigGeneration
 	s.codexTicketConfigMu.Unlock()
+	if ctx.Err() != nil {
+		if cached != nil {
+			return cached.cfg
+		}
+		return fallback
+	}
 	if cached != nil && time.Now().Before(cached.expires) {
 		return cached.cfg
 	}
@@ -349,7 +355,10 @@ func (s *SettingService) SaveCodexTicketConfig(ctx context.Context, cfg config.O
 		return err
 	}
 	updates[codexTicketConfigSettingKey] = string(data)
-	finish := s.beginTicketMutation()
+	finish, err := s.beginTicketMutation(ctx)
+	if err != nil {
+		return err
+	}
 	defer finish()
 	// A masked/omitted proxy preserves the actual database value, even when
 	// this instance has not served the preceding GET and its cache is cold.

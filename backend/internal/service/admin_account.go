@@ -582,7 +582,10 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	if input.Status != "" || input.Type != "" {
-		finish := s.settingService.beginTicketMutation()
+		finish, err := s.settingService.beginTicketMutation(ctx)
+		if err != nil {
+			return nil, err
+		}
 		defer finish()
 	}
 	account, err := s.accountRepo.GetByID(ctx, id)
@@ -957,7 +960,10 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
-	finish := s.settingService.beginTicketMutation()
+	finish, err := s.settingService.beginTicketMutation(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer finish()
 	input.Extra = maps.Clone(input.Extra)
 	delete(input.Extra, CodexTicketPolicyExtraKey)
@@ -1293,7 +1299,10 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 }
 
 func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
-	finish := s.settingService.beginTicketMutation()
+	finish, err := s.settingService.beginTicketMutation(ctx)
+	if err != nil {
+		return err
+	}
 	defer finish()
 	// 级联删除 spark 影子账号（先删影子，再删母账号）
 	shadows, err := s.accountRepo.ListShadowsByParent(ctx, id)
