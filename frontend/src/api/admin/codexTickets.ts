@@ -49,6 +49,7 @@ export interface TicketProgress {
 }
 
 export interface TicketAccountView {
+  revision: string
   policy: TicketPolicy
   global_enabled: boolean
   enabled: boolean
@@ -64,8 +65,8 @@ export const getTicketConfig = async () => (await apiClient.get<TicketConfig>(`$
 export const saveTicketConfig = async (config: TicketConfig, clearProxy = false) =>
   (await apiClient.put<TicketConfig>(`${base}/codex-ticket/settings`, { ...config, clear_proxy: clearProxy })).data
 export const getTicketAccount = async (id: number) => (await apiClient.get<TicketAccountView>(`${base}/${id}/codex-ticket`)).data
-export const saveTicketPolicy = async (id: number, policy: TicketPolicy) =>
-  (await apiClient.put<TicketAccountView>(`${base}/${id}/codex-ticket`, policy)).data
+export const saveTicketPolicy = async (id: number, policy: TicketPolicy, expectedRevision?: string) =>
+  (await apiClient.put<TicketAccountView>(`${base}/${id}/codex-ticket`, { ...policy, expected_revision: expectedRevision })).data
 export const harvestTicket = async (id: number, model: string) =>
   (await apiClient.post<{ state: string }>(`${base}/${id}/codex-ticket/harvest`, { model })).data
 

@@ -58,18 +58,20 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
-	Name               string         `json:"name"`
-	Notes              *string        `json:"notes,omitempty"`
-	Platform           string         `json:"platform"`
-	Type               string         `json:"type"`
-	Credentials        map[string]any `json:"credentials"`
-	Extra              map[string]any `json:"extra,omitempty"`
-	ProxyKey           *string        `json:"proxy_key,omitempty"`
-	Concurrency        int            `json:"concurrency"`
-	Priority           int            `json:"priority"`
-	RateMultiplier     *float64       `json:"rate_multiplier,omitempty"`
-	ExpiresAt          *int64         `json:"expires_at,omitempty"`
-	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired,omitempty"`
+	TicketProxyKey      *string        `json:"ticket_proxy_key,omitempty"`
+	TicketProxyRequired bool           `json:"ticket_proxy_required,omitempty"`
+	Name                string         `json:"name"`
+	Notes               *string        `json:"notes,omitempty"`
+	Platform            string         `json:"platform"`
+	Type                string         `json:"type"`
+	Credentials         map[string]any `json:"credentials"`
+	Extra               map[string]any `json:"extra,omitempty"`
+	ProxyKey            *string        `json:"proxy_key,omitempty"`
+	Concurrency         int            `json:"concurrency"`
+	Priority            int            `json:"priority"`
+	RateMultiplier      *float64       `json:"rate_multiplier,omitempty"`
+	ExpiresAt           *int64         `json:"expires_at,omitempty"`
+	AutoPauseOnExpired  *bool          `json:"auto_pause_on_expired,omitempty"`
 }
 
 type DataImportRequest struct {
@@ -78,6 +80,7 @@ type DataImportRequest struct {
 }
 
 type DataImportResult struct {
+	Warnings       []DataImportError `json:"warnings,omitempty"`
 	ProxyCreated   int               `json:"proxy_created"`
 	ProxyReused    int               `json:"proxy_reused"`
 	ProxyFailed    int               `json:"proxy_failed"`
@@ -199,13 +202,21 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			v := acc.ExpiresAt.Unix()
 			expiresAt = &v
 		}
+		var ticketProxyKey *string
+		ticketProxyID := service.CodexTicketProxyID(&acc)
+		if ticketProxyID != nil {
+			if key, ok := proxyKeyByID[*ticketProxyID]; ok {
+				ticketProxyKey = &key
+			}
+		}
 		dataAccounts = append(dataAccounts, DataAccount{
+			TicketProxyKey: ticketProxyKey, TicketProxyRequired: ticketProxyID != nil,
 			Name:               acc.Name,
 			Notes:              acc.Notes,
 			Platform:           acc.Platform,
 			Type:               acc.Type,
 			Credentials:        acc.Credentials,
-			Extra:              service.RedactOpenAICodexTicketExtra(acc.Extra),
+			Extra:              service.WithoutCodexTicketProxy(service.RedactOpenAICodexTicketExtra(acc.Extra)),
 			ProxyKey:           proxyKey,
 			Concurrency:        acc.Concurrency,
 			Priority:           acc.Priority,
@@ -431,6 +442,35 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			}
 		}
 
+		legacyTicketProxy := service.CodexTicketProxyID(&service.Account{Extra: item.Extra}) != nil
+		if raw, ok := item.Extra[service.CodexTicketPolicyExtraKey].(map[string]any); ok && raw["proxy_id"] != nil {
+			legacyTicketProxy = true
+		}
+		item.Extra = service.WithoutCodexTicketProxy(item.Extra)
+		if item.TicketProxyKey != nil && *item.TicketProxyKey != "" {
+			id, ok := proxyKeyToID[*item.TicketProxyKey]
+			if !ok {
+				result.AccountFailed++
+				result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, Message: "ticket_proxy_key not found"})
+				continue
+			}
+			if item.Extra == nil {
+				item.Extra = map[string]any{}
+			}
+			policy, ok := item.Extra[service.CodexTicketPolicyExtraKey].(map[string]any)
+			if !ok {
+				policy = map[string]any{}
+			}
+			policy["proxy_id"] = id
+			item.Extra[service.CodexTicketPolicyExtraKey] = policy
+		} else if legacyTicketProxy || item.TicketProxyRequired {
+			if item.Extra == nil {
+				item.Extra = map[string]any{}
+			}
+			item.Extra[service.CodexTicketEnabledExtraKey] = false
+			result.Warnings = append(result.Warnings, DataImportError{Kind: "account", Name: item.Name, Message: "Ticket disabled: select a harvest proxy because the imported proxy reference cannot be mapped safely"})
+		}
+
 		enrichCredentialsFromIDToken(&item)
 
 		accountInput := &service.CreateAccountInput{
@@ -575,18 +615,17 @@ func (h *AccountHandler) resolveExportProxies(ctx context.Context, accounts []se
 	seen := make(map[int64]struct{})
 	ids := make([]int64, 0)
 	for i := range accounts {
-		if accounts[i].ProxyID == nil {
-			continue
+		for _, proxyID := range []*int64{accounts[i].ProxyID, service.CodexTicketProxyID(&accounts[i])} {
+			if proxyID == nil || *proxyID <= 0 {
+				continue
+			}
+			id := *proxyID
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
 		}
-		id := *accounts[i].ProxyID
-		if id <= 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
 	}
 	if len(ids) == 0 {
 		return []service.Proxy{}, nil

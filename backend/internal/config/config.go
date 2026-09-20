@@ -1842,6 +1842,9 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config error: %w", err)
 	}
+	if value, present := os.LookupEnv("GATEWAY_OPENAI_CODEX_TICKET_INSTRUCTIONS"); present {
+		cfg.Gateway.OpenAICodexTicket.Instructions = value
+	}
 	if trustedProxiesEnvConfigured {
 		cfg.Server.TrustedProxies = normalizeStringSlice(strings.Split(trustedProxiesEnv, ","))
 	}
@@ -2688,6 +2691,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if err := c.Gateway.OpenAICodexTicket.Validate(); err != nil {
+		return fmt.Errorf("gateway.openai_codex_ticket: %w", err)
+	}
 	forwardedClientIPHeaders, err := NormalizeForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders)
 	if err != nil {
 		return fmt.Errorf("security.forwarded_client_ip_headers: %w", err)

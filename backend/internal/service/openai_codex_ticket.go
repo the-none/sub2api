@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -228,6 +227,11 @@ func parseOpenAICodexTicketFromAny(accountID int64, model string, raw any) *open
 }
 
 func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, account *Account, ticket *openAICodexTicket) error {
+	release, err := guardTicketSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if s == nil || account == nil || ticket == nil || account.ID <= 0 {
 		return errors.New("invalid ticket account")
 	}
@@ -309,10 +313,13 @@ func (s *OpenAIGatewayService) openAICodexTicketOutboundModel(account *Account, 
 // outboundModel 必须是真正会发给上游的模型名（openAICodexTicketOutboundModel），
 // 不是客户端原始模型：注入侧读的是出站 body.model，两侧口径必须一致。
 func (s *OpenAIGatewayService) openAICodexTicketBlocksAccount(account *Account, outboundModel string) bool {
+	return s.openAICodexTicketBlocksAccountContext(context.Background(), account, outboundModel)
+}
+func (s *OpenAIGatewayService) openAICodexTicketBlocksAccountContext(ctx context.Context, account *Account, outboundModel string) bool {
 	if s == nil || !isOpenAICodexTicketAccount(account) {
 		return false
 	}
-	cfg := resolveCodexTicketPolicy(account, s.openAICodexTicketConfig())
+	cfg := resolveCodexTicketPolicy(account, s.ticketConfigContext(ctx))
 	if !cfg.FailClosed || !ticketModelEnabled(cfg, outboundModel) {
 		return false
 	}
@@ -393,6 +400,10 @@ func (s *OpenAIGatewayService) StartOpenAICodexTicketHarvester() {
 	if s == nil {
 		return
 	}
+	control := s.ticketCoordinator()
+	control.mu.Lock()
+	control.cancel = s.cancelTicketJobs
+	control.mu.Unlock()
 	s.openaiCodexTicketLifecycleMu.Lock()
 	defer s.openaiCodexTicketLifecycleMu.Unlock()
 	if s.openaiCodexTicketStopped || s.openaiCodexTicketDone != nil {
@@ -482,26 +493,7 @@ func MergeOpenAICodexTicketExtra(extra, current map[string]any) map[string]any {
 // ValidateOpenAICodexTicketHarvestProxyURL validates only syntax, without making
 // a network request or including credentials in validation errors.
 func ValidateOpenAICodexTicketHarvestProxyURL(raw string) error {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Hostname() == "" || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
-		return errors.New("harvest proxy must be an HTTP(S) or SOCKS5(h) URL with a host and no path, query or fragment")
-	}
-	switch parsed.Scheme {
-	case "http", "https", "socks5", "socks5h":
-	default:
-		return errors.New("harvest proxy scheme must be http, https, socks5 or socks5h")
-	}
-	if port := parsed.Port(); port != "" {
-		n, err := strconv.Atoi(port)
-		if err != nil || n < 1 || n > 65535 {
-			return errors.New("harvest proxy port must be between 1 and 65535")
-		}
-	}
-	return nil
+	return config.ValidateCodexTicketHarvestProxyURL(raw)
 }
 
 // MaskProxyURL never returns a stored proxy password, even for invalid legacy data.

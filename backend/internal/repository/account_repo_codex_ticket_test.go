@@ -20,13 +20,15 @@ func TestLockAndMergeAccountExtraPreservesLatestCodexTicket(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT.*FOR NO KEY UPDATE`).
 		WithArgs(int64(41), service.PlatformOpenAI, service.AccountTypeOAuth, `{"access_token":"test"}`, nil).
 		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot", "current_extra"}).
-			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, []byte(`{"codex_turn_ticket:model":{"state":"latest-database-ticket"},"old_admin_setting":true}`)))
-	account := &service.Account{ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"access_token": "test"}, Extra: map[string]any{"codex_turn_ticket:model": map[string]any{"state": "stale"}, "codex_turn_ticket:injected": map[string]any{"state": "spoofed"}, "new_admin_setting": true}}
+			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, []byte(`{"codex_turn_ticket:model":{"state":"latest-database-ticket"},"old_admin_setting":true,"codex_ticket_enabled":false,"codex_ticket_policy":{"proxy_id":99}}`)))
+	account := &service.Account{ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"access_token": "test"}, Extra: map[string]any{"codex_turn_ticket:model": map[string]any{"state": "stale"}, "codex_turn_ticket:injected": map[string]any{"state": "spoofed"}, "new_admin_setting": true, "codex_ticket_enabled": true, "codex_ticket_policy": map[string]any{"proxy_id": 11}}}
 	extra, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, map[string]any{"state": "latest-database-ticket"}, extra["codex_turn_ticket:model"])
 	require.NotContains(t, extra, "codex_turn_ticket:injected")
 	require.NotContains(t, extra, "old_admin_setting")
+	require.Equal(t, false, extra[service.CodexTicketEnabledExtraKey])
+	require.Equal(t, map[string]any{"proxy_id": float64(99)}, extra[service.CodexTicketPolicyExtraKey])
 	require.Equal(t, true, extra["new_admin_setting"])
 	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -2253,7 +2253,7 @@
 
       <CodexTicketAccountPanel
         v-if="show && account?.platform === 'openai' && ['oauth', 'setup-token'].includes(account.type) && !account.parent_account_id"
-        :account-id="account.id" @saved="ticketPolicySaved = $event"
+        :account-id="account.id"
       />
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
@@ -3025,7 +3025,6 @@
 
 <script setup lang="ts">
 import CodexTicketAccountPanel from './CodexTicketAccountPanel.vue'
-import type { TicketPolicy } from '@/api/admin/codexTickets'
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3152,8 +3151,6 @@ const selectableGroups = computed(() => {
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
-const ticketPolicySaved = ref<{ accountId: number; policy: TicketPolicy } | null>(null)
-watch([() => props.account?.id, () => props.show], () => { ticketPolicySaved.value = null })
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -5692,8 +5689,9 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    if (ticketPolicySaved.value?.accountId === accountID) {
-      updatePayload.extra = { ...((updatePayload.extra || props.account.extra || {}) as Record<string, unknown>), codex_ticket_policy: ticketPolicySaved.value.policy, codex_ticket_enabled: ticketPolicySaved.value.policy.enabled }
+    if (updatePayload.extra) {
+      delete (updatePayload.extra as Record<string, unknown>).codex_ticket_policy
+      delete (updatePayload.extra as Record<string, unknown>).codex_ticket_enabled
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

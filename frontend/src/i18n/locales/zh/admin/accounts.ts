@@ -1,6 +1,8 @@
 export default {
     accounts: {
       ticket: {
+ importProxyWarning: '采集代理无法安全重映射，已关闭此账号的 Ticket 采集。请在账号设置中重新选择代理后开启。',
+"conflict": "Ticket 配置已在其他位置变化。请重新加载后再保存，重新加载会丢弃本区域尚未保存的修改。","reload": "重新加载配置",
   "title": "Codex Ticket 采集",
   "globalHint": "此处独立保存，修改后约 5 秒内生效。全局关闭会停止所有账号的采集、注入和缺票拦截。",
   "master": "启用 Ticket 总开关",

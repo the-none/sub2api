@@ -1,6 +1,8 @@
 export default {
     accounts: {
       ticket: {
+ importProxyWarning: 'Ticket harvesting was disabled because its proxy could not be mapped safely. Select a harvest proxy in account settings before enabling it.',
+"conflict": "Ticket settings changed elsewhere. Reload before saving; this discards unsaved edits in this section.","reload": "Reload settings",
   "title": "Codex Ticket harvesting",
   "globalHint": "Saved separately; changes take effect within about 5 seconds. The master switch disables harvesting, injection and missing-ticket gating for all accounts.",
   "master": "Enable tickets",

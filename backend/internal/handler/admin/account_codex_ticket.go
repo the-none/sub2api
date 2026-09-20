@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -78,12 +79,19 @@ func (h *AccountHandler) UpdateCodexTicketAccount(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req service.CodexTicketPolicy
+	var req struct {
+		service.CodexTicketPolicy
+		ExpectedRevision string `json:"expected_revision"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid ticket policy")
 		return
 	}
-	if err := h.codexTicketGateway.SaveCodexTicketPolicy(c.Request.Context(), id, req); err != nil {
+	if err := h.codexTicketGateway.SaveCodexTicketPolicyIfCurrent(c.Request.Context(), id, req.CodexTicketPolicy, req.ExpectedRevision); err != nil {
+		if errors.Is(err, service.ErrCodexTicketPolicyConflict) {
+			response.Error(c, 409, err.Error())
+			return
+		}
 		response.BadRequest(c, err.Error())
 		return
 	}

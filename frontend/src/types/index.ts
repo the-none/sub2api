@@ -1597,6 +1597,8 @@ export interface AdminDataProxy {
 }
 
 export interface AdminDataAccount {
+  ticket_proxy_key?: string | null
+  ticket_proxy_required?: boolean
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1619,6 +1621,7 @@ export interface AdminDataImportError {
 }
 
 export interface AdminDataImportResult {
+  warnings?: AdminDataImportError[]
   proxy_created: number
   proxy_reused: number
   proxy_failed: number

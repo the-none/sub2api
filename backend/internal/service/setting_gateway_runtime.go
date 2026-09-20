@@ -328,6 +328,7 @@ func (s *SettingService) InvalidateOpenAICodexTicketEnabledCache() {
 	if s == nil {
 		return
 	}
+	s.invalidateCodexTicketConfig()
 	s.openAICodexTicketEnabledSF.Forget(SettingKeyOpenAICodexTicketEnabled)
 	s.openAICodexTicketEnabledCache.Store(&cachedOpenAICodexTicketEnabled{expiresAt: 0})
 }
@@ -400,6 +401,7 @@ func (s *SettingService) InvalidateOpenAICodexTicketHarvestProxyCache() {
 	if s == nil {
 		return
 	}
+	s.invalidateCodexTicketConfig()
 	s.openAICodexTicketHarvestProxySF.Forget(SettingKeyOpenAICodexTicketHarvestProxyURL)
 	s.openAICodexTicketHarvestProxyCache.Store(&cachedOpenAICodexTicketHarvestProxy{expiresAt: 0})
 }

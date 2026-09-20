@@ -44,10 +44,13 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 	}
 	omitted.dropFrom(updates)
 
+	finishTicket := s.beginTicketMutation()
+	defer finishTicket()
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return err
 	}
 	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
+	s.seedCodexTicketConfig(updates)
 	return nil
 }
 
@@ -74,10 +77,13 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 	}
 	omitted.dropFrom(updates)
 
+	finishTicket := s.beginTicketMutation()
+	defer finishTicket()
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return err
 	}
 	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
+	s.seedCodexTicketConfig(updates)
 	return nil
 }
 

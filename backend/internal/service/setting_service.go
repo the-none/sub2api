@@ -117,8 +117,11 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 
 // SettingService 系统设置服务
 type SettingService struct {
-	codexTicketConfigMu    sync.Mutex
-	codexTicketConfigCache *cachedCodexTicketConfig
+	codexTicketConfigMu         sync.Mutex
+	codexTicketConfigSF         singleflight.Group
+	codexTicketConfigGeneration uint64
+	ticketControl               codexTicketControl
+	codexTicketConfigCache      *cachedCodexTicketConfig
 
 	settingRepo                        SettingRepository
 	defaultSubGroupReader              DefaultSubscriptionGroupReader

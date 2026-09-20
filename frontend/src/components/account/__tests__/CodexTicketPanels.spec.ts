@@ -18,7 +18,7 @@ const config = (): TicketConfig => ({ enabled: false, default_account_enabled: t
   refresh_before_seconds: 600, harvest_proxy_url: 'http://user:***@proxy.example:8080', harvest_probe_interval_seconds: 6,
   harvest_attempt_timeout_seconds: 25, fail_closed: true, models: ['gpt-6-astra'], instructions: 'Reply with exactly: pong',
   user_prompt: 'ping', max_concurrency: 4, max_backoff_seconds: 300 })
-const account = (): TicketAccountView => ({ policy: { enabled: null }, global_enabled: true, enabled: true, eligible: true,
+const account = (): TicketAccountView => ({ revision: 'v1', policy: { enabled: null }, global_enabled: true, enabled: true, eligible: true,
   options: ticketDefaults(), proxy_configured: true, tickets: [], progress: [{ model: 'gpt-6-astra', state: 'waiting', attempts: 0, consecutive_failures: 0 }] })
 const wrappers: VueWrapper[] = []
 const button = (wrapper: VueWrapper, suffix: string) => wrapper.findAll('button').find(b => b.text().endsWith(suffix))!
@@ -69,8 +69,41 @@ describe('Account ticket panel', () => {
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
     expect((wrapper.findAll('select')[0]!.element as HTMLSelectElement).value).toBe('off')
     await button(wrapper, 'saveAccount').trigger('click'); await flushPromises()
-    expect(mocks.savePolicy).toHaveBeenCalledWith(41, { enabled: false, options: null, proxy_id: 9 })
+    expect(mocks.savePolicy).toHaveBeenCalledWith(41, { enabled: false, options: null, proxy_id: 9 }, 'v1')
     expect(wrapper.emitted('saved')?.[0]?.[0]).toMatchObject({ accountId: 41, policy: { enabled: false } })
+  })
+
+  it('refreshes untouched inherited controls before switching to an override', async () => {
+    const wrapper = mount(CodexTicketAccountPanel, { props: { accountId: 41 } }); wrappers.push(wrapper); await flushPromises()
+    const newer = { ...account(), revision: 'v2', options: { ...ticketDefaults(), user_prompt: 'new global prompt', retry_seconds: 77 } }
+    mocks.getAccount.mockResolvedValue(newer)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    const editor = wrapper.findAllComponents(CodexTicketOptionsForm).find(c => !c.props('disabled'))!
+    expect(editor.props('modelValue')).toMatchObject({ user_prompt: 'new global prompt', retry_seconds: 77 })
+    await button(wrapper, 'saveAccount').trigger('click'); await flushPromises()
+    expect(mocks.savePolicy).toHaveBeenCalledWith(41, expect.objectContaining({ options: expect.objectContaining({ user_prompt: 'new global prompt' }) }), 'v2')
+  })
+
+  it('preserves dirty input but blocks stale saves until the user reloads', async () => {
+    const wrapper = mount(CodexTicketAccountPanel, { props: { accountId: 41 } }); wrappers.push(wrapper); await flushPromises()
+    await wrapper.findAll('select')[0]!.setValue('off')
+    mocks.getAccount.mockResolvedValue({ ...account(), revision: 'v2', policy: { enabled: true } })
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect((wrapper.findAll('select')[0]!.element as HTMLSelectElement).value).toBe('off')
+    expect(button(wrapper, 'saveAccount').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('ticket.conflict')
+    await button(wrapper, 'reload').trigger('click'); await flushPromises()
+    expect((wrapper.findAll('select')[0]!.element as HTMLSelectElement).value).toBe('on')
+    expect(button(wrapper, 'saveAccount').attributes('disabled')).toBeUndefined()
+  })
+
+  it('shows a conflict if another writer wins between polling and saving', async () => {
+    mocks.savePolicy.mockRejectedValue({ status: 409, message: 'configuration changed' })
+    const wrapper = mount(CodexTicketAccountPanel, { props: { accountId: 41 } }); wrappers.push(wrapper); await flushPromises()
+    await button(wrapper, 'saveAccount').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('ticket.conflict')
+    expect(button(wrapper, 'saveAccount').attributes('disabled')).toBeDefined()
   })
 
   it('disables manual harvesting when the global switch is off', async () => {
@@ -96,6 +129,6 @@ describe('Account ticket panel', () => {
     resolveOld({ ...account(), global_enabled: false, enabled: false }); await flushPromises()
     expect(wrapper.text()).not.toContain('masterOff')
     await button(wrapper, 'saveAccount').trigger('click'); await flushPromises()
-    expect(mocks.savePolicy).toHaveBeenCalledWith(42, expect.anything())
+    expect(mocks.savePolicy).toHaveBeenCalledWith(42, expect.anything(), 'v1')
   })
 })

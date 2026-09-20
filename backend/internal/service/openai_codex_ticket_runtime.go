@@ -136,7 +136,7 @@ func (s *OpenAIGatewayService) attemptCodexTicket(ctx context.Context, account *
 			if persistErr != nil {
 				result.reason = "persist_failed"
 			}
-			result.success = ctx.Err() == nil
+			result.success = ctx.Err() == nil && !errors.Is(persistErr, errCodexTicketPolicyChanged)
 			if !result.success {
 				result.reason = "cancelled"
 			}
@@ -154,6 +154,11 @@ func (s *OpenAIGatewayService) attemptCodexTicket(ctx context.Context, account *
 // launchTicketJob reserves both a model key and a process-wide slot before
 // starting work. Manual and automatic probes share the same limits and cooldowns.
 func (s *OpenAIGatewayService) launchTicketJob(ctx context.Context, account *Account, model string, cfg config.OpenAICodexTicketConfig, manual bool) (<-chan struct{}, string) {
+	release, err := guardTicketSnapshot(ctx)
+	if err != nil {
+		return nil, "stale"
+	}
+	defer release()
 	s.openaiCodexTicketLifecycleMu.Lock()
 	defer s.openaiCodexTicketLifecycleMu.Unlock()
 	if s.openaiCodexTicketStopped || ctx.Err() != nil {
@@ -254,6 +259,7 @@ func (s *OpenAIGatewayService) scheduleCodexTickets(ctx context.Context, wait bo
 	if s == nil || s.accountRepo == nil || ctx.Err() != nil {
 		return
 	}
+	ctx = s.stampTicketSnapshot(ctx)
 	cfg := s.ticketConfigContext(ctx)
 	if !cfg.Enabled {
 		s.cancelTicketJobs(0)
@@ -275,6 +281,10 @@ func (s *OpenAIGatewayService) scheduleCodexTickets(ctx context.Context, wait bo
 			allowed[openAICodexTicketKey(account.ID, model)] = ticketFingerprint(account, effective)
 		}
 	}
+	release, err := guardTicketSnapshot(ctx)
+	if err != nil {
+		return
+	}
 	s.ticketJobsMu.Lock()
 	for key, job := range s.ticketJobs {
 		if fingerprint, ok := allowed[key]; !ok || fingerprint != job.fingerprint {
@@ -286,6 +296,7 @@ func (s *OpenAIGatewayService) scheduleCodexTickets(ctx context.Context, wait bo
 		}
 	}
 	s.ticketJobsMu.Unlock()
+	release()
 	var wg sync.WaitGroup
 	for i := range accounts {
 		account := &accounts[i]
@@ -305,6 +316,7 @@ func (s *OpenAIGatewayService) scheduleCodexTickets(ctx context.Context, wait bo
 }
 
 type CodexTicketAccountView struct {
+	Revision        string                    `json:"revision"`
 	Policy          CodexTicketPolicy         `json:"policy"`
 	GlobalEnabled   bool                      `json:"global_enabled"`
 	Enabled         bool                      `json:"enabled"`
@@ -330,7 +342,7 @@ func (s *OpenAIGatewayService) CodexTicketAccountView(ctx context.Context, accou
 			snapshot.Extra[openAICodexTicketExtraKey(model)] = ticket
 		}
 	}
-	view := CodexTicketAccountView{Policy: ticketPolicy(account), GlobalEnabled: global.Enabled, Enabled: cfg.Enabled, Eligible: isOpenAICodexTicketAccount(account), Options: CodexTicketOptionsFromConfig(cfg), ProxyConfigured: proxyErr == nil && proxy != "", Tickets: OpenAICodexTicketStatuses(&snapshot, global, time.Now()), Progress: []CodexTicketProgress{}}
+	view := CodexTicketAccountView{Revision: ticketFingerprint(account, global), Policy: ticketPolicy(account), GlobalEnabled: global.Enabled, Enabled: cfg.Enabled, Eligible: isOpenAICodexTicketAccount(account), Options: CodexTicketOptionsFromConfig(cfg), ProxyConfigured: proxyErr == nil && proxy != "", Tickets: OpenAICodexTicketStatuses(&snapshot, global, time.Now()), Progress: []CodexTicketProgress{}}
 	for _, model := range cfg.Models {
 		p := CodexTicketProgress{Model: model, State: "waiting"}
 		s.ticketJobsMu.Lock()
@@ -371,7 +383,14 @@ func (s *OpenAIGatewayService) CodexTicketAccountView(ctx context.Context, accou
 	return view
 }
 
+var ErrCodexTicketPolicyConflict = errors.New("ticket configuration changed; reload before saving")
+
 func (s *OpenAIGatewayService) SaveCodexTicketPolicy(ctx context.Context, accountID int64, policy CodexTicketPolicy) error {
+	return s.SaveCodexTicketPolicyIfCurrent(ctx, accountID, policy, "")
+}
+func (s *OpenAIGatewayService) SaveCodexTicketPolicyIfCurrent(ctx context.Context, accountID int64, policy CodexTicketPolicy, expectedRevision string) error {
+	finish := s.ticketCoordinator().beginMutation(accountID)
+	defer finish()
 	b, _ := json.Marshal(policy)
 	var raw map[string]any
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -383,6 +402,9 @@ func (s *OpenAIGatewayService) SaveCodexTicketPolicy(ctx context.Context, accoun
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return err
+	}
+	if expectedRevision != "" && ticketFingerprint(account, s.ticketConfigContext(ctx)) != expectedRevision {
+		return ErrCodexTicketPolicyConflict
 	}
 	if !isOpenAICodexTicketAccount(account) {
 		return errors.New("ticket policy requires a non-shadow OpenAI OAuth account")
@@ -410,6 +432,7 @@ func (s *OpenAIGatewayService) SaveCodexTicketPolicy(ctx context.Context, accoun
 }
 
 func (s *OpenAIGatewayService) TriggerCodexTicket(ctx context.Context, accountID int64, model string) (string, error) {
+	ctx = s.stampTicketSnapshot(ctx)
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return "", err
@@ -428,7 +451,11 @@ func (s *OpenAIGatewayService) TriggerCodexTicket(ctx context.Context, accountID
 	if workCtx == nil {
 		return "", errors.New("ticket harvester is not running")
 	}
+	workCtx = context.WithValue(workCtx, codexTicketStampKey{}, ctx.Value(codexTicketStampKey{}))
 	_, state := s.launchTicketJob(workCtx, account, model, cfg, true)
+	if state == "stale" {
+		return "", errors.New("ticket policy changed; refresh before harvesting")
+	}
 	if state == "stopped" {
 		return "", fmt.Errorf("ticket harvester is stopped")
 	}

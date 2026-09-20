@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -15,6 +16,51 @@ import (
 const CodexTicketEnabledExtraKey = "codex_ticket_enabled"
 const CodexTicketPolicyExtraKey = "codex_ticket_policy"
 const codexTicketConfigSettingKey = "openai_codex_ticket_config"
+
+// 通用账号编辑只能保留数据库中的最新策略；创建、专用端点和批量开关分别处理授权写入。
+func PreserveCodexTicketPolicyExtra(extra, current map[string]any) map[string]any {
+	result := maps.Clone(extra)
+	for _, key := range []string{CodexTicketEnabledExtraKey, CodexTicketPolicyExtraKey} {
+		delete(result, key)
+		if value, ok := current[key]; ok {
+			if result == nil {
+				result = map[string]any{}
+			}
+			result[key] = value
+		}
+	}
+	return result
+}
+
+func CodexTicketProxyID(account *Account) *int64 { return ticketPolicy(account).ProxyID }
+
+func WithoutCodexTicketProxy(extra map[string]any) map[string]any {
+	result := maps.Clone(extra)
+	if raw, ok := result[CodexTicketPolicyExtraKey]; ok && raw != nil {
+		b, err := json.Marshal(raw)
+		var policy map[string]any
+		if err == nil && json.Unmarshal(b, &policy) == nil {
+			delete(policy, "proxy_id")
+			result[CodexTicketPolicyExtraKey] = policy
+		}
+	}
+	return result
+}
+
+func validateCodexTicketProxy(ctx context.Context, repo ProxyRepository, account *Account) error {
+	id := CodexTicketProxyID(account)
+	if id == nil {
+		return nil
+	}
+	if !isOpenAICodexTicketAccount(account) || repo == nil {
+		return errors.New("ticket proxy requires a non-shadow OpenAI OAuth account and an available proxy")
+	}
+	proxy, err := repo.GetByID(ctx, *id)
+	if err != nil || proxy == nil || proxy.Status != StatusActive {
+		return errors.New("selected ticket proxy is unavailable")
+	}
+	return nil
+}
 
 // CodexTicketOptions can be inherited as a group, independently of participation.
 type CodexTicketOptions struct {
@@ -43,9 +89,6 @@ func normalizeCodexTicketConfig(cfg config.OpenAICodexTicketConfig) config.OpenA
 	if cfg.TTLSeconds <= 0 {
 		cfg.TTLSeconds = 3600
 	}
-	if cfg.RefreshBeforeSeconds <= 0 {
-		cfg.RefreshBeforeSeconds = 600
-	}
 	if cfg.HarvestProbeIntervalSeconds <= 0 {
 		cfg.HarvestProbeIntervalSeconds = 6
 	}
@@ -57,9 +100,6 @@ func normalizeCodexTicketConfig(cfg config.OpenAICodexTicketConfig) config.OpenA
 	}
 	if cfg.MaxBackoffSeconds <= 0 {
 		cfg.MaxBackoffSeconds = 300
-	}
-	if cfg.Instructions == "" {
-		cfg.Instructions = "Reply with exactly: pong"
 	}
 	if cfg.UserPrompt == "" {
 		cfg.UserPrompt = "ping"
@@ -87,35 +127,7 @@ func (o CodexTicketOptions) apply(cfg config.OpenAICodexTicketConfig) config.Ope
 }
 
 func (o CodexTicketOptions) Validate() error {
-	if len(o.Models) == 0 || len(o.Models) > 20 {
-		return errors.New("models must contain 1–20 model names")
-	}
-	seen := map[string]bool{}
-	for _, model := range o.Models {
-		if strings.TrimSpace(model) != model || model == "" || len(model) > 128 || strings.ContainsAny(model, "\r\n\x00") || seen[model] {
-			return errors.New("model names must be non-empty, unique, trimmed and at most 128 bytes")
-		}
-		seen[model] = true
-	}
-	if len(o.Instructions) > 8000 || strings.TrimSpace(o.UserPrompt) == "" || len(o.UserPrompt) > 8000 {
-		return errors.New("user_prompt is required; prompts must not exceed 8000 bytes")
-	}
-	if o.RetrySeconds < 1 || o.RetrySeconds > 3600 {
-		return errors.New("retry_seconds must be between 1 and 3600")
-	}
-	if o.TimeoutSeconds < 1 || o.TimeoutSeconds > 120 {
-		return errors.New("timeout_seconds must be between 1 and 120")
-	}
-	if o.TTLSeconds < 60 || o.TTLSeconds > 86400 {
-		return errors.New("ttl_seconds must be between 60 and 86400")
-	}
-	if o.RefreshBeforeSeconds < 0 || o.RefreshBeforeSeconds >= o.TTLSeconds {
-		return errors.New("refresh_before_seconds must be non-negative and smaller than ttl_seconds")
-	}
-	if o.MaxBackoffSeconds < o.RetrySeconds || o.MaxBackoffSeconds > 86400 {
-		return errors.New("max_backoff_seconds must be between retry_seconds and 86400")
-	}
-	return nil
+	return o.apply(config.OpenAICodexTicketConfig{}).ValidateOptions()
 }
 
 func ticketPolicy(account *Account) CodexTicketPolicy {
@@ -190,43 +202,133 @@ func (s *SettingService) codexTicketBaseConfig(ctx context.Context, fallback con
 		return fallback
 	}
 	s.codexTicketConfigMu.Lock()
-	defer s.codexTicketConfigMu.Unlock()
-	if c := s.codexTicketConfigCache; c != nil && time.Now().Before(c.expires) {
-		return c.cfg
+	cached := s.codexTicketConfigCache
+	generation := s.codexTicketConfigGeneration
+	s.codexTicketConfigMu.Unlock()
+	if cached != nil && time.Now().Before(cached.expires) {
+		return cached.cfg
 	}
-	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	raw, err := s.settingRepo.GetValue(readCtx, codexTicketConfigSettingKey)
-	cfg := fallback
-	if err == nil && raw != "" {
-		candidate := cfg
-		if json.Unmarshal([]byte(raw), &candidate) == nil && CodexTicketOptionsFromConfig(candidate).Validate() == nil {
-			cfg = candidate
+	// Coalesce misses without holding a mutex during storage I/O. Callers can
+	// cancel independently; failed refreshes retain the last value for one second.
+	result := s.codexTicketConfigSF.DoChan(fmt.Sprint(generation), func() (any, error) {
+		s.codexTicketConfigMu.Lock()
+		previous := s.codexTicketConfigCache
+		s.codexTicketConfigMu.Unlock()
+		if previous != nil && time.Now().Before(previous.expires) {
+			return previous.cfg, nil
 		}
-	} else if err != nil && !errors.Is(err, ErrSettingNotFound) && s.codexTicketConfigCache != nil {
-		return s.codexTicketConfigCache.cfg
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		raw, err := s.settingRepo.GetValue(readCtx, codexTicketConfigSettingKey)
+		cfg, ttl := fallback, 5*time.Second
+		if err == nil && raw != "" {
+			candidate := cfg
+			if json.Unmarshal([]byte(raw), &candidate) == nil && candidate.Validate() == nil {
+				cfg = candidate
+			} else {
+				err = errors.New("invalid ticket settings")
+			}
+		}
+		if err == nil || errors.Is(err, ErrSettingNotFound) {
+			err = nil
+			for _, key := range []string{SettingKeyOpenAICodexTicketEnabled, SettingKeyOpenAICodexTicketHarvestProxyURL} {
+				value, readErr := s.settingRepo.GetValue(readCtx, key)
+				if readErr != nil && !errors.Is(readErr, ErrSettingNotFound) {
+					err = readErr
+					break
+				}
+				if key == SettingKeyOpenAICodexTicketEnabled && value != "" {
+					cfg.Enabled = value == "true"
+				}
+				if key == SettingKeyOpenAICodexTicketHarvestProxyURL {
+					cfg.HarvestProxyURL = fallback.HarvestProxyURL
+					if strings.TrimSpace(value) != "" {
+						cfg.HarvestProxyURL = strings.TrimSpace(value)
+					}
+				}
+			}
+		}
+		if err != nil && !errors.Is(err, ErrSettingNotFound) {
+			ttl = time.Second
+			if previous != nil {
+				cfg = previous.cfg
+			}
+		}
+		s.codexTicketConfigMu.Lock()
+		if s.codexTicketConfigGeneration == generation {
+			s.codexTicketConfigCache = &cachedCodexTicketConfig{cfg: cfg, expires: time.Now().Add(ttl)}
+		}
+		s.codexTicketConfigMu.Unlock()
+		return cfg, nil
+	})
+	select {
+	case <-ctx.Done():
+		if cached != nil {
+			return cached.cfg
+		}
+		return fallback
+	case value := <-result:
+		if cfg, ok := value.Val.(config.OpenAICodexTicketConfig); ok {
+			return cfg
+		}
+		return fallback
 	}
-	s.codexTicketConfigCache = &cachedCodexTicketConfig{cfg: cfg, expires: time.Now().Add(5 * time.Second)}
-	return cfg
 }
 
 func (s *SettingService) GetCodexTicketConfig(ctx context.Context, fallback config.OpenAICodexTicketConfig) config.OpenAICodexTicketConfig {
-	cfg := s.codexTicketBaseConfig(ctx, fallback)
-	cfg.Enabled = s.GetOpenAICodexTicketEnabled(ctx, fallback.Enabled)
-	if proxy := s.GetOpenAICodexTicketHarvestProxyURL(ctx); proxy != "" {
-		cfg.HarvestProxyURL = proxy
-	} else {
-		cfg.HarvestProxyURL = fallback.HarvestProxyURL
+	return s.codexTicketBaseConfig(ctx, fallback)
+}
+
+func (s *SettingService) invalidateCodexTicketConfig() {
+	s.codexTicketConfigMu.Lock()
+	s.codexTicketConfigGeneration++
+	if cached := s.codexTicketConfigCache; cached != nil {
+		s.codexTicketConfigCache = &cachedCodexTicketConfig{cfg: cached.cfg}
 	}
-	return cfg
+	s.codexTicketConfigMu.Unlock()
+}
+
+// Seed acknowledged local writes, including the master switch, before allowing
+// new task snapshots. Storage outages must not revive an acknowledged shutdown.
+func (s *SettingService) seedCodexTicketConfig(updates map[string]string) {
+	s.codexTicketConfigMu.Lock()
+	defer s.codexTicketConfigMu.Unlock()
+	_, complete := updates[codexTicketConfigSettingKey]
+	known := complete || s.codexTicketConfigCache != nil
+	cfg := config.OpenAICodexTicketConfig{}
+	if s.cfg != nil {
+		cfg = s.cfg.Gateway.OpenAICodexTicket
+	}
+	fallbackProxy := cfg.HarvestProxyURL
+	cfg = normalizeCodexTicketConfig(cfg)
+	if previous := s.codexTicketConfigCache; previous != nil {
+		cfg = previous.cfg
+	}
+	oldProxy := cfg.HarvestProxyURL
+	if raw, ok := updates[codexTicketConfigSettingKey]; ok {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+		cfg.HarvestProxyURL = oldProxy
+	}
+	if enabled, ok := updates[SettingKeyOpenAICodexTicketEnabled]; ok {
+		cfg.Enabled = enabled == "true"
+	}
+	if proxy, ok := updates[SettingKeyOpenAICodexTicketHarvestProxyURL]; ok {
+		cfg.HarvestProxyURL = proxy
+		if proxy == "" {
+			cfg.HarvestProxyURL = fallbackProxy
+		}
+	}
+	s.codexTicketConfigGeneration++
+	expires := time.Time{}
+	if known {
+		expires = time.Now().Add(5 * time.Second)
+	}
+	s.codexTicketConfigCache = &cachedCodexTicketConfig{cfg: cfg, expires: expires}
 }
 
 func (s *SettingService) SaveCodexTicketConfig(ctx context.Context, cfg config.OpenAICodexTicketConfig, clearProxy bool) error {
-	if err := (CodexTicketOptions{Models: cfg.Models, Instructions: cfg.Instructions, UserPrompt: cfg.UserPrompt, RetrySeconds: cfg.HarvestProbeIntervalSeconds, TimeoutSeconds: cfg.HarvestAttemptTimeoutSeconds, TTLSeconds: cfg.TTLSeconds, RefreshBeforeSeconds: cfg.RefreshBeforeSeconds, MaxBackoffSeconds: cfg.MaxBackoffSeconds, FailClosed: cfg.FailClosed}).Validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return err
-	}
-	if cfg.TargetLength < 16 || cfg.TargetLength > 8192 || cfg.MaxConcurrency < 1 || cfg.MaxConcurrency > 32 {
-		return errors.New("target_length must be 16–8192 and max_concurrency must be 1–32")
 	}
 	if err := ValidateOpenAICodexTicketHarvestProxyURL(cfg.HarvestProxyURL); err != nil {
 		return err
@@ -240,20 +342,32 @@ func (s *SettingService) SaveCodexTicketConfig(ctx context.Context, cfg config.O
 	} else if !IsMaskedProxyURL(cfg.HarvestProxyURL) {
 		updates[SettingKeyOpenAICodexTicketHarvestProxyURL] = strings.TrimSpace(cfg.HarvestProxyURL)
 	}
+	preserveProxy := !clearProxy && IsMaskedProxyURL(cfg.HarvestProxyURL)
 	cfg.HarvestProxyURL = ""
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
 	updates[codexTicketConfigSettingKey] = string(data)
+	finish := s.beginTicketMutation()
+	defer finish()
+	// A masked/omitted proxy preserves the actual database value, even when
+	// this instance has not served the preceding GET and its cache is cold.
+	if preserveProxy {
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		current, readErr := s.settingRepo.GetValue(readCtx, SettingKeyOpenAICodexTicketHarvestProxyURL)
+		cancel()
+		if readErr != nil && !errors.Is(readErr, ErrSettingNotFound) {
+			return readErr
+		}
+		updates[SettingKeyOpenAICodexTicketHarvestProxyURL] = current
+	}
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return err
 	}
-	s.codexTicketConfigMu.Lock()
-	s.codexTicketConfigCache = nil
-	s.codexTicketConfigMu.Unlock()
 	s.InvalidateOpenAICodexTicketEnabledCache()
 	s.InvalidateOpenAICodexTicketHarvestProxyCache()
+	s.seedCodexTicketConfig(updates)
 	return nil
 }
 

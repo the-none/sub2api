@@ -21,6 +21,21 @@ const harvesting = ref('')
 const error = ref('')
 const loadError = ref('')
 const message = ref('')
+const baseRevision = ref('')
+const cleanForm = ref('')
+const conflict = ref(false)
+const formSnapshot = () => JSON.stringify({ mode: mode.value, override: override.value, options: options.value, proxyId: proxyId.value })
+const dirty = computed(() => formSnapshot() !== cleanForm.value)
+function syncForm(result: TicketAccountView) {
+  mode.value = result.policy.enabled == null ? 'inherit' : result.policy.enabled ? 'on' : 'off'
+  override.value = !!result.policy.options
+  options.value = JSON.parse(JSON.stringify(result.policy.options || result.options))
+  proxyId.value = result.policy.proxy_id ?? null
+  baseRevision.value = result.revision
+  cleanForm.value = formSnapshot()
+  conflict.value = false
+}
+
 let generation = 0
 let readSequence = 0
 let poll: ReturnType<typeof setTimeout> | undefined
@@ -38,12 +53,8 @@ async function load(reset = false) {
     if (current !== generation || read !== readSequence) return
     proxies.value = availableProxies
     view.value = result
-    if (reset) {
-      mode.value = result.policy.enabled == null ? 'inherit' : result.policy.enabled ? 'on' : 'off'
-      override.value = !!result.policy.options
-      options.value = JSON.parse(JSON.stringify(result.policy.options || result.options))
-      proxyId.value = result.policy.proxy_id ?? null
-    }
+    if (reset || !dirty.value) syncForm(result)
+    else if (result.revision !== baseRevision.value) conflict.value = true
     loadError.value = ''
   } catch { if (current === generation && read === readSequence) loadError.value = t(prefix + 'loadFailed') }
   finally {
@@ -55,7 +66,7 @@ async function load(reset = false) {
 }
 
 async function save() {
-  if (saving.value) return
+  if (saving.value || conflict.value) return
   const current = generation
   const id = props.accountId
   readSequence++
@@ -64,10 +75,10 @@ async function save() {
     options: override.value ? { ...options.value, models: [...options.value.models] } : null,
     proxy_id: proxyId.value || null }
   try {
-    const result = await saveTicketPolicy(id, policy)
+    const result = await saveTicketPolicy(id, policy, baseRevision.value)
     if (current !== generation) return
-    view.value = result; emit('saved', { accountId: id, policy: result.policy }); message.value = t(prefix + 'saved')
-  } catch (e: any) { if (current === generation) error.value = e.response?.data?.message || e.message || t(prefix + 'saveFailed') }
+    view.value = result; syncForm(result); emit('saved', { accountId: id, policy: result.policy }); message.value = t(prefix + 'saved')
+  } catch (e: any) { if (current === generation) { error.value = e.response?.data?.message || e.message || t(prefix + 'saveFailed'); if (e.status === 409 || e.response?.status === 409) conflict.value = true } }
   finally { if (current === generation) { saving.value = false; clearTimeout(poll); poll = setTimeout(() => { void load() }, 5000) } }
 }
 
@@ -85,7 +96,7 @@ async function harvest(model: string) {
 }
 
 watch(() => props.accountId, () => {
-  generation++; clearTimeout(poll); view.value = null; saving.value = false; harvesting.value = ''; message.value = ''; error.value = ''
+  generation++; clearTimeout(poll); view.value = null; conflict.value = false; cleanForm.value = ''; baseRevision.value = ''; saving.value = false; harvesting.value = ''; message.value = ''; error.value = ''
   void load(true)
 }, { immediate: true })
 onUnmounted(() => { generation++; clearTimeout(poll) })
@@ -97,6 +108,7 @@ onUnmounted(() => { generation++; clearTimeout(poll) })
     <p v-if="error || loadError" role="alert" class="text-sm text-red-600">{{ error || loadError }}</p>
     <button v-if="!view" type="button" class="text-sm underline" @click="load(true)">{{ t(prefix + 'refresh') }}</button>
     <template v-if="view">
+      <p v-if="conflict" role="alert" class="text-sm text-amber-600">{{ t(prefix + 'conflict') }} <button type="button" class="underline" :disabled="saving" @click="load(true)">{{ t(prefix + 'reload') }}</button></p>
       <p class="input-hint">{{ t(prefix + 'effective', { state: enabledLabel }) }} <span v-if="!view.global_enabled">{{ t(prefix + 'masterOff') }}</span></p>
       <fieldset :disabled="saving || !view.eligible" class="space-y-3">
         <label class="block"><span class="input-label">{{ t(prefix + 'participation') }}</span>
@@ -107,7 +119,7 @@ onUnmounted(() => { generation++; clearTimeout(poll) })
         <CodexTicketOptionsForm v-if="override" v-model="options" />
         <details v-else><summary class="cursor-pointer text-sm">{{ t(prefix + 'inheritedOptions') }}</summary><CodexTicketOptionsForm :model-value="view.options" disabled /></details>
       </fieldset>
-      <button type="button" class="btn btn-secondary" :disabled="saving || !view.eligible" @click="save">{{ t(prefix + 'saveAccount') }}</button>
+      <button type="button" class="btn btn-secondary" :disabled="saving || conflict || !view.eligible" @click="save">{{ t(prefix + 'saveAccount') }}</button>
       <p class="input-hint">{{ t(prefix + 'accountSaveHint') }}</p>
       <div v-for="item in view.progress" :key="item.model" class="space-y-1 rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">
         <div class="flex items-center justify-between gap-2"><strong>{{ item.model }}</strong><span>{{ stateLabel(item.state) }}</span></div>
