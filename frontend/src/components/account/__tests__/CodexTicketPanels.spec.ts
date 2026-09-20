@@ -121,6 +121,15 @@ describe('Account ticket panel', () => {
     expect(wrapper.get('[role="status"]').text()).toContain('triggers.cooldown')
   })
 
+  it('keeps the ticket policy editable but prevents harvesting while scheduling is paused', async () => {
+    mocks.getAccount.mockResolvedValue({ ...account(), progress: [{ model: 'gpt-6-astra', state: 'scheduling_paused', attempts: 0, consecutive_failures: 0 }] })
+    const wrapper = mount(CodexTicketAccountPanel, { props: { accountId: 41 } }); wrappers.push(wrapper); await flushPromises()
+    expect(wrapper.text()).toContain('schedulingPausedHint')
+    expect(button(wrapper, 'harvest').attributes('disabled')).toBeDefined()
+    expect(button(wrapper, 'saveAccount').attributes('disabled')).toBeUndefined()
+    expect(mocks.harvest).not.toHaveBeenCalled()
+  })
+
   it('ignores a late response from the previously selected account', async () => {
     let resolveOld!: (value: TicketAccountView) => void
     mocks.getAccount.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))

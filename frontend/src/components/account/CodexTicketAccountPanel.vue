@@ -139,6 +139,7 @@ onUnmounted(() => { generation++; clearTimeout(poll) })
     <template v-if="view">
       <p v-if="conflict" role="alert" class="text-sm text-amber-600">{{ t(prefix + 'conflict') }} <button type="button" class="underline" :disabled="saving || busy" @click="load(true)">{{ t(prefix + 'reload') }}</button></p>
       <p class="input-hint">{{ t(prefix + 'effective', { state: enabledLabel }) }} <span v-if="!view.global_enabled">{{ t(prefix + 'masterOff') }}</span></p>
+      <p v-if="view.progress.some(item => item.state === 'scheduling_paused')" class="input-hint">{{ t(prefix + 'schedulingPausedHint') }}</p>
       <fieldset :disabled="saving || busy || !view.eligible" class="space-y-3">
         <label class="block"><span class="input-label">{{ t(prefix + 'participation') }}</span>
           <select v-model="mode" class="input"><option value="inherit">{{ t(prefix + 'inherit') }}</option><option value="on">{{ t(prefix + 'on') }}</option><option value="off">{{ t(prefix + 'off') }}</option></select>
@@ -158,7 +159,7 @@ onUnmounted(() => { generation++; clearTimeout(poll) })
         <p>{{ t(prefix + 'nextAttempt') }}{{ formatTime(item.next_attempt) }}</p>
         <p>{{ t(prefix + 'attempts', { count: item.attempts, failures: item.consecutive_failures }) }}</p>
         <p v-for="ticket in (view.tickets ?? []).filter(ticket => ticket.model === item.model)" :key="ticket.model">{{ ticket.ready ? t(prefix + 'expires', { time: formatTime(ticket.expires_at) }) : ticket.blocked ? t(prefix + 'block') : t(prefix + 'allow') }}</p>
-        <button type="button" class="btn btn-secondary" :disabled="busy || !!harvesting || !view.enabled || !view.proxy_configured || item.state === 'harvesting' || item.state === 'inactive'" @click="harvest(item.model)">{{ t(prefix + 'harvest') }}</button>
+        <button type="button" class="btn btn-secondary" :disabled="busy || !!harvesting || !view.enabled || !view.proxy_configured || item.state === 'harvesting' || item.state === 'inactive' || item.state === 'scheduling_paused'" @click="harvest(item.model)">{{ t(prefix + 'harvest') }}</button>
       </div>
       <p class="input-hint">{{ t(prefix + 'runtimeHint') }}</p>
       <button type="button" class="text-sm underline" @click="load()">{{ t(prefix + 'refresh') }}</button>

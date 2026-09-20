@@ -1,6 +1,7 @@
 export default {
     accounts: {
       ticket: {
+ schedulingPausedHint: "账号调度已关闭，自动和手动打票均暂停。恢复调度后将继续使用当前 Ticket 配置。",
 "saveBeforeAccountFailed": "Ticket 配置尚未保存，请处理该区域的提示后重试。","partialAccountSave": "Ticket 配置已保存，但账号保存未成功完成，请检查错误后重试。",
  importProxyWarning: '采集代理无法安全重映射，已关闭此账号的 Ticket 采集。请在账号设置中重新选择代理后开启。',
 "conflict": "Ticket 配置已在其他位置变化。请重新加载后再保存，重新加载会丢弃本区域尚未保存的修改。","reload": "重新加载配置",
@@ -53,6 +54,7 @@ export default {
   "refresh": "刷新",
   "runtimeHint": "每 5 秒刷新状态。尝试次数与退避状态属于当前实例，服务重启会重置；手动采集也遵守并发上限和失败冷却。",
   "states": {
+ "scheduling_paused": "调度已关闭，采集暂停",
     "waiting": "等待采集",
     "harvesting": "采集中",
     "ready": "已有有效票据",

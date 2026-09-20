@@ -1,6 +1,7 @@
 export default {
     accounts: {
       ticket: {
+ schedulingPausedHint: "Account scheduling is disabled. Automatic and manual harvesting are paused. Enabling scheduling resumes the current ticket policy.",
 "saveBeforeAccountFailed": "Ticket settings were not saved. Resolve the message in that section and retry.","partialAccountSave": "Ticket settings were saved, but the account update did not complete. Check the error and retry.",
  importProxyWarning: 'Ticket harvesting was disabled because its proxy could not be mapped safely. Select a harvest proxy in account settings before enabling it.',
 "conflict": "Ticket settings changed elsewhere. Reload before saving; this discards unsaved edits in this section.","reload": "Reload settings",
@@ -53,6 +54,7 @@ export default {
   "refresh": "Refresh",
   "runtimeHint": "Refreshes every 5 seconds. Attempt counters and backoff belong to this instance and reset on restart. Manual probes obey concurrency and failure cooldown limits.",
   "states": {
+ "scheduling_paused": "Scheduling disabled; harvesting paused",
     "waiting": "Waiting",
     "harvesting": "Harvesting",
     "ready": "Valid ticket available",

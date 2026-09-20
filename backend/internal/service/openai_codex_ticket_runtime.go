@@ -44,6 +44,11 @@ type ticketAttemptResult struct {
 	success        bool
 }
 
+// 只跟随持久调度开关，不使用含临时限流/缺票条件的可调度判断，避免无法补票自愈。
+func canHarvestCodexTicket(account *Account) bool {
+	return isOpenAICodexTicketAccount(account) && account.Status == StatusActive && account.Schedulable
+}
+
 func (s *OpenAIGatewayService) ticketProxy(ctx context.Context, account *Account, cfg config.OpenAICodexTicketConfig) (string, error) {
 	p := ticketPolicy(account)
 	if p.ProxyID == nil {
@@ -96,7 +101,7 @@ func (s *OpenAIGatewayService) attemptCodexTicket(ctx context.Context, account *
 		}
 	}()
 
-	if !ticketModelEnabled(cfg, model) || ctx.Err() != nil {
+	if !ticketModelEnabled(cfg, model) || !canHarvestCodexTicket(account) || ctx.Err() != nil {
 		return ticketAttemptResult{reason: "disabled"}
 	}
 	proxy, err := s.ticketProxy(ctx, account, cfg)
@@ -159,6 +164,9 @@ func (s *OpenAIGatewayService) launchTicketJob(ctx context.Context, account *Acc
 		return nil, "stale"
 	}
 	defer release()
+	if !canHarvestCodexTicket(account) || !ticketModelEnabled(cfg, model) {
+		return nil, "disabled"
+	}
 	s.openaiCodexTicketLifecycleMu.Lock()
 	defer s.openaiCodexTicketLifecycleMu.Unlock()
 	if s.openaiCodexTicketStopped || ctx.Err() != nil {
@@ -274,7 +282,7 @@ func (s *OpenAIGatewayService) scheduleCodexTickets(ctx context.Context, wait bo
 	for i := range accounts {
 		account := &accounts[i]
 		effective := resolveCodexTicketPolicy(account, cfg)
-		if account.Status != StatusActive || !effective.Enabled {
+		if !canHarvestCodexTicket(account) || !effective.Enabled {
 			continue
 		}
 		for _, model := range effective.Models {
@@ -301,7 +309,7 @@ func (s *OpenAIGatewayService) scheduleCodexTickets(ctx context.Context, wait bo
 	for i := range accounts {
 		account := &accounts[i]
 		effective := resolveCodexTicketPolicy(account, cfg)
-		if account.Status != StatusActive || !effective.Enabled {
+		if !canHarvestCodexTicket(account) || !effective.Enabled {
 			continue
 		}
 		for _, model := range effective.Models {
@@ -366,6 +374,9 @@ func (s *OpenAIGatewayService) CodexTicketAccountView(ctx context.Context, accou
 			p.State = "disabled"
 		case account.Status != StatusActive:
 			p.State = "inactive"
+		case !account.Schedulable:
+			p.State = "scheduling_paused"
+			p.NextAttempt = nil
 		case !view.ProxyConfigured:
 			p.State = "configuration_missing"
 			if proxyErr != nil {
@@ -448,7 +459,10 @@ func (s *OpenAIGatewayService) TriggerCodexTicket(ctx context.Context, accountID
 		return "", err
 	}
 	cfg := resolveCodexTicketPolicy(account, s.ticketConfigContext(ctx))
-	if !ticketModelEnabled(cfg, model) || account.Status != StatusActive {
+	if account != nil && !account.Schedulable {
+		return "", errors.New("account scheduling is disabled; enable scheduling before harvesting")
+	}
+	if !ticketModelEnabled(cfg, model) || !canHarvestCodexTicket(account) {
 		return "", errors.New("ticket harvesting is disabled for this account or model")
 	}
 	proxy, err := s.ticketProxy(ctx, account, cfg)

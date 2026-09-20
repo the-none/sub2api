@@ -581,13 +581,12 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
-	if input.Status != "" || input.Type != "" {
-		finish, err := s.settingService.beginTicketMutation(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer finish()
+	// 全量行更新也携带 schedulable；连同读取一起排序，避免旧快照恢复已关闭的调度。
+	finish, err := s.settingService.beginTicketMutation(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer finish()
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1356,6 +1355,11 @@ func (s *adminServiceImpl) SetAccountError(ctx context.Context, id int64, errorM
 }
 
 func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error) {
+	finish, err := s.settingService.beginTicketMutation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	if err := s.accountRepo.SetSchedulable(ctx, id, schedulable); err != nil {
 		return nil, err
 	}
