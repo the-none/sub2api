@@ -582,7 +582,13 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	// 全量行更新也携带 schedulable；连同读取一起排序，避免旧快照恢复已关闭的调度。
-	finish, err := s.settingService.beginTicketMutation(ctx)
+	var finish func()
+	var err error
+	if input.Status != "" || input.Type != "" {
+		finish, err = s.settingService.beginTicketMutation(ctx)
+	} else {
+		finish, err = s.settingService.lockTicketAccountUpdate(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}

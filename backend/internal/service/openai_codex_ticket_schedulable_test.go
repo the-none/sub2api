@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -156,4 +159,131 @@ func TestCodexTicketResumingSchedulingDoesNotEnableDisabledPolicy(t *testing.T) 
 	latest, err := repo.GetByID(context.Background(), 41)
 	require.NoError(t, err)
 	require.Equal(t, false, latest.Extra[CodexTicketEnabledExtraKey])
+}
+
+type ticketSchedulingEditRepo struct {
+	AccountRepository
+	mu        sync.Mutex
+	accounts  map[int64]*Account
+	afterRead func()
+}
+
+func (r *ticketSchedulingEditRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	r.mu.Lock()
+	a := *r.accounts[id]
+	a.Extra = maps.Clone(a.Extra)
+	a.Credentials = maps.Clone(a.Credentials)
+	r.mu.Unlock()
+	if r.afterRead != nil {
+		r.afterRead()
+	}
+	return &a, nil
+}
+func (r *ticketSchedulingEditRepo) Update(_ context.Context, account *Account) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a := *account
+	r.accounts[account.ID] = &a
+	return nil
+}
+func (r *ticketSchedulingEditRepo) UpdateExtra(_ context.Context, id int64, extra map[string]any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.accounts[id].Extra == nil {
+		r.accounts[id].Extra = map[string]any{}
+	}
+	maps.Copy(r.accounts[id].Extra, extra)
+	return nil
+}
+func (r *ticketSchedulingEditRepo) SetSchedulable(_ context.Context, id int64, enabled bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.accounts[id].Schedulable = enabled
+	return nil
+}
+
+func TestCodexTicketOrdinaryAccountEditDoesNotCancelHarvest(t *testing.T) {
+	for _, editedID := range []int64{41, 99} {
+		t.Run(fmt.Sprint(editedID), func(t *testing.T) {
+			account := ticketTestAccount(41)
+			repo := &ticketSchedulingEditRepo{accounts: map[int64]*Account{41: account, 99: {ID: 99, Platform: PlatformGemini, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true}}}
+			started, release := make(chan struct{}), make(chan struct{})
+			cfg := ticketSchedulingConfig()
+			svc := ticketTestService(t, cfg, &codexTicketFuncUpstream{do: func(req *http.Request) (*http.Response, error) {
+				close(started)
+				select {
+				case <-release:
+				case <-req.Context().Done():
+					return nil, req.Context().Err()
+				}
+				return codexTicketResponse(), nil
+			}})
+			svc.accountRepo = repo
+			svc.settingService = NewSettingService(nil, svc.cfg)
+			svc.ticketCoordinator().cancel = svc.cancelTicketJobs
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done, state := svc.launchTicketJob(svc.stampTicketSnapshot(ctx), account, "gpt-6-astra", cfg, false)
+			require.Equal(t, "started", state)
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("probe did not start")
+			}
+			admin := &adminServiceImpl{accountRepo: repo, settingService: svc.settingService}
+			_, err := admin.UpdateAccount(context.Background(), editedID, &UpdateAccountInput{Name: "renamed"})
+			require.NoError(t, err)
+			close(release)
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("probe did not finish")
+			}
+			latest, err := repo.GetByID(context.Background(), 41)
+			require.NoError(t, err)
+			require.True(t, svc.CodexTicketAccountView(context.Background(), latest).Tickets[0].Ready, "ordinary editing must allow the in-flight probe to publish its ticket")
+		})
+	}
+}
+
+func TestCodexTicketOrdinaryEditSerializesWithSchedulingPause(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var reads atomic.Int64
+	repo := &ticketSchedulingEditRepo{accounts: map[int64]*Account{41: ticketTestAccount(41)}, afterRead: func() {
+		if reads.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+	}}
+	setting := NewSettingService(nil, &config.Config{})
+	admin := &adminServiceImpl{accountRepo: repo, settingService: setting}
+	edited := make(chan error, 1)
+	go func() {
+		_, err := admin.UpdateAccount(context.Background(), 41, &UpdateAccountInput{Name: "renamed"})
+		edited <- err
+	}()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("edit did not read the old scheduling state")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := admin.SetAccountSchedulable(ctx, 41, false)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "pause must wait for the entire ordinary read/write operation")
+	close(release)
+	require.NoError(t, <-edited)
+	_, err = admin.SetAccountSchedulable(context.Background(), 41, false)
+	require.NoError(t, err)
+	latest, err := repo.GetByID(context.Background(), 41)
+	require.NoError(t, err)
+	require.Equal(t, "renamed", latest.Name)
+	require.False(t, latest.Schedulable, "the ordinary edit must not restore the pre-pause snapshot")
 }

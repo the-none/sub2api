@@ -55,6 +55,14 @@ func (s *SettingService) beginTicketMutation(ctx context.Context) (func(), error
 	}
 	return s.ticketControl.beginMutation(ctx, 0)
 }
+
+// 普通全量编辑与调度开关写入互斥，但不使在途采集失效。
+func (s *SettingService) lockTicketAccountUpdate(ctx context.Context) (func(), error) {
+	if s == nil {
+		return func() {}, nil
+	}
+	return s.ticketControl.acquire(ctx, ticketWriteWeight)
+}
 func (s *OpenAIGatewayService) ticketCoordinator() *codexTicketControl {
 	if s.settingService != nil {
 		return &s.settingService.ticketControl
