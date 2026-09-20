@@ -1,6 +1,7 @@
 export default {
     accounts: {
       ticket: {
+"saveBeforeAccountFailed": "Ticket 配置尚未保存，请处理该区域的提示后重试。","partialAccountSave": "Ticket 配置已保存，但账号保存未成功完成，请检查错误后重试。",
  importProxyWarning: '采集代理无法安全重映射，已关闭此账号的 Ticket 采集。请在账号设置中重新选择代理后开启。',
 "conflict": "Ticket 配置已在其他位置变化。请重新加载后再保存，重新加载会丢弃本区域尚未保存的修改。","reload": "重新加载配置",
   "title": "Codex Ticket 采集",
@@ -41,7 +42,7 @@ export default {
   "proxyId": "指定采集代理",
   "effective": "当前已保存配置：{state}。",
   "masterOff": "全局总开关已关闭，账号开启也不会执行。",
-  "accountSaveHint": "Ticket 配置独立保存。立即采集使用已保存配置；关闭账号后不再采集、注入或因缺票拦截。",
+  "accountSaveHint": "底部保存会一并保存 Ticket 修改，也可单独保存此区域。立即采集使用已保存配置；关闭后不再采集、注入或因缺票拦截。",
   "reason": "最近结果：",
   "lastAttempt": "最近尝试：",
   "lastSuccess": "最近成功：",

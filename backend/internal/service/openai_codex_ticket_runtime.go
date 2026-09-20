@@ -343,6 +343,10 @@ func (s *OpenAIGatewayService) CodexTicketAccountView(ctx context.Context, accou
 		}
 	}
 	view := CodexTicketAccountView{Revision: ticketFingerprint(account, global), Policy: ticketPolicy(account), GlobalEnabled: global.Enabled, Enabled: cfg.Enabled, Eligible: isOpenAICodexTicketAccount(account), Options: CodexTicketOptionsFromConfig(cfg), ProxyConfigured: proxyErr == nil && proxy != "", Tickets: OpenAICodexTicketStatuses(&snapshot, global, time.Now()), Progress: []CodexTicketProgress{}}
+	// 管理面板始终接收数组；关闭策略时也必须保持可编辑。
+	if view.Tickets == nil {
+		view.Tickets = []OpenAICodexTicketStatus{}
+	}
 	for _, model := range cfg.Models {
 		p := CodexTicketProgress{Model: model, State: "waiting"}
 		s.ticketJobsMu.Lock()

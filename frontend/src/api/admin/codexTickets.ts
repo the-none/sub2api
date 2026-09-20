@@ -56,7 +56,7 @@ export interface TicketAccountView {
   eligible: boolean
   options: TicketOptions
   proxy_configured: boolean
-  tickets: Array<{ model: string; ready: boolean; blocked: boolean; expires_at?: string }>
+  tickets: Array<{ model: string; ready: boolean; blocked: boolean; expires_at?: string }> | null
   progress: TicketProgress[]
 }
 

@@ -1,6 +1,7 @@
 export default {
     accounts: {
       ticket: {
+"saveBeforeAccountFailed": "Ticket settings were not saved. Resolve the message in that section and retry.","partialAccountSave": "Ticket settings were saved, but the account update did not complete. Check the error and retry.",
  importProxyWarning: 'Ticket harvesting was disabled because its proxy could not be mapped safely. Select a harvest proxy in account settings before enabling it.',
 "conflict": "Ticket settings changed elsewhere. Reload before saving; this discards unsaved edits in this section.","reload": "Reload settings",
   "title": "Codex Ticket harvesting",
@@ -41,7 +42,7 @@ export default {
   "proxyId": "Harvest proxy",
   "effective": "Saved effective policy: {state}.",
   "masterOff": "The master switch is off; this account will not run even when enabled.",
-  "accountSaveHint": "Ticket settings are saved separately. Manual harvesting uses saved settings. Disabling stops harvesting, injection and missing-ticket gating.",
+  "accountSaveHint": "The bottom save button also saves ticket changes. You can save this section separately. Manual harvesting uses saved settings; disabling stops harvesting, injection and missing-ticket gating.",
   "reason": "Last result: ",
   "lastAttempt": "Last attempt: ",
   "lastSuccess": "Last success: ",
