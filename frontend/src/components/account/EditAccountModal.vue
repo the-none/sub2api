@@ -10,14 +10,7 @@
       id="edit-account-form"
       @submit.prevent="handleSubmit"
       class="space-y-5"
-      :aria-busy="submitting"
     >
-      <fieldset
-        :disabled="submitting"
-        :inert="submitting ? true : undefined"
-        class="min-w-0 space-y-5 border-0 p-0"
-        data-testid="account-edit-fields"
-      >
       <div>
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
@@ -2258,13 +2251,6 @@
         </div>
       </div>
 
-      <CodexTicketAccountPanel
-        v-if="show && account?.platform === 'openai' && ['oauth', 'setup-token'].includes(account.type) && !account.parent_account_id"
-        ref="ticketPanel"
-        :account-id="account.id"
-        :busy="submitting"
-      />
-
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -2979,7 +2965,6 @@
         data-tour="account-form-groups"
       />
 
-      </fieldset>
     </form>
 
     <template #footer>
@@ -3034,7 +3019,6 @@
 </template>
 
 <script setup lang="ts">
-import CodexTicketAccountPanel from './CodexTicketAccountPanel.vue'
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3161,7 +3145,6 @@ const selectableGroups = computed(() => {
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
-
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
 })
@@ -3197,10 +3180,6 @@ interface TempUnschedRuleForm {
 
 // State
 const submitting = ref(false)
-const ticketPanel = ref<InstanceType<typeof CodexTicketAccountPanel> | null>(null)
-let accountSaveInFlight = false
-let editSession = 0
-watch([() => props.account?.id, () => props.show], () => { editSession++ })
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
 
@@ -4950,29 +4929,14 @@ const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Ac
 }
 
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
-  if (accountSaveInFlight) return
-  accountSaveInFlight = true
-  const session = editSession
-  const stillCurrent = () => session === editSession && props.show && props.account?.id === accountID
-  const ticketWasDirty = Boolean(ticketPanel.value?.isDirty)
-  let ticketSaved = false
   submitting.value = true
   try {
-    const ticketResult = await ticketPanel.value?.saveIfDirty?.()
-    if (!stillCurrent()) return
-    if (ticketResult === false) {
-      appStore.showError(t('admin.accounts.ticket.saveBeforeAccountFailed'))
-      return
-    }
-    ticketSaved = ticketWasDirty && ticketResult === true
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
-    if (!stillCurrent()) return
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
     emit('updated', updatedAccount)
     handleClose()
   } catch (error: any) {
-    if (!stillCurrent()) return
     if (error.status === 409 && error.error === 'mixed_channel_warning' && needsMixedChannelCheck()) {
       openMixedChannelDialog({
         message: error.message,
@@ -4983,16 +4947,14 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
       })
       return
     }
-    const reason = error.message || t('admin.accounts.failedToUpdate')
-    appStore.showError(ticketSaved ? `${t('admin.accounts.ticket.partialAccountSave')} ${reason}` : reason)
+    appStore.showError(error.message || t('admin.accounts.failedToUpdate'))
   } finally {
-    accountSaveInFlight = false
     submitting.value = false
   }
 }
 
 const handleSubmit = async () => {
-  if (!props.account || submitting.value || accountSaveInFlight) return
+  if (!props.account) return
   const accountID = props.account.id
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
@@ -5718,11 +5680,6 @@ const handleSubmit = async () => {
         delete newExtra.upstream_request_id_header
       }
       updatePayload.extra = newExtra
-    }
-
-    if (updatePayload.extra) {
-      delete (updatePayload.extra as Record<string, unknown>).codex_ticket_policy
-      delete (updatePayload.extra as Record<string, unknown>).codex_ticket_enabled
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

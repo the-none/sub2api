@@ -335,9 +335,6 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if s.accountDuplicateRepo == nil {
 		return nil, errors.New("account duplicate repository is not configured")
 	}
-	if err := validateCodexTicketProxy(ctx, s.proxyRepo, duplicate); err != nil {
-		return nil, err
-	}
 	if err := s.accountDuplicateRepo.CreateWithAccountGroups(ctx, duplicate, groups); err != nil {
 		return nil, fmt.Errorf("create duplicate account: %w", err)
 	}
@@ -414,10 +411,6 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
-	if err := ValidateCodexTicketPolicyExtra(accountExtra); err != nil {
-		return nil, err
-	}
-	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -538,9 +531,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
-	if err := validateCodexTicketProxy(ctx, s.proxyRepo, account); err != nil {
-		return nil, err
-	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -581,18 +571,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
-	// 全量行更新也携带 schedulable；连同读取一起排序，避免旧快照恢复已关闭的调度。
-	var finish func()
-	var err error
-	if input.Status != "" || input.Type != "" {
-		finish, err = s.settingService.beginTicketMutation(ctx)
-	} else {
-		finish, err = s.settingService.lockTicketAccountUpdate(ctx)
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer finish()
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -613,10 +591,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		normalizedExtra, err = normalizeOpenAIAutoResetCreditExtra(account.Platform, effectiveType, account.IsShadow(), normalizedExtra)
 		if err != nil {
-			return nil, err
-		}
-		normalizedExtra = PreserveCodexTicketPolicyExtra(normalizedExtra, account.Extra)
-		if err := ValidateCodexTicketPolicyExtra(normalizedExtra); err != nil {
 			return nil, err
 		}
 		if err := ValidateUpstreamRequestIDHeaderExtra(normalizedExtra); err != nil {
@@ -723,8 +697,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 				normalizedExtra[key] = v
 			}
 		}
-		normalizedExtra = PreserveCodexTicketPolicyExtra(normalizedExtra, account.Extra)
-		normalizedExtra = MergeOpenAICodexTicketExtra(normalizedExtra, account.Extra)
 		normalizedExtra = prepareCodexFingerprintExtraForUpdate(account, normalizedExtra)
 		account.Extra = normalizedExtra
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
@@ -933,11 +905,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
-	updates = PreserveCodexTicketPolicyExtra(updates, nil)
-	if err := ValidateCodexTicketPolicyExtra(updates); err != nil {
-		return err
-	}
-	updates = MergeOpenAICodexTicketExtra(updates, nil)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
@@ -965,18 +932,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
-	finish, err := s.settingService.beginTicketMutation(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer finish()
-	input.Extra = maps.Clone(input.Extra)
-	delete(input.Extra, CodexTicketPolicyExtraKey)
-	if err := ValidateCodexTicketPolicyExtra(input.Extra); err != nil {
-		return nil, err
-	}
 	// Managed probe/session state may only enter through dedicated typed endpoints.
-	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
@@ -1304,11 +1260,6 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 }
 
 func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
-	finish, err := s.settingService.beginTicketMutation(ctx)
-	if err != nil {
-		return err
-	}
-	defer finish()
 	// 级联删除 spark 影子账号（先删影子，再删母账号）
 	shadows, err := s.accountRepo.ListShadowsByParent(ctx, id)
 	if err != nil {
@@ -1361,11 +1312,6 @@ func (s *adminServiceImpl) SetAccountError(ctx context.Context, id int64, errorM
 }
 
 func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error) {
-	finish, err := s.settingService.beginTicketMutation(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer finish()
 	if err := s.accountRepo.SetSchedulable(ctx, id, schedulable); err != nil {
 		return nil, err
 	}

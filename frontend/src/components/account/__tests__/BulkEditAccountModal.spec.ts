@@ -98,16 +98,6 @@ describe('BulkEditAccountModal', () => {
     } as any)
   })
 
-  it('批量关闭 Ticket 只更新开关，不覆盖账号的模型与提示词配置', async () => {
-    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
-    await wrapper.get('[data-testid="bulk-ticket-enabled"]').setValue(true)
-    await wrapper.get('[data-testid="bulk-ticket-mode"]').setValue('off')
-    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
-    await flushPromises()
-    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { codex_ticket_enabled: false } })
-    wrapper.unmount()
-  })
-
   it('批量修改倍率时提示自动同步账号需要先关闭同步', async () => {
     const wrapper = mountModal()
 

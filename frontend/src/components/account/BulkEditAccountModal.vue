@@ -885,13 +885,6 @@
         </div>
       </div>
 
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="mb-3 flex items-center gap-2"><input v-model="enableCodexTicket" type="checkbox" data-testid="bulk-ticket-enabled" />{{ t('admin.accounts.ticket.participation') }}</label>
-        <select v-model="codexTicketMode" :disabled="!enableCodexTicket" class="input" data-testid="bulk-ticket-mode">
-          <option value="inherit">{{ t('admin.accounts.ticket.inherit') }}</option><option value="on">{{ t('admin.accounts.ticket.on') }}</option><option value="off">{{ t('admin.accounts.ticket.off') }}</option>
-        </select>
-      </div>
-
       <!-- OpenAI OAuth Codex CLI only -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1714,8 +1707,6 @@ const upstreamBillingAutoProbeMode = ref<'enabled' | 'disabled'>('enabled')
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
-const enableCodexTicket = ref(false)
-const codexTicketMode = ref('inherit')
 const enableCodexFingerprintMode = ref(false)
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 const codexFingerprintModeOptions = computed(() => [
@@ -2097,10 +2088,6 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     extra.codex_cli_only_allow_app_server = codexCLIOnlyAppServerEnabled.value
   }
 
-  if (enableCodexTicket.value) {
-    ensureExtra().codex_ticket_enabled = codexTicketMode.value === 'inherit' ? null : codexTicketMode.value === 'on'
-  }
-
   if (enableCodexFingerprintMode.value) {
     const extra = ensureExtra()
     // off 必须显式落键，不能靠删本地键表达。批量更新走 JSONB 顶层合并
@@ -2235,7 +2222,7 @@ const handleSubmit = async () => {
     enableUpstreamBillingAutoProbe.value ||
     enableCodexCLIOnly.value ||
     enableCodexCLIOnlyAppServer.value ||
-    enableCodexFingerprintMode.value || enableCodexTicket.value ||
+    enableCodexFingerprintMode.value ||
     enableOpenAICompactMode.value ||
     enableOpenAICompactModelMapping.value ||
     enableRpmLimit.value ||
@@ -2386,8 +2373,6 @@ watch(
       enableUpstreamBillingAutoProbe.value = false
       enableCodexCLIOnly.value = false
       enableCodexCLIOnlyAppServer.value = false
-      enableCodexTicket.value = false
-      codexTicketMode.value = 'inherit'
       enableCodexFingerprintMode.value = false
       codexFingerprintMode.value = 'off'
       enableOpenAICompactMode.value = false

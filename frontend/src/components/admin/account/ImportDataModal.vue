@@ -62,10 +62,6 @@
           {{ t('admin.accounts.dataImportResultSummary', result) }}
         </div>
 
-        <div v-if="result.warnings?.length" role="alert" class="text-sm text-amber-600">
-          <div v-for="(warning, index) in result.warnings" :key="index">{{ warning.name }} — {{ t('admin.accounts.ticket.importProxyWarning') }}</div>
-        </div>
-
         <div v-if="errorItems.length" class="mt-2">
           <div class="text-sm font-medium text-red-600 dark:text-red-400">
             {{ t('admin.accounts.dataImportErrors') }}

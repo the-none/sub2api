@@ -6,7 +6,6 @@ import enCommon from "@/i18n/locales/en/common";
 import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
-vi.mock('@/components/account/CodexTicketSettingsPanel.vue', () => ({ default: { template: '<div data-testid="ticket-settings-panel" />' } }));
 import SettingsView from "../SettingsView.vue";
 
 const {
@@ -719,19 +718,6 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
-  });
-
-  it("saves general settings without overwriting separately saved ticket settings", async () => {
-    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, openai_codex_ticket_enabled: false,
-      openai_codex_ticket_harvest_proxy_url: "http://user:***@old.example.com:8080" });
-    const wrapper = mountView();
-    await flushPromises();
-    expect(wrapper.find('[data-testid="ticket-settings-panel"]').exists()).toBe(true);
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_enabled");
-    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_url");
-    wrapper.unmount();
   });
 
   it("loads and saves the open button visibility for each custom menu", async () => {

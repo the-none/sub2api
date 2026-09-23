@@ -1004,9 +1004,6 @@ type GatewayConfig struct {
 	// OpenAICompactModel: /responses/compact 上游使用的模型。
 	// compact 端点支持模型滞后于普通 /responses 时，可用该配置降级规避上游错误。
 	OpenAICompactModel string `mapstructure:"openai_compact_model"`
-	// OpenAICodexTicket: ChatGPT OAuth 账号按 (账号, 模型) 捕获 292 长度
-	// x-codex-turn-state，并在住宅 IP 业务请求中注入该头。默认关闭。
-	OpenAICodexTicket OpenAICodexTicketConfig `mapstructure:"openai_codex_ticket"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 	// Live: ChatGPT Frameless Live 会话配置。
@@ -1219,26 +1216,6 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 		return UMQModeSerialize // 向后兼容
 	}
 	return ""
-}
-
-// OpenAICodexTicketConfig 控制 ChatGPT OAuth 的 x-codex-turn-state 门票。
-// 打票走 harvest_proxy_url（SOCKS），业务出站仍用账号住宅 proxy_id，只替换该请求头。
-// 门票默认有效 3600 秒，临近过期前 refresh_before_seconds 重新打票。
-type OpenAICodexTicketConfig struct {
-	Enabled                      bool     `mapstructure:"enabled" json:"enabled"`
-	TargetLength                 int      `mapstructure:"target_length" json:"target_length"`
-	TTLSeconds                   int      `mapstructure:"ttl_seconds" json:"ttl_seconds"`
-	RefreshBeforeSeconds         int      `mapstructure:"refresh_before_seconds" json:"refresh_before_seconds"`
-	HarvestProxyURL              string   `mapstructure:"harvest_proxy_url" json:"harvest_proxy_url"`
-	HarvestProbeIntervalSeconds  int      `mapstructure:"harvest_probe_interval_seconds" json:"harvest_probe_interval_seconds"`
-	HarvestAttemptTimeoutSeconds int      `mapstructure:"harvest_attempt_timeout_seconds" json:"harvest_attempt_timeout_seconds"`
-	FailClosed                   bool     `mapstructure:"fail_closed" json:"fail_closed"`
-	Models                       []string `mapstructure:"models" json:"models"`
-	DefaultAccountEnabled        *bool    `mapstructure:"default_account_enabled" json:"default_account_enabled,omitempty"`
-	Instructions                 string   `mapstructure:"instructions" json:"instructions"`
-	UserPrompt                   string   `mapstructure:"user_prompt" json:"user_prompt"`
-	MaxConcurrency               int      `mapstructure:"max_concurrency" json:"max_concurrency"`
-	MaxBackoffSeconds            int      `mapstructure:"max_backoff_seconds" json:"max_backoff_seconds"`
 }
 
 // DefaultOpenAIWSClientFirstMessageTimeoutSeconds preserves the legacy ingress deadline.
@@ -1842,9 +1819,6 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config error: %w", err)
 	}
-	if value, present := os.LookupEnv("GATEWAY_OPENAI_CODEX_TICKET_INSTRUCTIONS"); present {
-		cfg.Gateway.OpenAICodexTicket.Instructions = value
-	}
 	if trustedProxiesEnvConfigured {
 		cfg.Server.TrustedProxies = normalizeStringSlice(strings.Split(trustedProxiesEnv, ","))
 	}
@@ -2407,20 +2381,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
-	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
-	viper.SetDefault("gateway.openai_codex_ticket.default_account_enabled", true)
-	viper.SetDefault("gateway.openai_codex_ticket.max_concurrency", 4)
-	viper.SetDefault("gateway.openai_codex_ticket.max_backoff_seconds", 300)
-	viper.SetDefault("gateway.openai_codex_ticket.instructions", "Reply with exactly: pong")
-	viper.SetDefault("gateway.openai_codex_ticket.user_prompt", "ping")
-	viper.SetDefault("gateway.openai_codex_ticket.target_length", 292)
-	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 3600)
-	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", 600)
-	viper.SetDefault("gateway.openai_codex_ticket.harvest_proxy_url", "")
-	viper.SetDefault("gateway.openai_codex_ticket.harvest_probe_interval_seconds", 6)
-	viper.SetDefault("gateway.openai_codex_ticket.harvest_attempt_timeout_seconds", 25)
-	viper.SetDefault("gateway.openai_codex_ticket.fail_closed", true)
-	viper.SetDefault("gateway.openai_codex_ticket.models", []string{"gpt-6-astra", "gpt-5.6-sol"})
 	viper.SetDefault("gateway.live.max_session_duration_seconds", 3600)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
@@ -2691,9 +2651,6 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
-	if err := c.Gateway.OpenAICodexTicket.Validate(); err != nil {
-		return fmt.Errorf("gateway.openai_codex_ticket: %w", err)
-	}
 	forwardedClientIPHeaders, err := NormalizeForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders)
 	if err != nil {
 		return fmt.Errorf("security.forwarded_client_ip_headers: %w", err)

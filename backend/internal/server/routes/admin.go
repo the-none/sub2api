@@ -364,11 +364,6 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 	accounts := admin.Group("/accounts")
 	{
 		accounts.GET("", h.Admin.Account.List)
-		accounts.GET("/codex-ticket/settings", h.Admin.Account.GetCodexTicketSettings)
-		accounts.PUT("/codex-ticket/settings", h.Admin.Account.UpdateCodexTicketSettings)
-		accounts.GET("/:id/codex-ticket", h.Admin.Account.GetCodexTicketAccount)
-		accounts.PUT("/:id/codex-ticket", h.Admin.Account.UpdateCodexTicketAccount)
-		accounts.POST("/:id/codex-ticket/harvest", h.Admin.Account.HarvestCodexTicket)
 		accounts.GET("/upstream-billing-rates", h.Admin.Account.GetUpstreamBillingRates)
 		accounts.GET("/upstream-billing-probe/settings", h.Admin.Account.GetUpstreamBillingProbeSettings)
 		accounts.PUT("/upstream-billing-probe/settings", h.Admin.Account.UpdateUpstreamBillingProbeSettings)

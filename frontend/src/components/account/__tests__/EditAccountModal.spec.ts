@@ -54,8 +54,6 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-vi.mock('../CodexTicketAccountPanel.vue', () => ({ default: { template: '<div />' } }))
-
 import EditAccountModal from '../EditAccountModal.vue'
 
 const BaseDialogStub = defineComponent({

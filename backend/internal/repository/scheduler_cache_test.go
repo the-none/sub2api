@@ -108,17 +108,3 @@ func TestSchedulerMetadataAccountDropsInvalidUpstreamBillingProbe(t *testing.T) 
 		require.NotContains(t, metadata.Extra, service.UpstreamBillingProbeExtraKey)
 	}
 }
-
-func TestFilterSchedulerExtraKeepsTicketPolicyWithoutTicketMaterial(t *testing.T) {
-	policy := map[string]any{"options": map[string]any{"fail_closed": false}}
-	filtered := filterSchedulerExtra(map[string]any{
-		service.CodexTicketEnabledExtraKey: false,
-		service.CodexTicketPolicyExtraKey:  policy,
-		"codex_turn_ticket:gpt-6-astra":    map[string]any{"state": "secret-ticket"},
-		"codex_harvest_proxy_url":          "http://user:secret@proxy.example:8080",
-	})
-	require.Equal(t, false, filtered[service.CodexTicketEnabledExtraKey])
-	require.Equal(t, policy, filtered[service.CodexTicketPolicyExtraKey])
-	require.NotContains(t, filtered, "codex_turn_ticket:gpt-6-astra")
-	require.NotContains(t, filtered, "codex_harvest_proxy_url")
-}

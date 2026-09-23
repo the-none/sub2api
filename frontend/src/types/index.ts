@@ -1168,14 +1168,6 @@ export interface Account {
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
   ollama_cloud_usage?: OllamaCloudUsageState
-  codex_turn_tickets?: Array<{
-    model: string
-    length?: number
-    ready: boolean
-    remaining_seconds: number
-    blocked: boolean
-    expires_at?: string
-  }>
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
@@ -1597,8 +1589,6 @@ export interface AdminDataProxy {
 }
 
 export interface AdminDataAccount {
-  ticket_proxy_key?: string | null
-  ticket_proxy_required?: boolean
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1621,7 +1611,6 @@ export interface AdminDataImportError {
 }
 
 export interface AdminDataImportResult {
-  warnings?: AdminDataImportError[]
   proxy_created: number
   proxy_reused: number
   proxy_failed: number
