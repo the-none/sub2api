@@ -60,7 +60,7 @@ func TestResetCreditReconcilesLocalStateWithoutRetryingRedeemedCredit(t *testing
 	defer srv.Close()
 
 	reconciler := &openAIQuotaResetReconcilerRecorder{err: errors.New("local cache temporarily unavailable")}
-	svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv), nil)
 	svc.resetReconcileDelays = nil
 	svc.SetResetReconciler(reconciler)
 
@@ -96,7 +96,7 @@ func TestResetCreditRetryOnlyRepeatsReconciliation(t *testing.T) {
 	defer srv.Close()
 
 	reconciler := &openAIQuotaResetRetryRecorder{recovered: make(chan struct{})}
-	svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv), nil)
 	svc.resetReconcileDelays = []time.Duration{time.Millisecond}
 	svc.SetResetReconciler(reconciler)
 
@@ -144,7 +144,7 @@ func TestQueryUsageSnapshotSkipsResetCreditDetailsRequest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv), nil)
 	usage, err := svc.QueryUsageSnapshot(context.Background(), account.ID)
 	require.NoError(t, err)
 	require.NotNil(t, usage.RateLimit)
@@ -318,7 +318,7 @@ func TestQueryUsageResetCreditCountPrecedence(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+			svc := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv), nil)
 			usage, err := svc.QueryUsage(context.Background(), 100)
 			require.NoError(t, err)
 			require.NotNil(t, usage)

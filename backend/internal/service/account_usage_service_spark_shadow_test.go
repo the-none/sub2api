@@ -125,7 +125,7 @@ func TestGetOpenAIUsage_SparkShadow_WritesExtraAndReturnsNonEmptyWindows(t *test
 	}))
 	defer srv.Close()
 
-	quotaService := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	quotaService := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv), nil)
 	svc := &AccountUsageService{
 		accountRepo:        repo,
 		openAIQuotaService: quotaService,
@@ -214,7 +214,7 @@ func TestRefreshOpenAICodexUsageSnapshot_SparkShadowSkipsResetCreditDetails(t *t
 
 	svc := &AccountUsageService{
 		accountRepo:        repo,
-		openAIQuotaService: NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv)),
+		openAIQuotaService: NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv), nil),
 		cache:              NewUsageCache(),
 	}
 	svc.RefreshOpenAICodexUsageSnapshot(shadow.ID, false)
