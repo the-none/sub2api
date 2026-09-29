@@ -140,6 +140,7 @@ type SettingService struct {
 	openAIFastPolicyWriteMu     sync.Mutex
 	openAIFastPolicyGeneration  atomic.Uint64
 
+	cyberSessionBlockRuntimeMu    sync.Mutex
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
 	cyberSessionBlockRuntimeSF    singleflight.Group
 
