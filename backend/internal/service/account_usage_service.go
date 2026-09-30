@@ -507,7 +507,13 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 						}
 					}
 				}
+				fetchStarted := time.Now()
 				resp, fetchErr := s.fetchOAuthUsageRaw(ctx, account)
+				// A response fetched after this one started (e.g. the post-reset
+				// reconciliation) wins; never let a slower, older fetch replace it.
+				if newer := s.cachedClaudeUsageSince(accountID, fetchStarted); newer != nil {
+					return newer, nil
+				}
 				if fetchErr != nil {
 					// 负缓存：缓存错误响应，防止后续请求重复触发 429
 					s.cache.apiCache.Store(accountID, &apiUsageCache{
@@ -529,23 +535,7 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 			apiResp, _ = result.(*ClaudeUsageResponse)
 		}
 
-		// 3. 构建 UsageInfo（每次都重新计算 RemainingSeconds）
-		now := time.Now()
-		usage := s.buildUsageInfo(apiResp, &now)
-
-		// 4. 添加窗口统计（有独立缓存，1 分钟）
-		s.addWindowStats(ctx, account, usage)
-
-		// 5. 将主动查询结果同步到被动缓存，下次 passive 加载即为最新值
-		s.syncActiveToPassive(ctx, account.ID, usage)
-
-		// 6. 上游 usage API 目前不一定下发 Fable 7d 窗口；缺失时回填被动采样
-		// （7d_oi 响应头）的数据，避免主动查询后 7d F 进度条丢失。
-		if usage.SevenDayFable == nil {
-			usage.SevenDayFable = buildPassiveUsageWindow(account.Extra, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset")
-		}
-		s.observeUsageAlert(ctx, account.ID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeUsageAPI, usage)
-
+		usage := s.publishClaudeUsage(ctx, account, apiResp)
 		s.tryClearRecoverableAccountError(ctx, account)
 		return usage, nil
 	}
@@ -561,6 +551,28 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 
 	// API Key账号不支持usage查询
 	return nil, fmt.Errorf("account type %s does not support usage query", account.Type)
+}
+
+// publishClaudeUsage builds the display usage from an /api/oauth/usage response
+// and publishes it to the passive snapshot and usage alerts.
+func (s *AccountUsageService) publishClaudeUsage(ctx context.Context, account *Account, apiResp *ClaudeUsageResponse) *UsageInfo {
+	// 3. 构建 UsageInfo（每次都重新计算 RemainingSeconds）
+	now := time.Now()
+	usage := s.buildUsageInfo(apiResp, &now)
+
+	// 4. 添加窗口统计（有独立缓存，1 分钟）
+	s.addWindowStats(ctx, account, usage)
+
+	// 5. 将主动查询结果同步到被动缓存，下次 passive 加载即为最新值
+	s.syncActiveToPassive(ctx, account.ID, usage)
+
+	// 6. 上游 usage API 目前不一定下发 Fable 7d 窗口；缺失时回填被动采样
+	// （7d_oi 响应头）的数据，避免主动查询后 7d F 进度条丢失。
+	if usage.SevenDayFable == nil {
+		usage.SevenDayFable = buildPassiveUsageWindow(account.Extra, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset")
+	}
+	s.observeUsageAlert(ctx, account.ID, UsageAlertPlatformAnthropic, UsageAlertSourceClaudeUsageAPI, usage)
+	return usage
 }
 
 // GetUsage 获取账号使用量

@@ -2363,6 +2363,36 @@ func (r *accountRepository) ClearRateLimitIfObserved(ctx context.Context, id int
 	return true, nil
 }
 
+// ClearAnthropicRateLimitIfObserved clears only the Anthropic OAuth 429
+// cooldown generation observed before a confirmed Claude reset redemption. The
+// independent overload block is preserved, and a newer or re-armed generation
+// (different timestamps) is left untouched.
+func (r *accountRepository) ClearAnthropicRateLimitIfObserved(ctx context.Context, id int64, observedLimitedAt, observedResetAt time.Time) (bool, error) {
+	updated, err := r.client.Account.Update().
+		Where(
+			dbaccount.IDEQ(id),
+			dbaccount.PlatformEQ(service.PlatformAnthropic),
+			dbaccount.TypeEQ(service.AccountTypeOAuth),
+			dbaccount.RateLimitedAtEQ(observedLimitedAt),
+			dbaccount.RateLimitResetAtEQ(observedResetAt),
+		).
+		ClearRateLimitedAt().
+		ClearRateLimitResetAt().
+		Save(ctx)
+	if err != nil {
+		return false, err
+	}
+	if updated == 0 {
+		r.syncSchedulerAccountSnapshot(ctx, id)
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue anthropic observed rate-limit clear failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
+}
+
 // SetRateLimitedIfUnchanged atomically applies a rate-limit reset only while the
 // account still carries exactly the generation the caller observed: its
 // UpdatedAt row version, its RateLimitedAt and its RateLimitResetAt (nil means

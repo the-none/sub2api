@@ -942,6 +942,52 @@ func (s *AccountRepoSuite) TestClearRateLimitIfObservedProtectsRearmed429Generat
 	s.Require().WithinDuration(rearmedReset, *retyped.RateLimitResetAt, time.Second)
 }
 
+func (s *AccountRepoSuite) TestClearAnthropicRateLimitIfObservedKeepsOverloadAndRearmedGeneration() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "acc-claude-reset-clear",
+		Platform: service.PlatformAnthropic,
+		Type:     service.AccountTypeOAuth,
+	})
+	overloadUntil := time.Now().Add(10 * time.Minute).UTC().Truncate(time.Second)
+	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, overloadUntil))
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, time.Now().Add(3*time.Hour)))
+	observed, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(observed.RateLimitedAt)
+	s.Require().NotNil(observed.RateLimitResetAt)
+
+	cleared, err := s.repo.ClearAnthropicRateLimitIfObserved(s.ctx, account.ID, *observed.RateLimitedAt, *observed.RateLimitResetAt)
+	s.Require().NoError(err)
+	s.Require().True(cleared)
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(got.RateLimitedAt)
+	s.Require().Nil(got.RateLimitResetAt)
+	s.Require().NotNil(got.OverloadUntil, "an independent overload block must survive a Claude reset")
+	s.Require().WithinDuration(overloadUntil, *got.OverloadUntil, time.Second)
+
+	// A 429 re-armed after the observation is a new generation and stays.
+	rearmedReset := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, rearmedReset))
+	cleared, err = s.repo.ClearAnthropicRateLimitIfObserved(s.ctx, account.ID, *observed.RateLimitedAt, *observed.RateLimitResetAt)
+	s.Require().NoError(err)
+	s.Require().False(cleared)
+	got, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.RateLimitResetAt)
+	s.Require().WithinDuration(rearmedReset, *got.RateLimitResetAt, time.Second)
+
+	// Only Anthropic OAuth accounts are eligible, even with matching timestamps.
+	_, err = s.client.Account.UpdateOneID(account.ID).SetType(service.AccountTypeSetupToken).Save(s.ctx)
+	s.Require().NoError(err)
+	cleared, err = s.repo.ClearAnthropicRateLimitIfObserved(s.ctx, account.ID, *got.RateLimitedAt, *got.RateLimitResetAt)
+	s.Require().NoError(err)
+	s.Require().False(cleared)
+	retyped, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(retyped.RateLimitResetAt)
+}
+
 func (s *AccountRepoSuite) TestClearRateLimit() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-clear"})
 	until := time.Now().Add(1 * time.Hour)
