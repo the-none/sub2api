@@ -45,12 +45,20 @@ func newClaudeResetReconciler(usage *AccountUsageService, rateLimit *RateLimitSe
 		return nil
 	}
 	return func(ctx context.Context, accountID int64, cleared []string) {
+		// Snapshot the limits before querying usage: only these generations are
+		// covered by the fresh evidence. A 429 recorded while the query runs is
+		// newer than that evidence and must survive.
+		observed, err := rateLimit.accountRepo.GetByID(ctx, accountID)
+		if err != nil || observed == nil {
+			slog.Warn("claude_reset_reconcile_account_load_failed", "account_id", accountID, "error", err)
+			return
+		}
 		info, err := usage.RefreshClaudeUsageAfterReset(ctx, accountID)
 		if err != nil || info == nil {
 			slog.Warn("claude_reset_reconcile_usage_refresh_failed", "account_id", accountID, "error", err)
 			return
 		}
-		if err := rateLimit.ReconcileClaudeReset(ctx, accountID, cleared, info); err != nil {
+		if err := rateLimit.ReconcileClaudeReset(ctx, observed, cleared, info); err != nil {
 			slog.Warn("claude_reset_reconcile_failed", "account_id", accountID, "error", err)
 		}
 	}
@@ -101,24 +109,23 @@ func (s *AccountUsageService) cachedClaudeUsageSince(accountID int64, since time
 }
 
 // ReconcileClaudeReset lifts the local blocks that a confirmed reset removed,
-// judged by a fresh authoritative usage snapshot:
+// judged by a fresh authoritative usage snapshot. observed is the account as
+// read before that snapshot was queried; only the limit generations it carries
+// are lifted:
 //   - the account-level 429 cooldown (5h/7d) only when five_hour or seven_day
 //     was cleared and neither window is still at its limit;
 //   - the Fable 7d_oi model limit only when seven_day_overage_included was
 //     cleared and the fresh Fable window is below its limit.
 //
 // Temporary-unschedulable, overload, and admin threshold pauses are left alone.
-func (s *RateLimitService) ReconcileClaudeReset(ctx context.Context, accountID int64, cleared []string, usage *UsageInfo) error {
-	if s == nil || s.accountRepo == nil || usage == nil {
+func (s *RateLimitService) ReconcileClaudeReset(ctx context.Context, observed *Account, cleared []string, usage *UsageInfo) error {
+	if s == nil || s.accountRepo == nil || observed == nil || usage == nil {
 		return nil
 	}
-	account, err := s.accountRepo.GetByID(ctx, accountID)
-	if err != nil || account == nil {
-		return err
-	}
-	if account.Platform != PlatformAnthropic || account.Type != AccountTypeOAuth {
+	if observed.Platform != PlatformAnthropic || observed.Type != AccountTypeOAuth {
 		return nil
 	}
+	account, accountID := observed, observed.ID
 	now := time.Now()
 	lifted := false
 
@@ -129,8 +136,8 @@ func (s *RateLimitService) ReconcileClaudeReset(ctx context.Context, accountID i
 		if !ok {
 			return fmt.Errorf("account repository cannot clear an observed Anthropic rate limit")
 		}
-		// Clears only the observed 429 generation: overload stays, and a 429
-		// re-armed while usage was being refreshed is kept.
+		// Clears only the generation observed before the usage query: overload
+		// stays, and a 429 re-armed since then is kept.
 		ok, err := clearer.ClearAnthropicRateLimitIfObserved(ctx, accountID, *account.RateLimitedAt, *account.RateLimitResetAt)
 		if err != nil {
 			return err
@@ -143,12 +150,20 @@ func (s *RateLimitService) ReconcileClaudeReset(ctx context.Context, accountID i
 
 	if slices.Contains(cleared, "seven_day_overage_included") && account.isRateLimitActiveForKey(anthropicFableRateLimitKey) &&
 		claudeResetWindowBelowLimit(usage.SevenDayFable, false) {
-		// No single-scope delete exists; an already-expired entry is inert.
-		if err := s.accountRepo.SetModelRateLimit(ctx, accountID, anthropicFableRateLimitKey, now, claudeResetFableClearReason); err != nil {
+		current, err := s.accountRepo.GetByID(ctx, accountID)
+		if err != nil {
 			return err
 		}
-		lifted = true
-		slog.Info("claude_reset_fable_rate_limit_cleared", "account_id", accountID)
+		// Model limits live in JSONB without a conditional update, so re-check
+		// the generation right before expiring it.
+		if current != nil && claudeResetSameModelLimit(observed, current, anthropicFableRateLimitKey) {
+			// No single-scope delete exists; an already-expired entry is inert.
+			if err := s.accountRepo.SetModelRateLimit(ctx, accountID, anthropicFableRateLimitKey, now, claudeResetFableClearReason); err != nil {
+				return err
+			}
+			lifted = true
+			slog.Info("claude_reset_fable_rate_limit_cleared", "account_id", accountID)
+		}
 	}
 
 	if lifted {
@@ -159,6 +174,24 @@ func (s *RateLimitService) ReconcileClaudeReset(ctx context.Context, accountID i
 
 type claudeResetRateLimitClearer interface {
 	ClearAnthropicRateLimitIfObserved(ctx context.Context, id int64, observedLimitedAt, observedResetAt time.Time) (bool, error)
+}
+
+// claudeResetSameModelLimit reports whether current still carries the model
+// limit generation seen in observed.
+func claudeResetSameModelLimit(observed, current *Account, scope string) bool {
+	generation := func(a *Account) (string, string, bool) {
+		limits, _ := a.Extra[modelRateLimitsKey].(map[string]any)
+		entry, ok := limits[scope].(map[string]any)
+		if !ok {
+			return "", "", false
+		}
+		limitedAt, _ := entry["rate_limited_at"].(string)
+		resetAt, _ := entry["rate_limit_reset_at"].(string)
+		return limitedAt, resetAt, true
+	}
+	oLimited, oReset, oOK := generation(observed)
+	cLimited, cReset, cOK := generation(current)
+	return oOK && cOK && oLimited == cLimited && oReset == cReset
 }
 
 // claudeResetWindowBelowLimit reports whether a fresh usage window proves the

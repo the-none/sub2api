@@ -509,8 +509,9 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 				}
 				fetchStarted := time.Now()
 				resp, fetchErr := s.fetchOAuthUsageRaw(ctx, account)
-				// A response fetched after this one started (e.g. the post-reset
-				// reconciliation) wins; never let a slower, older fetch replace it.
+				// A response cached after this fetch started (e.g. by the post-reset
+				// reconciliation) wins over this slower one. Best effort only: a
+				// publish already in progress is not ordered against it.
 				if newer := s.cachedClaudeUsageSince(accountID, fetchStarted); newer != nil {
 					return newer, nil
 				}

@@ -28,10 +28,15 @@ func (r *claudeResetReconcileRepo) ClearRateLimit(context.Context, int64) error 
 	panic("ClearRateLimit must not be used by Claude reset reconciliation")
 }
 
-func (r *claudeResetReconcileRepo) ClearAnthropicRateLimitIfObserved(_ context.Context, _ int64, limitedAt, resetAt time.Time) (bool, error) {
+func (r *claudeResetReconcileRepo) ClearAnthropicRateLimitIfObserved(_ context.Context, id int64, limitedAt, resetAt time.Time) (bool, error) {
 	r.clearRateLimitCalls++
 	r.observedLimitedAt, r.observedResetAt = limitedAt, resetAt
-	return !r.rearmed, nil
+	if r.rearmed {
+		return false, nil
+	}
+	current := r.accountsByID[id]
+	return current != nil && current.RateLimitedAt != nil && current.RateLimitResetAt != nil &&
+		current.RateLimitedAt.Equal(limitedAt) && current.RateLimitResetAt.Equal(resetAt), nil
 }
 
 func (r *claudeResetReconcileRepo) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time, reason ...string) error {
@@ -65,7 +70,10 @@ func claudeResetLimitedAccount(fableLimited bool) *Account {
 	a := &Account{ID: 7, Platform: PlatformAnthropic, Type: AccountTypeOAuth, RateLimitedAt: &limitedAt, RateLimitResetAt: &future, Extra: map[string]any{}}
 	if fableLimited {
 		a.Extra[modelRateLimitsKey] = map[string]any{
-			anthropicFableRateLimitKey: map[string]any{"rate_limit_reset_at": time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)},
+			anthropicFableRateLimitKey: map[string]any{
+				"rate_limited_at":     limitedAt.UTC().Format(time.RFC3339),
+				"rate_limit_reset_at": time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339),
+			},
 		}
 	}
 	return a
@@ -76,7 +84,7 @@ func TestReconcileClaudeResetClearsAccountCooldownWhenWindowsRecovered(t *testin
 	svc, repo, blocker := newClaudeResetReconcileService(account)
 	usage := &UsageInfo{FiveHour: &UsageProgress{Utilization: 0}, SevenDay: &UsageProgress{Utilization: 41}}
 
-	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), 7, []string{"five_hour", "seven_day"}, usage))
+	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), account, []string{"five_hour", "seven_day"}, usage))
 	require.Equal(t, 1, repo.clearRateLimitCalls)
 	require.Equal(t, *account.RateLimitedAt, repo.observedLimitedAt, "clear must be fenced on the observed 429 generation")
 	require.Equal(t, *account.RateLimitResetAt, repo.observedResetAt)
@@ -85,41 +93,45 @@ func TestReconcileClaudeResetClearsAccountCooldownWhenWindowsRecovered(t *testin
 }
 
 func TestReconcileClaudeResetKeepsRearmedCooldown(t *testing.T) {
-	svc, repo, blocker := newClaudeResetReconcileService(claudeResetLimitedAccount(false))
+	account := claudeResetLimitedAccount(false)
+	svc, repo, blocker := newClaudeResetReconcileService(account)
 	repo.rearmed = true
 	usage := &UsageInfo{FiveHour: &UsageProgress{Utilization: 0}, SevenDay: &UsageProgress{Utilization: 41}}
 
-	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), 7, []string{"five_hour"}, usage))
+	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), account, []string{"five_hour"}, usage))
 	require.Equal(t, 1, repo.clearRateLimitCalls)
 	require.Empty(t, blocker.cleared, "a 429 re-armed during reconciliation must keep the scheduling block")
 }
 
 func TestReconcileClaudeResetKeepsCooldownWhileSevenDayStillExhausted(t *testing.T) {
 	// 5h-only reset while the weekly window is still at its limit.
-	svc, repo, blocker := newClaudeResetReconcileService(claudeResetLimitedAccount(false))
+	account := claudeResetLimitedAccount(false)
+	svc, repo, blocker := newClaudeResetReconcileService(account)
 	usage := &UsageInfo{FiveHour: &UsageProgress{Utilization: 0}, SevenDay: &UsageProgress{Utilization: 100}}
 
-	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), 7, []string{"five_hour"}, usage))
+	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), account, []string{"five_hour"}, usage))
 	require.Zero(t, repo.clearRateLimitCalls)
 	require.Empty(t, blocker.cleared)
 }
 
 func TestReconcileClaudeResetRequiresFreshFiveHourWindow(t *testing.T) {
-	svc, repo, _ := newClaudeResetReconcileService(claudeResetLimitedAccount(false))
+	account := claudeResetLimitedAccount(false)
+	svc, repo, _ := newClaudeResetReconcileService(account)
 
-	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), 7, []string{"five_hour"}, &UsageInfo{}))
+	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), account, []string{"five_hour"}, &UsageInfo{}))
 	require.Zero(t, repo.clearRateLimitCalls)
 }
 
 func TestReconcileClaudeResetFiveHourOnlyKeepsFableLimit(t *testing.T) {
-	svc, repo, _ := newClaudeResetReconcileService(claudeResetLimitedAccount(true))
+	account := claudeResetLimitedAccount(true)
+	svc, repo, _ := newClaudeResetReconcileService(account)
 	usage := &UsageInfo{
 		FiveHour:      &UsageProgress{Utilization: 0},
 		SevenDay:      &UsageProgress{Utilization: 30},
 		SevenDayFable: &UsageProgress{Utilization: 5},
 	}
 
-	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), 7, []string{"five_hour"}, usage))
+	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), account, []string{"five_hour"}, usage))
 	require.Equal(t, 1, repo.clearRateLimitCalls)
 	require.Empty(t, repo.modelLimitScope, "Fable 7d_oi limit must survive a reset that did not clear it")
 }
@@ -131,7 +143,7 @@ func TestReconcileClaudeResetExpiresFableLimitWhenCleared(t *testing.T) {
 	usage := &UsageInfo{FiveHour: &UsageProgress{Utilization: 20}, SevenDayFable: &UsageProgress{Utilization: 3}}
 	before := time.Now()
 
-	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), 7, []string{"seven_day_overage_included"}, usage))
+	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), account, []string{"seven_day_overage_included"}, usage))
 	require.Zero(t, repo.clearRateLimitCalls)
 	require.Equal(t, anthropicFableRateLimitKey, repo.modelLimitScope)
 	require.False(t, repo.modelLimitResetAt.After(time.Now()))
@@ -145,7 +157,7 @@ func TestReconcileClaudeResetKeepsFableLimitWithoutFreshEvidence(t *testing.T) {
 	account.RateLimitResetAt = nil
 	svc, repo, blocker := newClaudeResetReconcileService(account)
 
-	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), 7, []string{"seven_day_overage_included"}, &UsageInfo{FiveHour: &UsageProgress{}}))
+	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), account, []string{"seven_day_overage_included"}, &UsageInfo{FiveHour: &UsageProgress{}}))
 	require.Empty(t, repo.modelLimitScope)
 	require.Empty(t, blocker.cleared)
 }
@@ -155,7 +167,7 @@ func TestReconcileClaudeResetIgnoresNonAnthropicOAuth(t *testing.T) {
 	account.Type = AccountTypeSetupToken
 	svc, repo, _ := newClaudeResetReconcileService(account)
 
-	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), 7, []string{"five_hour"}, &UsageInfo{FiveHour: &UsageProgress{}}))
+	require.NoError(t, svc.ReconcileClaudeReset(context.Background(), account, []string{"five_hour"}, &UsageInfo{FiveHour: &UsageProgress{}}))
 	require.Zero(t, repo.clearRateLimitCalls)
 }
 
@@ -167,6 +179,7 @@ type claudeResetUsageFetcherStub struct {
 	first        *ClaudeUsageResponse
 	firstStarted chan struct{}
 	releaseFirst chan struct{}
+	onFetch      func()
 }
 
 func (f *claudeResetUsageFetcherStub) FetchUsage(context.Context, string, string) (*ClaudeUsageResponse, error) {
@@ -178,6 +191,9 @@ func (f *claudeResetUsageFetcherStub) FetchUsageWithOptions(context.Context, *Cl
 	f.calls++
 	call := f.calls
 	f.mu.Unlock()
+	if f.onFetch != nil {
+		f.onFetch()
+	}
 	if call == 1 && f.first != nil {
 		close(f.firstStarted)
 		<-f.releaseFirst
@@ -293,6 +309,40 @@ func TestRefreshClaudeUsageAfterResetIgnoresPassiveFableBackfill(t *testing.T) {
 	usage, err := svc.RefreshClaudeUsageAfterReset(context.Background(), 7)
 	require.NoError(t, err)
 	require.Nil(t, usage.SevenDayFable, "passive samples predate the reset and are not evidence")
+}
+
+func TestClaudeResetReconcilerKeepsLimitsRearmedDuringUsageQuery(t *testing.T) {
+	g1 := claudeResetLimitedAccount(true)
+	g1.Credentials = map[string]any{"access_token": "synthetic", "scope": "user:profile"}
+	repo := &claudeResetReconcileRepo{mockAccountRepoForGemini: mockAccountRepoForGemini{accountsByID: map[int64]*Account{7: g1}}}
+	rateLimit := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	blocker := &claudeResetBlockRecorder{}
+	rateLimit.runtimeBlocker = blocker
+	fresh := claudeResetUsageResponse(0)
+	fresh.SevenDayOverageIncluded.Utilization = 1
+	fresh.SevenDayOverageIncluded.ResetsAt = time.Now().Add(7 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	fetcher := &claudeResetUsageFetcherStub{resp: fresh}
+	// New 429s (account-level and Fable) land while the usage query runs.
+	fetcher.onFetch = func() {
+		g2 := claudeResetLimitedAccount(true)
+		g2.Credentials = g1.Credentials
+		rearmedAt := time.Now().Add(time.Minute)
+		rearmedReset := time.Now().Add(4 * time.Hour)
+		g2.RateLimitedAt, g2.RateLimitResetAt = &rearmedAt, &rearmedReset
+		g2.Extra[modelRateLimitsKey].(map[string]any)[anthropicFableRateLimitKey].(map[string]any)["rate_limited_at"] = rearmedAt.UTC().Format(time.RFC3339)
+		repo.accountsByID[7] = g2
+	}
+	cache := NewUsageCache()
+	cache.windowStatsCache.Store(int64(7), &windowStatsCache{stats: &WindowStats{}, timestamp: time.Now()})
+	usage := NewAccountUsageService(repo, nil, fetcher, nil, nil, nil, nil, nil, cache, nil, nil)
+
+	newClaudeResetReconciler(usage, rateLimit)(context.Background(), 7, []string{"five_hour", "seven_day", "seven_day_overage_included"})
+
+	require.Equal(t, 1, fetcher.callCount())
+	require.Equal(t, 1, repo.clearRateLimitCalls)
+	require.Equal(t, *g1.RateLimitedAt, repo.observedLimitedAt, "the clear must target the generation seen before the usage query")
+	require.Empty(t, repo.modelLimitScope, "a Fable limit re-armed during the query must survive")
+	require.Empty(t, blocker.cleared)
 }
 
 func TestClaudeResetRedeemRunsReconcilerOnlyForReset(t *testing.T) {
