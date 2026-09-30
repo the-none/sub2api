@@ -117,6 +117,9 @@ func (s *ClaudeResetCreditService) Redeem(ctx context.Context, id int64, key str
 		return nil, err
 	}
 	outcome.Replayed = outcome.Replayed || result.Replayed
+	// Outside the idempotent execution and leases: reconciliation is itself
+	// idempotent, so a replayed reset may safely run it again.
+	s.reconcileAfterReset(ctx, id, &outcome)
 	return &outcome, nil
 }
 

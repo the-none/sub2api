@@ -80,6 +80,9 @@ type ClaudeResetCreditService struct {
 	// Redemption only; both are mandatory and never fail open.
 	idempotency *IdempotencyCoordinator
 	locks       LeaderLockCache
+
+	// Optional post-reset local reconciliation (claude_reset_reconcile.go).
+	reconcileReset claudeResetReconcileFunc
 }
 
 func NewClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeTokenProvider, proxies ProxyRepository, settings *SettingService) *ClaudeResetCreditService {
