@@ -584,6 +584,72 @@ func TestObserveAsyncRetriesOnlyUndeliveredWebhookWithStableEventID(t *testing.T
 	eventIDsMu.Unlock()
 }
 
+func TestObserveAsyncRetriesThresholdCrossingFromNormalState(t *testing.T) {
+	var healthyRequests, flakyRequests atomic.Int32
+	eventIDs := make(chan string, 2)
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		healthyRequests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer healthy.Close()
+	flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var event UsageAlertWebhookEvent
+		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+			t.Errorf("decode event: %v", err)
+		}
+		eventIDs <- event.EventID
+		if flakyRequests.Add(1) == 1 {
+			http.Error(w, "temporary failure", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer flaky.Close()
+
+	realAccountID := int64(1)
+	repo := &usageAlertDeliveryRepoStub{
+		rule: &UsageAlertRule{
+			ID: 9, RealAccountID: &realAccountID, Platform: UsageAlertPlatformOpenAI,
+			UsageType: UsageAlertTypeOverall, Window: UsageAlertWindow7d,
+			Metric: UsageAlertMetricUsed, Operator: UsageAlertOperatorGTE,
+			Threshold: 20, CooldownMinutes: 0, Enabled: true,
+		},
+		webhooks: []*UsageAlertWebhook{
+			{ID: 1, Name: "healthy", URL: healthy.URL, Enabled: true},
+			{ID: 2, Name: "flaky", URL: flaky.URL, Enabled: true},
+		},
+	}
+	svc := NewUsageAlertService(repo, nil)
+	snapshot := UsageAlertSnapshot{
+		AccountID: 2, RealAccountID: realAccountID, UsageType: UsageAlertTypeOverall,
+		Platform: UsageAlertPlatformOpenAI, SampledAt: time.Now().UTC(),
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {UsedPercent: 10, RemainingPercent: 90},
+		},
+	}
+	require.False(t, svc.observeAsync(snapshot))
+	require.Equal(t, UsageAlertStatusNormal, repo.currentState().LastStatus)
+
+	snapshot.SampledAt = snapshot.SampledAt.Add(time.Minute)
+	snapshot.Windows = map[string]UsageAlertWindowSnapshot{
+		UsageAlertWindow7d: {UsedPercent: 20, RemainingPercent: 80},
+	}
+	require.True(t, svc.observeAsync(snapshot))
+	require.Equal(t, UsageAlertStatusNormal, repo.currentState().LastStatus)
+	// The failed attempt already persisted this sample. A retry must use the
+	// uncommitted rule state, even though the snapshots no longer cross 20%.
+	require.False(t, svc.observeAsync(snapshot))
+	require.Equal(t, int32(1), healthyRequests.Load())
+	require.Equal(t, int32(2), flakyRequests.Load())
+	require.Equal(t, <-eventIDs, <-eventIDs)
+	require.Equal(t, UsageAlertStatusTriggered, repo.currentState().LastStatus)
+
+	snapshot.SampledAt = snapshot.SampledAt.Add(time.Minute)
+	require.False(t, svc.observeAsync(snapshot))
+	require.Equal(t, int32(1), healthyRequests.Load())
+	require.Equal(t, int32(2), flakyRequests.Load(), "successful edge-only alerts must not repeat")
+}
+
 func TestObserveAsyncDeduplicatesAccountResetPerWebhookAcrossRules(t *testing.T) {
 	var firstRequests atomic.Int32
 	var secondRequests atomic.Int32
@@ -1382,6 +1448,70 @@ func TestPrepareUsageAlertSnapshotRejectsLateSampleFromOlderResetWindow(t *testi
 	_, _, accepted, _ := prepareUsageAlertSnapshot(previous, current)
 
 	require.False(t, accepted)
+}
+
+func TestObserveAsyncAcceptsResetPrecisionDifferencesAcrossUsageSources(t *testing.T) {
+	for _, tc := range []struct {
+		platform, usageType, window, apiSource, headerSource string
+		delta                                                time.Duration
+	}{
+		{UsageAlertPlatformAnthropic, UsageAlertTypeOverall, UsageAlertWindow5h, UsageAlertSourceClaudeUsageAPI, UsageAlertSourceClaudeHeaders, 438065 * time.Microsecond},
+		{UsageAlertPlatformAnthropic, UsageAlertTypeOverall, UsageAlertWindow7d, UsageAlertSourceClaudeUsageAPI, UsageAlertSourceClaudeHeaders, 438065 * time.Microsecond},
+		{UsageAlertPlatformAnthropic, UsageAlertTypeFable, UsageAlertWindow7d, UsageAlertSourceClaudeUsageAPI, UsageAlertSourceClaudeHeaders, 438065 * time.Microsecond},
+		{UsageAlertPlatformOpenAI, UsageAlertTypeOverall, UsageAlertWindow5h, UsageAlertSourceOpenAICodexProbe, UsageAlertSourceOpenAICodexHeaders, time.Second},
+		{UsageAlertPlatformOpenAI, UsageAlertTypeSpark, UsageAlertWindow5h, UsageAlertSourceOpenAICodexUsageAPI, UsageAlertSourceOpenAICodexUsageAPI, time.Second},
+		{UsageAlertPlatformOpenAI, UsageAlertTypeSpark, UsageAlertWindow7d, UsageAlertSourceOpenAICodexUsageAPI, UsageAlertSourceOpenAICodexUsageAPI, time.Second},
+	} {
+		for _, apiFirst := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/%s/%s/api_first=%t", tc.platform, tc.usageType, tc.window, apiFirst), func(t *testing.T) {
+				var requests atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					requests.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				}))
+				defer server.Close()
+				realAccountID := int64(2)
+				step := 10.0
+				repo := &usageAlertDeliveryRepoStub{
+					rule: &UsageAlertRule{
+						ID: 6, RealAccountID: &realAccountID, Platform: tc.platform,
+						UsageType: tc.usageType, Window: tc.window, Metric: UsageAlertMetricUsed,
+						Operator: UsageAlertOperatorGTE, Threshold: 50, StepPercent: &step, Enabled: true,
+					},
+					webhook: &UsageAlertWebhook{ID: 2, Name: "test", URL: server.URL, Enabled: true},
+				}
+				svc := NewUsageAlertService(repo, nil)
+				now := time.Now().UTC()
+				headerReset := now.Add(72 * time.Hour).Truncate(time.Second)
+				apiReset := headerReset.Add(tc.delta)
+				firstReset, secondReset := apiReset, headerReset
+				firstSource, secondSource := tc.apiSource, tc.headerSource
+				if !apiFirst {
+					firstReset, secondReset = headerReset, apiReset
+					firstSource, secondSource = secondSource, firstSource
+				}
+				sample := func(used float64, reset time.Time, source string, at time.Time) UsageAlertSnapshot {
+					return UsageAlertSnapshot{
+						AccountID: 2, RealAccountID: realAccountID, Platform: tc.platform,
+						UsageType: tc.usageType, Source: source, SampledAt: at,
+						Windows: map[string]UsageAlertWindowSnapshot{
+							tc.window: {UsedPercent: used, RemainingPercent: 100 - used, ResetAt: &reset},
+						},
+					}
+				}
+				require.False(t, svc.observeAsync(sample(39, firstReset, firstSource, now)))
+				require.False(t, svc.observeAsync(sample(60, secondReset, secondSource, now.Add(time.Minute))))
+				require.Equal(t, int32(1), requests.Load(), "reset precision must not suppress fresh usage")
+				require.Equal(t, int64(1), repo.currentState().LastGeneration)
+				require.Equal(t, firstReset, *repo.currentState().LastResetAt, "preserve the stored reset anchor for state writes")
+				require.Equal(t, 60.0, repo.snapshot.Windows[tc.window].UsedPercent)
+
+				require.False(t, svc.observeAsync(sample(65, firstReset, firstSource, now.Add(2*time.Minute))))
+				require.Equal(t, int32(1), requests.Load(), "precision changes must not re-arm the same step")
+				require.Equal(t, int64(1), repo.snapshot.Windows[tc.window].Generation)
+			})
+		}
+	}
 }
 
 func TestPrepareUsageAlertSnapshotKeepsFreshWindowAndPreservesNewerLinkedWindow(t *testing.T) {

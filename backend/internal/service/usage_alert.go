@@ -989,6 +989,15 @@ func normalizePersistedUsageAlertWindow(snapshot *UsageAlertSnapshot, window str
 }
 
 func prepareResetOrderedWindow(previous, current UsageAlertWindowSnapshot) (UsageAlertWindowSnapshot, bool) {
+	// APIs can include fractional seconds; headers and Codex countdowns are
+	// rounded to seconds. Keep the anchor across that one-second precision
+	// difference so fresh usage is accepted without starting a new cycle.
+	if previous.ResetAt != nil && current.ResetAt != nil {
+		delta := current.ResetAt.Sub(*previous.ResetAt)
+		if delta >= -time.Second && delta <= time.Second {
+			current.ResetAt = previous.ResetAt
+		}
+	}
 	if usageAlertWindowGenerationIsOlder(previous, current) {
 		return UsageAlertWindowSnapshot{}, false
 	}
@@ -1300,7 +1309,10 @@ func usageAlertRuleAllowsTrigger(previous, current *UsageAlertSnapshot, rule *Us
 	if usageAlertRuleStepPercent(rule) > 0 {
 		return usageAlertStepAllowsTrigger(state, rule, value, now)
 	}
-	if state == nil {
+	// Snapshots are persisted before delivery. After a failed send they no
+	// longer show the crossing, but the rule remains normal until delivery
+	// succeeds. Keep that transition eligible for retry.
+	if state == nil || state.LastStatus != UsageAlertStatusTriggered {
 		return true
 	}
 	if crossedThreshold(previous, current, rule, value) {
