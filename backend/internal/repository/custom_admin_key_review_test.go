@@ -38,7 +38,13 @@ func TestScopedAdminReviewGroupPriorityAndStatus(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close(); _, _ = base.Exec(`DROP SCHEMA ` + name + ` CASCADE`); _ = base.Close() })
 	driver := entsql.OpenDB(dialect.Postgres, db)
 	client := dbent.NewClient(dbent.Driver(driver))
-	require.NoError(t, migrate.Create(context.Background(), migrate.NewSchema(driver), []*schema.Table{migrate.ProxiesTable, migrate.AccountsTable, migrate.GroupsTable, migrate.AccountGroupsTable}, migrate.WithForeignKeys(false)))
+	require.NoError(t, migrate.Create(context.Background(), migrate.NewSchema(driver), []*schema.Table{
+		migrate.ProxiesTable,
+		migrate.RealAccountsTable,
+		migrate.AccountsTable,
+		migrate.GroupsTable,
+		migrate.AccountGroupsTable,
+	}, migrate.WithForeignKeys(false)))
 	_, err = db.Exec(`CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT NOW());CREATE UNIQUE INDEX review_outbox_dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
 	require.NoError(t, err)
 	cache := &scopedReviewSchedulerCache{accounts: make(map[int64]*service.Account)}
