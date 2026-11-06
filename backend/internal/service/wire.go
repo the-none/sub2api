@@ -199,6 +199,16 @@ func ProvideOpenAIQuotaService(
 }
 
 // ProvideOpenAIQuotaAutoResetService 启动账号级自动用卡队列与补偿扫描。
+func ProvideOpenAIResetReservationService(
+	repo OpenAIResetReservationRepository, accounts AccountRepository,
+	quota *OpenAIQuotaService, locks LeaderLockCache,
+	idempotency *IdempotencyCoordinator, recoverer *RateLimitService,
+) *OpenAIResetReservationService {
+	reservations := NewOpenAIResetReservationService(repo, accounts, quota, locks, idempotency, recoverer)
+	quota.reservations = reservations
+	return reservations
+}
+
 func ProvideOpenAIQuotaAutoResetService(
 	accountRepo AccountRepository,
 	quotaService *OpenAIQuotaService,
@@ -207,6 +217,7 @@ func ProvideOpenAIQuotaAutoResetService(
 	audit *AuditLogService,
 	settingService *SettingService,
 	leaderLock LeaderLockCache,
+	reservations *OpenAIResetReservationService,
 ) *OpenAIQuotaAutoResetService {
 	service := NewOpenAIQuotaAutoResetService(
 		accountRepo,
@@ -217,6 +228,7 @@ func ProvideOpenAIQuotaAutoResetService(
 		settingService,
 		leaderLock,
 	)
+	service.reservations = reservations
 	service.Start()
 	return service
 }
@@ -949,6 +961,7 @@ var ProviderSet = wire.NewSet(
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
 	ProvideOpenAIQuotaService,
+	ProvideOpenAIResetReservationService,
 	ProvideOpenAIQuotaAutoResetService,
 	ProvideGrokQuotaService,
 	ProvideCNProviderQuotaService,

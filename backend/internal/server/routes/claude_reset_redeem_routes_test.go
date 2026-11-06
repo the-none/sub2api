@@ -35,7 +35,8 @@ func TestClaudeResetRedeemRouteMatchesCodexResetProtection(t *testing.T) {
 
 	codex := "/api/v1/admin/openai/accounts/1/reset-quota"
 	claude := "/api/v1/admin/accounts/1/claude/reset-credits/redeem"
-	for _, path := range []string{codex, claude} {
+	reservation := "/api/v1/admin/openai/accounts/1/reset-reservation"
+	for _, path := range []string{codex, claude, reservation} {
 		for _, auth := range []string{"", "Bearer user-token"} {
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodPost, path, nil)
@@ -54,4 +55,5 @@ func TestClaudeResetRedeemRouteMatchesCodexResetProtection(t *testing.T) {
 	claudeChain := chains["/api/v1/admin/accounts/:id/claude/reset-credits/redeem"]
 	require.NotEmpty(t, codexChain)
 	require.Equal(t, strings.Join(codexChain, "\n"), strings.Join(claudeChain, "\n"))
+	require.Equal(t, codexChain, chains["/api/v1/admin/openai/accounts/:id/reset-reservation"])
 }

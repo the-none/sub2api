@@ -576,6 +576,30 @@ export default {
         cacheFailed: '实时次数已获取，但缓存保存失败，请重新查询。',
         refreshFailed: '邀请已发送，但剩余次数刷新失败，请重新查询。'
       },
+      resetReservation: {
+        title: '到期前使用 reset',
+        description: '一次性预约当前最早到期的一张 reset，默认提前 30 分钟使用，即使用量未达阈值也会尝试兑换。成功或失效后不会转用下一张。',
+        coordination: '已有自动用卡阈值仍可提前使用这一张。预约期间手动重置受保护，需先取消尚未执行的预约。暂停调度不影响预约；禁用账号期间不执行。',
+        leadMinutes: '提前执行（分钟，5–1440）',
+        expires: '目标 reset 到期时间：{time}',
+        executes: '预计执行时间：{time}',
+        schedule: '预约最近一张',
+        cancel: '取消预约',
+        unknownHint: '曾发出兑换请求，但结果无法确认。请核对上游记录；为防止误用下一张，此订阅的后续兑换暂停至目标卡到期后 2 分钟。',
+        recoveryHint: '已确认兑换成功，正在重试本地状态恢复，不会再次用卡。',
+        states: {
+          pending: '已预约 reset',
+          resetting: '正在确认兑换',
+          unknown: '兑换结果待核对',
+          consumed: '已兑换，恢复中',
+          completed: '预约已完成',
+          cancelled: '预约已取消',
+          expired: '预约已过期',
+          unavailable: '目标 reset 已不可用',
+          invalidated: '预约已失效',
+          unconfirmed: '结果未确认，保护已结束'
+        }
+      },
       openaiQuotaReset: {
         count: '次数',
         points: '点数',

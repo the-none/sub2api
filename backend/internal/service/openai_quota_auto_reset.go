@@ -89,13 +89,14 @@ type openAIAutoResetRecovery interface {
 // OpenAIQuotaAutoResetService 通过小型去重队列承接实时信号，并用分钟扫描补偿
 // 重启、漏事件和多实例读取；真正消费仍由 PostgreSQL 幂等记录串行化。
 type OpenAIQuotaAutoResetService struct {
-	accountRepo AccountRepository
-	quota       openAIAutoResetQuota
-	recoverer   openAIAutoResetRecovery
-	idempotency *IdempotencyCoordinator
-	audit       *AuditLogService
-	settings    *SettingService
-	leaderLock  LeaderLockCache
+	reservations *OpenAIResetReservationService
+	accountRepo  AccountRepository
+	quota        openAIAutoResetQuota
+	recoverer    openAIAutoResetRecovery
+	idempotency  *IdempotencyCoordinator
+	audit        *AuditLogService
+	settings     *SettingService
+	leaderLock   LeaderLockCache
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -224,6 +225,22 @@ func (s *OpenAIQuotaAutoResetService) scanEnabledAccounts(ctx context.Context) {
 	if release != nil {
 		defer release()
 	}
+	if s.reservations != nil {
+		for after := int64(0); ; {
+			ids, err := s.reservations.repo.ListRunnable(ctx, after, openAIAutoResetBatchSize)
+			if err != nil {
+				slog.Warn("openai_reset_reservation_scan_failed", "error", err)
+				break
+			}
+			for _, id := range ids {
+				s.Notify(id)
+				after = id
+			}
+			if len(ids) < openAIAutoResetBatchSize {
+				break
+			}
+		}
+	}
 	for page := 1; ; page++ {
 		accounts, pageInfo, err := s.accountRepo.ListWithFilters(ctx, pagination.PaginationParams{
 			Page: page, PageSize: openAIAutoResetBatchSize,
@@ -277,6 +294,12 @@ type openAIAutoResetAssessment struct {
 
 func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accountID int64) error {
 	ctx = withOpenAIAutoResetContext(ctx)
+	if s.reservations != nil {
+		handled, err := s.reservations.Process(ctx, accountID)
+		if handled || err != nil {
+			return err
+		}
+	}
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil || account == nil {
 		return err

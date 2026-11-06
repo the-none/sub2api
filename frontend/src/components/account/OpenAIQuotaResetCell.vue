@@ -74,6 +74,7 @@
         <span class="truncate tabular-nums">{{ creditsDisplay }}</span>
       </button>
       <OpenAIReferralCell :account="account" />
+      <OpenAIResetReservationCell :account="account" />
     </div>
 
     <div v-if="creditsCacheWarning" class="text-[10px] text-amber-600 dark:text-amber-400">
@@ -192,6 +193,7 @@ import {
 } from '@/api/admin/accounts'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import OpenAIReferralCell from '@/components/account/OpenAIReferralCell.vue'
+import OpenAIResetReservationCell from '@/components/account/OpenAIResetReservationCell.vue'
 
 const props = defineProps<{
   account: Account

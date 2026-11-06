@@ -10,6 +10,9 @@ vi.mock('@/api/admin/accounts', () => ({
   resetOpenAIQuota: vi.fn(),
   refreshOpenAIReferrals: vi.fn(),
   sendOpenAIReferralInvite: vi.fn(),
+  getOpenAIResetReservation: vi.fn().mockResolvedValue(null),
+  createOpenAIResetReservation: vi.fn(),
+  cancelOpenAIResetReservation: vi.fn(),
 }))
 
 vi.mock('vue-i18n', async () => {

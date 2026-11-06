@@ -1771,6 +1771,30 @@ export default {
         cacheFailed: 'Live capacity was fetched, but the cache could not be saved. Query again.',
         refreshFailed: 'The invitation was sent, but remaining capacity could not be refreshed. Query again.'
       },
+      resetReservation: {
+        title: 'Use reset before expiry',
+        description: 'Schedule the currently earliest-expiring reset once, 30 minutes before expiry by default, even below usage thresholds. Never switches to the next credit after completion or unavailability.',
+        coordination: 'Existing automatic thresholds may redeem this credit earlier. Cancel a pending reservation before resetting manually. Scheduling pauses do not cancel reservations; disabled accounts are not redeemed.',
+        leadMinutes: 'Minutes before expiry (5–1440)',
+        expires: 'Target reset expires: {time}',
+        executes: 'Scheduled execution: {time}',
+        schedule: 'Schedule earliest reset',
+        cancel: 'Cancel reservation',
+        unknownHint: 'A redemption was attempted but its outcome is unconfirmed. Check the upstream records. Further resets for this subscription are blocked until two minutes after the target expires.',
+        recoveryHint: 'Redemption succeeded. Retrying local recovery only; no additional credit will be spent.',
+        states: {
+          pending: 'Reset scheduled',
+          resetting: 'Confirming redemption',
+          unknown: 'Redemption needs verification',
+          consumed: 'Redeemed, recovering',
+          completed: 'Reservation completed',
+          cancelled: 'Reservation cancelled',
+          expired: 'Reservation expired',
+          unavailable: 'Target reset unavailable',
+          invalidated: 'Reservation invalidated',
+          unconfirmed: 'Unconfirmed; protection ended'
+        }
+      },
       openaiQuotaReset: {
         count: 'Resets',
         points: 'Points',

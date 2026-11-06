@@ -958,6 +958,36 @@ export interface OpenAIQuotaResetResult {
     | 'account_state_refresh_failed'
 }
 
+export interface OpenAIResetReservation {
+  id: string
+  status: 'pending' | 'resetting' | 'unknown' | 'consumed' | 'completed' | 'cancelled' | 'expired' | 'unavailable' | 'invalidated' | 'unconfirmed'
+  expires_at: string
+  execute_at: string
+  updated_at: string
+  attempted_at?: string
+  windows_reset: number
+  error_code?: string
+}
+
+export async function getOpenAIResetReservation(id: number): Promise<OpenAIResetReservation | null> {
+  const { data } = await apiClient.get<OpenAIResetReservation | null>(`/admin/openai/accounts/${id}/reset-reservation`)
+  return data
+}
+
+export async function createOpenAIResetReservation(id: number, leadMinutes: number): Promise<OpenAIResetReservation> {
+  const { data } = await apiClient.post<OpenAIResetReservation>(
+    `/admin/openai/accounts/${id}/reset-reservation`, { lead_minutes: leadMinutes }, { timeout: 60_000 }
+  )
+  return data
+}
+
+export async function cancelOpenAIResetReservation(id: number, reservationID: string): Promise<OpenAIResetReservation> {
+  const { data } = await apiClient.delete<OpenAIResetReservation>(
+    `/admin/openai/accounts/${id}/reset-reservation`, { data: { id: reservationID } }
+  )
+  return data
+}
+
 /** Usage payload plus whether the reset-credit snapshot was persisted. */
 export interface OpenAIQuotaRefreshResult extends OpenAIQuotaUsage {
   cache_persisted: boolean

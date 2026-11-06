@@ -18,6 +18,7 @@ import (
 
 // OpenAIOAuthHandler handles OpenAI OAuth-related operations
 type OpenAIOAuthHandler struct {
+	resetReservations  *service.OpenAIResetReservationService
 	openaiOAuthService *service.OpenAIOAuthService
 	adminService       service.AdminService
 	quotaService       openAIQuotaService
@@ -85,10 +86,12 @@ func NewOpenAIOAuthHandler(
 	adminService service.AdminService,
 	quotaService *service.OpenAIQuotaService,
 	rateLimitService *service.RateLimitService,
+	resetReservations *service.OpenAIResetReservationService,
 ) *OpenAIOAuthHandler {
 	h := &OpenAIOAuthHandler{
 		openaiOAuthService: openaiOAuthService,
 		adminService:       adminService,
+		resetReservations:  resetReservations,
 	}
 	// Assign through explicit nil checks: storing a nil *Service in an interface
 	// field yields a non-nil interface, which would silently defeat the

@@ -132,6 +132,7 @@ type OpenAIQuotaResetResult struct {
 // for OpenAI OAuth accounts. It reuses the privacy client factory so all calls
 // flow through the impersonated HTTP client (Cloudflare-friendly TLS fingerprint).
 type OpenAIQuotaService struct {
+	reservations         *OpenAIResetReservationService
 	accountRepo          AccountRepository
 	proxyRepo            ProxyRepository
 	tokenProvider        *OpenAITokenProvider
@@ -392,6 +393,14 @@ func (s *OpenAIQuotaService) ResetCreditTargeted(ctx context.Context, accountID 
 }
 
 func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, creditID, redeemRequestID string, targeted bool) (*OpenAIQuotaResetResult, error) {
+	if s.reservations != nil {
+		guardCtx, release, err := s.reservations.guardConsumption(ctx, accountID)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+		ctx = guardCtx
+	}
 	// Shadow guard: resetting credits via a shadow account would silently
 	// operate on the parent's quota; that is surprising and unwanted. Callers
 	// must reset the parent account directly.
