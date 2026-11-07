@@ -400,6 +400,17 @@ func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, c
 		}
 		defer release()
 		ctx = guardCtx
+		evidence, ok := ctx.Value(openAIResetUsageContextKey{}).(openAIResetUsageEvidence)
+		if !ok || evidence.accountID != accountID {
+			usage, queryErr := s.QueryUsage(ctx, accountID)
+			if queryErr != nil {
+				return nil, queryErr
+			}
+			evidence = openAIResetUsageEvidence{accountID, usage}
+		}
+		if !openAIResetUsageEligible(evidence.usage, time.Now()) {
+			return nil, infraerrors.Conflict("OPENAI_RESET_USAGE_TOO_LOW", "7-day usage must be strictly above 20% before resetting")
+		}
 	}
 	// Shadow guard: resetting credits via a shadow account would silently
 	// operate on the parent's quota; that is surprising and unwanted. Callers
@@ -444,6 +455,11 @@ func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, c
 		if targeted {
 			body["credit_id"] = creditID
 		}
+		if !recovered && s.reservations != nil {
+			if err := s.reservations.claimConsumptionInterval(ctx, accountID); err != nil {
+				return nil, err
+			}
+		}
 		resp, err := client.R().
 			SetContext(callCtx).
 			SetHeaders(headers).
@@ -473,15 +489,18 @@ func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, c
 		break
 	}
 
-	slog.Info("openai_quota_reset_success",
+	slog.Info("openai_quota_reset_response",
 		"account_id", accountID,
 		"code", payload.Code,
 		"windows_reset", payload.WindowsReset,
 	)
+	if openAIResetOutcome(payload.Code) == "nothing_to_reset" {
+		return nil, openAIResetNoopError()
+	}
 	// Targeted consumption is the auto-reset path. Its caller runs the shared
 	// post-process after the idempotent consume completes, so invoking the legacy
 	// manual reconciler here would duplicate probes and scheduler recovery.
-	if s.resetReconciler != nil && !targeted {
+	if s.resetReconciler != nil && !targeted && openAIResetOutcome(payload.Code) == "ok" {
 		if reconcileErr := s.resetReconciler.ReconcileOpenAIQuotaReset(ctx, accountID); reconcileErr != nil {
 			slog.Error("openai_quota_reset_local_reconcile_failed",
 				"account_id", accountID,

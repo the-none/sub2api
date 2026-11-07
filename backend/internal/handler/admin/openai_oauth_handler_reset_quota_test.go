@@ -13,8 +13,26 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
+
+func TestResetQuotaPolicyRefusalsNeverRecoverOrRefresh(t *testing.T) {
+	for _, code := range []string{"OPENAI_RESET_USAGE_TOO_LOW", "OPENAI_RESET_COOLDOWN", "OPENAI_RESET_NOTHING_TO_RESET"} {
+		t.Run(code, func(t *testing.T) {
+			quota := &openAIQuotaWorkflowStub{resetErr: infraerrors.Conflict(code, "reset not performed")}
+			recovery := &openAIAccountStateRecovererStub{}
+			admin := &openAIResetAdminServiceStub{}
+			handler := &OpenAIOAuthHandler{quotaService: quota, rateLimitService: recovery, adminService: admin}
+			status, _ := performOpenAIQuotaResetRequest(t, handler)
+			require.Equal(t, http.StatusConflict, status)
+			require.Zero(t, recovery.calls)
+			require.Zero(t, quota.queryCalls)
+			require.Zero(t, quota.cacheCalls)
+			require.Zero(t, admin.calls)
+		})
+	}
+}
 
 type openAIQuotaWorkflowStub struct {
 	resetResult        *service.OpenAIQuotaResetResult

@@ -99,7 +99,7 @@ func reservationFixture(t *testing.T) (*OpenAIResetReservationService, *reservat
 	}}
 	quota := &autoResetTestQuota{usage: &OpenAIQuotaUsage{
 		AccountID: "subscription-a", FetchedAt: now.Unix(),
-		RateLimit:             &OpenAIRateLimit{PrimaryWindow: &OpenAIRateLimitWindow{UsedPercent: 10, LimitWindowSeconds: 18000}},
+		RateLimit:             &OpenAIRateLimit{PrimaryWindow: &OpenAIRateLimitWindow{UsedPercent: 30, LimitWindowSeconds: 604800}},
 		RateLimitResetCredits: &OpenAIRateLimitResetCredits{AvailableCount: 2},
 		autoResetCandidates: []openAIAutoResetCreditCandidate{
 			{ID: "second-secret", ExpiresAt: now.Add(48 * time.Hour).Format(time.RFC3339)},
@@ -118,7 +118,7 @@ func reservationFixture(t *testing.T) (*OpenAIResetReservationService, *reservat
 func TestResetReservationDeadlineIndependentOfThresholdAndScheduling(t *testing.T) {
 	s, repo, _, quota := reservationFixture(t)
 	ctx := context.Background()
-	view, err := s.Create(ctx, 12, 30)
+	view, err := s.Create(ctx, 12, 20)
 	require.NoError(t, err)
 	require.Equal(t, "pending", view.Status)
 	encoded, err := json.Marshal(view)
@@ -145,7 +145,7 @@ func TestResetReservationDeadlineIndependentOfThresholdAndScheduling(t *testing.
 func TestResetReservationCancelAndRebookRetainsCreditOperation(t *testing.T) {
 	s, _, _, quota := reservationFixture(t)
 	ctx := context.Background()
-	first, err := s.Create(ctx, 12, 30)
+	first, err := s.Create(ctx, 12, 20)
 	require.NoError(t, err)
 	_, err = s.Cancel(ctx, 12, first.ID)
 	require.NoError(t, err)
@@ -173,6 +173,8 @@ func TestResetReservationUnavailableNeverSelectsNextCredit(t *testing.T) {
 				now := s.now()
 				r.AttemptedAt, r.Status = &now, "resetting"
 				require.NoError(t, s.save(ctx, r))
+				next := now.Add(10 * time.Minute)
+				s.now = func() time.Time { return next }
 			}
 			quota.usage.autoResetCandidates = quota.usage.autoResetCandidates[:1]
 			quota.usage.RateLimitResetCredits.AvailableCount = 1
@@ -238,7 +240,9 @@ func TestResetReservationRetryUsesSameBodyAfterWindowChanges(t *testing.T) {
 	_, err = s.Process(ctx, 12)
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond)
-	quota.usage.RateLimit.PrimaryWindow.ResetAt += 5000
+	quota.usage.RateLimit.PrimaryWindow.ResetAt = s.now().Add(time.Hour).Unix()
+	next := s.now().Add(10 * time.Minute)
+	s.now = func() time.Time { return next }
 	_, err = s.Process(ctx, 12)
 	require.NoError(t, err)
 	require.Len(t, quota.resetArgs, 2)
@@ -250,7 +254,7 @@ func TestResetReservationDisabledIdentityExpiryAndEarlyThreshold(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			s, repo, accounts, quota := reservationFixture(t)
 			ctx := context.Background()
-			view, err := s.Create(ctx, 12, 30)
+			view, err := s.Create(ctx, 12, 20)
 			require.NoError(t, err)
 			expected := "pending"
 			switch scenario {
@@ -266,8 +270,8 @@ func TestResetReservationDisabledIdentityExpiryAndEarlyThreshold(t *testing.T) {
 			case "early threshold":
 				accounts.account.Extra = map[string]any{
 					OpenAIAutoResetCreditEnabledExtraKey: true,
-					"codex_5h_used_percent":              100.0, "codex_usage_updated_at": s.now().Format(time.RFC3339),
-					"codex_5h_reset_at": s.now().Add(time.Hour).Format(time.RFC3339),
+					"codex_7d_used_percent":              100.0, "codex_usage_updated_at": s.now().Format(time.RFC3339),
+					"codex_7d_reset_at": s.now().Add(time.Hour).Format(time.RFC3339),
 				}
 				quota.usage.RateLimit.PrimaryWindow.UsedPercent = 100
 				expected = "completed"
@@ -310,12 +314,12 @@ func TestResetReservationLockFailureAndInvalidDetailsFailClosed(t *testing.T) {
 	locks, ok := s.locks.(*fakeLeaderLockCache)
 	require.True(t, ok)
 	locks.acquireErr = errors.New("redis unavailable")
-	_, err := s.Create(context.Background(), 12, 30)
+	_, err := s.Create(context.Background(), 12, 20)
 	require.Equal(t, "OPENAI_RESET_LOCK_UNAVAILABLE", infraerrors.Reason(err))
 	require.Zero(t, quota.queryCalls.Load())
 	locks.acquireErr = nil
 	quota.usage.autoResetCandidates = quota.usage.autoResetCandidates[:1]
-	_, err = s.Create(context.Background(), 12, 30)
+	_, err = s.Create(context.Background(), 12, 20)
 	require.Equal(t, "OPENAI_AUTO_RESET_CREDIT_DETAILS_INCOMPLETE", infraerrors.Reason(err))
 	require.Zero(t, quota.resetCalls.Load())
 }
@@ -424,7 +428,7 @@ func TestResetReservationWaitingPreservesLegacyAvailableCreditState(t *testing.T
 	accounts.account.Schedulable = true
 	accounts.account.Extra = map[string]any{OpenAIAutoResetCreditEnabledExtraKey: true}
 	quota.usage.RateLimit.PrimaryWindow.UsedPercent = 90
-	_, err := s.Create(context.Background(), 12, 30)
+	_, err := s.Create(context.Background(), 12, 20)
 	require.NoError(t, err)
 	auto := NewOpenAIQuotaAutoResetService(accounts, quota, s.recoverer, s.idempotency, nil, nil, nil)
 	auto.reservations = s

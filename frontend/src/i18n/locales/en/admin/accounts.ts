@@ -1066,7 +1066,7 @@ export default {
 	    hint: 'Uses the earliest-expiring available credit only when actual usage reaches a threshold. Off by default; the account remains paused if no credit is available or reset fails.',
 	    threshold5h: '5h auto-reset threshold (%)',
 	    threshold7d: '7d auto-reset threshold (%)',
-	    thresholdHint: 'Each window is evaluated independently. Enter 0.1–100; both default to 100.',
+	    thresholdHint: 'Only 7-day usage counts: it must reach this threshold and be strictly above 20%. Redemption attempts are at least 10 minutes apart. The 5-hour window uses ordinary pause rules. Enter 0.1–100; default 100.',
 	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0.1% and 100%.'
 	  },
       // Quota control (Anthropic OAuth/SetupToken only)
@@ -1773,9 +1773,16 @@ export default {
       },
       resetReservation: {
         title: 'Use reset before expiry',
-        description: 'Schedule the currently earliest-expiring reset once, 30 minutes before expiry by default, even below usage thresholds. Never switches to the next credit after completion or unavailability.',
+        description: 'Check the earliest-expiring reset 20 minutes before expiry by default. Only 7-day usage counts and must be strictly above 20% before redemption. Checks and redemption attempts are at least 10 minutes apart. Upstream eligibility still applies. Never switches to the next credit.',
         coordination: 'Existing automatic thresholds may redeem this credit earlier. Cancel a pending reservation before resetting manually. Scheduling pauses do not cancel reservations; disabled accounts are not redeemed.',
-        leadMinutes: 'Minutes before expiry (5–1440)',
+        leadMinutes: 'Minutes before expiry (20–1440, multiples of 20)',
+        lowUsageHint: '7-day usage does not meet the strictly-above-20% requirement. No credit was used. Check again in 10 minutes.',
+        lowUsageManualHint: '7-day usage must be strictly above 20%. No redemption request was sent.',
+        lowUsageExpired: 'Expired unused: usage did not meet the strictly-above-20% requirement.',
+        nothingHint: 'Upstream reported no eligible window; this attempt performed no reset. Check again after at least 10 minutes. Earlier unconfirmed attempts remain protected.',
+        nothingManualHint: 'Upstream reported no eligible window; this attempt performed no reset. Wait at least 10 minutes before trying again.',
+        nothingExpired: 'Expired unused: upstream had no eligible window.',
+        cooldownHint: 'Less than 10 minutes since the last redemption attempt. Waiting for the next check.',
         expires: 'Target reset expires: {time}',
         executes: 'Scheduled execution: {time}',
         schedule: 'Schedule earliest reset',

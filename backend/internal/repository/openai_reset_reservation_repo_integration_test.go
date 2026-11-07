@@ -27,6 +27,9 @@ func TestResetReservationRepositoryCASAndSubscriptionUniqueness(t *testing.T) {
 		ID: uuid.NewString(), AccountID: a.ID, IdentityHash: "subscription", CreditHash: "credit",
 		Status: "pending", Version: 1, ExpiresAt: time.Now().Add(time.Hour), ExecuteAt: time.Now(),
 	}
+	nextCheck := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Microsecond)
+	lastAttempt := nextCheck.Add(-10 * time.Minute)
+	r.NextCheckAt, r.LastAttemptAt, r.OnlyNoopAttempts = &nextCheck, &lastAttempt, true
 	ok, err := repo.CompareAndSwap(ctx, r, 0)
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -46,6 +49,9 @@ func TestResetReservationRepositoryCASAndSubscriptionUniqueness(t *testing.T) {
 	got, err := repo.Get(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, r.ID, got.ID)
+	require.True(t, got.OnlyNoopAttempts)
+	require.True(t, nextCheck.Equal(*got.NextCheckAt))
+	require.True(t, lastAttempt.Equal(*got.LastAttemptAt))
 	r.Status, r.Version = "cancelled", 2
 	ok, err = repo.CompareAndSwap(ctx, r, 1)
 	require.NoError(t, err)

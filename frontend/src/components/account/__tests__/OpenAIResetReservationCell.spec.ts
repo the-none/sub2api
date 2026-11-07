@@ -31,15 +31,16 @@ describe('OpenAI reset reservation', () => {
     cancel.mockReset().mockResolvedValue(reservation('cancelled'))
   })
 
-  it('schedules only after explicit action and defaults to 30 minutes', async () => {
+  it('schedules only after explicit action and defaults to 20 minutes', async () => {
     const wrapper = mountCell()
     await flushPromises()
     expect(create).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="reset-reservation-open"]').trigger('click')
     await flushPromises()
+    expect(wrapper.get('[data-testid="reset-reservation-lead"]').attributes()).toMatchObject({ min: '20', step: '20' })
     await wrapper.get('[data-testid="reset-reservation-create"]').trigger('click')
     await flushPromises()
-    expect(create).toHaveBeenCalledWith(1, 30)
+    expect(create).toHaveBeenCalledWith(1, 20)
     expect(wrapper.text()).toContain('states.pending')
     expect(wrapper.find('[data-testid="reset-reservation-create"]').exists()).toBe(false)
     wrapper.unmount()
@@ -52,6 +53,10 @@ describe('OpenAI reset reservation', () => {
     await flushPromises()
     await wrapper.get('[data-testid="reset-reservation-lead"]').setValue('0')
     expect(wrapper.get('[data-testid="reset-reservation-create"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="reset-reservation-lead"]').setValue('30')
+    expect(wrapper.get('[data-testid="reset-reservation-create"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="reset-reservation-lead"]').setValue('40')
+    expect(wrapper.get('[data-testid="reset-reservation-create"]').attributes('disabled')).toBeUndefined()
     get.mockResolvedValue(reservation())
     await wrapper.get('[data-testid="reset-reservation-open"]').trigger('click')
     await flushPromises()
@@ -90,6 +95,22 @@ describe('OpenAI reset reservation', () => {
     await flushPromises()
     expect(get).not.toHaveBeenCalled()
     expect(wrapper.find('button').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['pending', 'OPENAI_RESET_USAGE_TOO_LOW', 'lowUsageHint'],
+    ['expired', 'OPENAI_RESET_USAGE_TOO_LOW', 'lowUsageExpired'],
+    ['resetting', 'OPENAI_RESET_NOTHING_TO_RESET', 'nothingHint'],
+    ['expired', 'OPENAI_RESET_NOTHING_TO_RESET', 'nothingExpired']
+  ] as const)('explains %s / %s without claiming a successful reset', async (status, code, hint) => {
+    get.mockResolvedValue({ ...reservation(status), error_code: code })
+    const wrapper = mountCell()
+    await flushPromises()
+    await wrapper.get('[data-testid="reset-reservation-open"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(`resetReservation.${hint}`)
+    expect(wrapper.text()).not.toContain('states.completed')
     wrapper.unmount()
   })
 })

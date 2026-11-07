@@ -22,11 +22,11 @@
           <p>{{ t(`${base}.executes`, { time: formatTime(reservation.execute_at) }) }}</p>
           <p v-if="reservation.status === 'unknown'" class="text-amber-600">{{ t(`${base}.unknownHint`) }}</p>
           <p v-if="reservation.status === 'consumed'" class="text-amber-600">{{ t(`${base}.recoveryHint`) }}</p>
-          <p v-if="reservation.error_code" class="break-all text-xs text-amber-600">{{ reservation.error_code }}</p>
+          <p v-if="reservation.error_code" class="break-all text-xs text-amber-600">{{ policyHint || reservation.error_code }}</p>
         </div>
         <label v-if="!active" class="block">
           <span class="input-label">{{ t(`${base}.leadMinutes`) }}</span>
-          <input v-model.number="leadMinutes" type="number" min="5" max="1440" step="1" class="input" data-testid="reset-reservation-lead" />
+          <input v-model.number="leadMinutes" type="number" min="20" max="1440" step="20" class="input" data-testid="reset-reservation-lead" />
         </label>
       </div>
       <template #footer>
@@ -68,8 +68,16 @@ const show = ref(false)
 const busy = ref(false)
 const loaded = ref(false)
 const error = ref('')
-const leadMinutes = ref(30)
-const validLead = computed(() => Number.isInteger(leadMinutes.value) && leadMinutes.value >= 5 && leadMinutes.value <= 1440)
+const leadMinutes = ref(20)
+const validLead = computed(() => Number.isInteger(leadMinutes.value) && leadMinutes.value >= 20 && leadMinutes.value <= 1440 && leadMinutes.value % 20 === 0)
+const policyHint = computed(() => {
+  const code = reservation.value?.error_code
+  const ended = reservation.value?.status === 'expired'
+  if (code === 'OPENAI_RESET_USAGE_TOO_LOW') return t(`${base}.${ended ? 'lowUsageExpired' : 'lowUsageHint'}`)
+  if (code === 'OPENAI_RESET_NOTHING_TO_RESET') return t(`${base}.${ended ? 'nothingExpired' : 'nothingHint'}`)
+  if (code === 'OPENAI_RESET_COOLDOWN') return t(`${base}.cooldownHint`)
+  return ''
+})
 const active = computed(() => !!reservation.value && ['pending', 'resetting', 'unknown', 'consumed'].includes(reservation.value.status))
 const formatTime = (value: string) => new Date(value).toLocaleString()
 let generation = 0

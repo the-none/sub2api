@@ -28,8 +28,8 @@ const (
 	openAIAutoResetAttemptTTL    = 8 * 24 * time.Hour
 	openAIAutoResetLeaderLockKey = "jobs:openai-auto-reset-credit"
 	// 查询阶段失败后的最短重试间隔。调度热路径和扫描都会触发评估，不设间隔时上游
-	// 故障期间同一账号会被十几秒重查一次；用卡阶段的失败不受此限，超时后仍立即用
-	// 同一幂等键重试。
+	// 故障期间同一账号会被十几秒重查一次；兑换阶段另以 RetryAfter 等待 10 分钟，
+	// 然后使用同一幂等键重试。
 	openAIAutoResetQueryFailureRetryAfter = time.Minute
 	// 调度热路径每次过滤候选都会评估暂停，对同一账号的通知按此冷却合并；
 	// 后台每分钟全量扫描兜底，冷却不会让账号漏检。
@@ -56,6 +56,7 @@ type OpenAIAutoResetCreditState struct {
 	ErrorCode         string `json:"error_code,omitempty"`
 	AttemptCycleHash  string `json:"attempt_cycle_hash,omitempty"`
 	AttemptCreditHash string `json:"attempt_credit_hash,omitempty"`
+	RetryAfter        string `json:"retry_after,omitempty"`
 }
 
 type openAIAutoResetQuota interface {
@@ -318,6 +319,11 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	now := time.Now()
 	assessment := s.assessExtra(account, config, now)
 	state := openAIAutoResetStateFromExtra(account.Extra)
+	if state != nil {
+		if retryAt, err := time.Parse(time.RFC3339Nano, state.RetryAfter); err == nil && now.Before(retryAt) {
+			return nil
+		}
+	}
 	// 达到用卡阈值本应立即查询以便用卡；但 10 分钟内已确认无卡时，重查不会改变结论，
 	// 只会让调度热路径的通知把同一账号的上游额度接口打到十几秒一次。
 	needsQuery := openAIAutoResetSnapshotStale(account.Extra, now) ||
@@ -400,6 +406,13 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	}
 
 	cycleSeed := openAIAutoResetCycleSeed(usage)
+	if !openAIResetUsageEligible(usage, now) {
+		checking.Status = OpenAIAutoResetStatusAvailable
+		checking.AvailableCount = available
+		checking.ErrorCode = "OPENAI_RESET_USAGE_TOO_LOW"
+		checking.RetryAfter = now.Add(openAIResetRetryInterval).UTC().Format(time.RFC3339Nano)
+		return s.persistState(ctx, accountID, checking)
+	}
 	cycleHash := shortOpenAIAutoResetHash(cycleSeed)
 	candidate, selectErr := selectOpenAIAutoResetCandidate(usage.autoResetCandidates, available, state, cycleHash)
 	if selectErr != nil {
@@ -419,6 +432,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		CheckedAt:         now.UTC().Format(time.RFC3339),
 		AttemptCycleHash:  cycleHash,
 		AttemptCreditHash: creditHash,
+		RetryAfter:        now.Add(openAIResetRetryInterval).UTC().Format(time.RFC3339Nano),
 	}
 	if err := s.persistState(ctx, accountID, resetting); err != nil {
 		return err
@@ -442,20 +456,30 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		TTL:        openAIAutoResetAttemptTTL,
 		RequireKey: true,
 	}, func(execCtx context.Context) (any, error) {
-		resetResult, resetErr := s.quota.ResetCreditTargeted(execCtx, accountID, candidate.ID, redeemRequestID)
+		resetResult, resetErr := s.quota.ResetCreditTargeted(withOpenAIResetUsage(execCtx, accountID, usage), accountID, candidate.ID, redeemRequestID)
 		if resetErr != nil {
 			return nil, resetErr
 		}
 		if resetResult == nil {
 			return nil, infraerrors.InternalServer("OPENAI_AUTO_RESET_EMPTY_RESULT", "automatic reset returned an empty result")
 		}
+		if openAIResetOutcome(resetResult.Code) == "nothing_to_reset" {
+			return nil, openAIResetNoopError()
+		}
 		// 幂等表只保存脱敏结果，避免上游返回的卡 ID 被持久化到响应体列。
 		return openAIAutoResetConsumeResult{Code: resetResult.Code, WindowsReset: resetResult.WindowsReset}, nil
 	})
 	if err != nil {
+		resetting.RetryAfter = time.Now().Add(openAIResetRetryInterval).UTC().Format(time.RFC3339Nano)
 		// 另一个实例已持有同一周期的兑换时保持 resetting，等待下一轮读取同一
 		// 幂等结果；不能把并发冲突误报成上游消费失败，更不能改选下一张卡。
 		reason := infraerrors.Reason(err)
+		if openAIResetNotSent(err) || reason == "OPENAI_RESET_NOTHING_TO_RESET" {
+			resetting.Status = OpenAIAutoResetStatusAvailable
+			resetting.ErrorCode = reason
+			resetting.LastResultAt = time.Now().UTC().Format(time.RFC3339)
+			return s.persistState(ctx, accountID, resetting)
+		}
 		if reason == infraerrors.Reason(ErrIdempotencyInProgress) || reason == infraerrors.Reason(ErrIdempotencyRetryBackoff) {
 			return nil
 		}
@@ -555,10 +579,9 @@ func (s *OpenAIQuotaAutoResetService) buildAssessment(account *Account, config O
 		threshold5h:   config.Threshold5h,
 		threshold7d:   config.Threshold7d,
 	}
-	reset5h := utilization5h >= config.Threshold5h
-	reset7d := utilization7d >= config.Threshold7d
-	assessment.resetReached = reset5h || reset7d
-	assessment.triggerWindow = joinOpenAIAutoResetWindows(reset5h, reset7d)
+	reset7d := openAIResetWeeklyThresholdReached(utilization7d, config.Threshold7d)
+	assessment.resetReached = reset7d
+	assessment.triggerWindow = joinOpenAIAutoResetWindows(false, reset7d)
 
 	pause5h, pause7d := resolveOpenAIQuotaAutoPauseThresholds(context.Background(), account)
 	if s.settings != nil {
@@ -736,7 +759,7 @@ func openAIAutoResetNoCreditConfirmed(state *OpenAIAutoResetCreditState, now tim
 }
 
 // openAIAutoResetQueryFailureBackoffActive 报告查询阶段刚失败、仍在重试间隔内。
-// 只覆盖查询、快照写入、卡明细缺失三类失败；用卡阶段的失败需要立即按原幂等键重试。
+// 只覆盖查询、快照写入、卡明细缺失；兑换阶段由 RetryAfter 限制重试间隔。
 func openAIAutoResetQueryFailureBackoffActive(state *OpenAIAutoResetCreditState, now time.Time) bool {
 	if state == nil || state.Status != OpenAIAutoResetStatusFailed {
 		return false

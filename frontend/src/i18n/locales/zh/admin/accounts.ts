@@ -578,9 +578,16 @@ export default {
       },
       resetReservation: {
         title: '到期前使用 reset',
-        description: '一次性预约当前最早到期的一张 reset，默认提前 30 分钟使用，即使用量未达阈值也会尝试兑换。成功或失效后不会转用下一张。',
+        description: '一次性预约当前最早到期的一张 reset，默认提前 20 分钟检查。仅在 7 天窗口用量严格超过 20% 时才尝试兑换，每次检查及兑换尝试至少间隔 10 分钟。是否可重置仍由上游判定；成功或失效后不会转用下一张。',
         coordination: '已有自动用卡阈值仍可提前使用这一张。预约期间手动重置受保护，需先取消尚未执行的预约。暂停调度不影响预约；禁用账号期间不执行。',
-        leadMinutes: '提前执行（分钟，5–1440）',
+        leadMinutes: '提前检查（分钟，20–1440，20 的倍数）',
+        lowUsageHint: '7 天用量未满足严格超过 20% 的条件，本次未用卡。10 分钟后再检查。',
+        lowUsageManualHint: '仅在 7 天用量严格超过 20% 时允许用卡，本次未发送兑换请求。',
+        lowUsageExpired: '到期未使用：用量未满足严格超过 20% 的条件。',
+        nothingHint: '上游返回无可重置窗口，本次未执行重置。至少间隔 10 分钟后再检查；此前未确认的请求仍保留保护。',
+        nothingManualHint: '上游返回无可重置窗口，本次未执行重置。请在至少 10 分钟后再尝试。',
+        nothingExpired: '到期未使用：上游无可重置窗口。',
+        cooldownHint: '距离上次兑换尝试不足 10 分钟，等待下次检查。',
         expires: '目标 reset 到期时间：{time}',
         executes: '预计执行时间：{time}',
         schedule: '预约最近一张',
@@ -1192,7 +1199,7 @@ export default {
 	    hint: '仅在实际用量达到阈值时使用最早到期的可用卡；默认关闭。无卡或失败时账号保持暂停。',
 	    threshold5h: '5h 自动用卡阈值(%)',
 	    threshold7d: '7d 自动用卡阈值(%)',
-	    thresholdHint: '两个窗口独立判断，任一达到自身阈值即触发。可填写 0.1–100，默认均为 100。',
+	    thresholdHint: '仅判断 7 天窗口：用量需达到此阈值且严格超过 20%。兑换尝试至少间隔 10 分钟。5 小时窗口仅按普通暂停规则处理。可填写 0.1–100，默认 100。',
 	    thresholdInvalid: '自动使用重置卡阈值必须在 0.1% 到 100% 之间。'
 	  },
       // Quota control (Anthropic OAuth/SetupToken only)

@@ -420,6 +420,9 @@ const extractErrorMessage = (e: unknown): string => {
     reason?: string
     response?: { data?: { message?: string; error?: string } }
   }
+  if (err?.reason === 'OPENAI_RESET_USAGE_TOO_LOW') return t('admin.accounts.resetReservation.lowUsageManualHint')
+  if (err?.reason === 'OPENAI_RESET_COOLDOWN') return t('admin.accounts.resetReservation.cooldownHint')
+  if (err?.reason === 'OPENAI_RESET_NOTHING_TO_RESET') return t('admin.accounts.resetReservation.nothingManualHint')
   return (
     err?.message ||
     err?.reason ||
