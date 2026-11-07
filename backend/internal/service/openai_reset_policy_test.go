@@ -356,3 +356,62 @@ func TestResetReservationNoopDoesNotEraseCrashOrUnavailableEvidence(t *testing.T
 		})
 	}
 }
+
+type resetPolicyCrossDeadlineQuota struct {
+	*autoResetTestQuota
+	now    *time.Time
+	cutoff time.Time
+}
+
+func (q *resetPolicyCrossDeadlineQuota) QueryUsage(ctx context.Context, id int64) (*OpenAIQuotaUsage, error) {
+	usage, err := q.autoResetTestQuota.QueryUsage(ctx, id)
+	*q.now = q.cutoff
+	return usage, err
+}
+
+func TestResetReservationNeverRedeemsAtOrAfterTargetDeadline(t *testing.T) {
+	for _, scenario := range []string{"before cutoff", "at cutoff", "expired", "cross cutoff during query", "retry after expiry"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, repo, _, quota := reservationFixture(t)
+			ctx := context.Background()
+			view, err := s.Create(ctx, 12, 20)
+			require.NoError(t, err)
+			cutoff := view.ExpiresAt.Add(-openAIResetReservationCutoff)
+			now := cutoff.Add(-time.Nanosecond)
+			s.now = func() time.Time { return now }
+			switch scenario {
+			case "at cutoff":
+				now = cutoff
+			case "expired":
+				now = view.ExpiresAt
+			case "cross cutoff during query":
+				s.quota = &resetPolicyCrossDeadlineQuota{autoResetTestQuota: quota, now: &now, cutoff: cutoff}
+			case "retry after expiry":
+				now = view.ExecuteAt
+				quota.failFirst = true
+				_, err = s.Process(ctx, 12)
+				require.NoError(t, err)
+				require.Equal(t, int32(1), quota.resetCalls.Load())
+				now = view.ExpiresAt.Add(time.Minute)
+			}
+			before := quota.resetCalls.Load()
+			_, err = s.Process(ctx, 12)
+			require.NoError(t, err)
+			r, _ := repo.Get(ctx, 12)
+			if scenario == "before cutoff" {
+				require.Equal(t, before+1, quota.resetCalls.Load())
+				require.Equal(t, "completed", r.Status)
+			} else {
+				require.Equal(t, before, quota.resetCalls.Load(), "the bound credit's deadline must override scheduling and retries")
+				require.Nil(t, r.ConsumedAt)
+				if scenario == "cross cutoff during query" {
+					require.Nil(t, r.AttemptedAt, "pre-send deadline rejection is not an ambiguous redemption")
+					_, err = s.Process(ctx, 12)
+					require.NoError(t, err)
+					r, _ = repo.Get(ctx, 12)
+					require.Equal(t, "expired", r.Status)
+				}
+			}
+		})
+	}
+}
