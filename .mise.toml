@@ -1,5 +1,5 @@
 [tools]
-go = "1.26.6"
-golangci-lint = "2.9.0"
+go = "1.27.4"
+golangci-lint = "2.14.0"
 node = "24.18.0"
 pnpm = "10.34.4"
