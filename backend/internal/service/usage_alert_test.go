@@ -101,6 +101,27 @@ func TestUsageAlertSnapshotsKeepFableAsOverallSubLimit(t *testing.T) {
 	require.Equal(t, overallReset, *snapshots[1].Windows[UsageAlertWindow7d].ResetAt)
 }
 
+func TestUsageAlertSnapshotsExcludeUnknownUtilization(t *testing.T) {
+	now := time.Now()
+	usage := &UsageInfo{
+		FiveHour:      &UsageProgress{UtilizationUnknown: true, WindowStats: &WindowStats{}},
+		SevenDay:      &UsageProgress{UtilizationUnknown: true, WindowStats: &WindowStats{}},
+		SevenDayFable: &UsageProgress{UtilizationUnknown: true},
+	}
+	for _, platform := range []string{UsageAlertPlatformOpenAI, UsageAlertPlatformAnthropic} {
+		require.Empty(t, usageAlertSnapshotsFromUsageInfo(42, platform, UsageAlertSourceOpenAICodexProbe, usage, now),
+			"local request statistics must not be interpreted as 0%% upstream utilization")
+	}
+
+	usage.SevenDay = &UsageProgress{Utilization: 0}
+	snapshots := usageAlertSnapshotsFromUsageInfo(42, UsageAlertPlatformOpenAI, UsageAlertSourceOpenAICodexProbe, usage, now)
+	require.Len(t, snapshots, 1)
+	require.Len(t, snapshots[0].Windows, 1)
+	require.Equal(t, 0.0, snapshots[0].Windows[UsageAlertWindow7d].UsedPercent,
+		"an explicitly observed zero remains valid")
+	require.NotContains(t, snapshots[0].Windows, UsageAlertWindow5h)
+}
+
 func TestEnsureUsageAlertRuleNameBuildsDefault(t *testing.T) {
 	step := 5.0
 	minReset := 24.0

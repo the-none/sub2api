@@ -2255,10 +2255,10 @@ func usageAlertSnapshotsFromUsageInfo(accountID int64, platform, source string, 
 	}
 	snapshots := make([]*UsageAlertSnapshot, 0, 2)
 	windows := make(map[string]UsageAlertWindowSnapshot, 2)
-	if usage.FiveHour != nil {
+	if usage.FiveHour != nil && !usage.FiveHour.UtilizationUnknown {
 		windows[UsageAlertWindow5h] = usageAlertWindowFromProgress(usage.FiveHour)
 	}
-	if usage.SevenDay != nil {
+	if usage.SevenDay != nil && !usage.SevenDay.UtilizationUnknown {
 		windows[UsageAlertWindow7d] = usageAlertWindowFromProgress(usage.SevenDay)
 	}
 	overallType := []string(nil)
@@ -2268,7 +2268,7 @@ func usageAlertSnapshotsFromUsageInfo(accountID int64, platform, source string, 
 	if snapshot := usageAlertSnapshotFromWindows(accountID, platform, source, windows, sampledAt, overallType...); snapshot != nil {
 		snapshots = append(snapshots, snapshot)
 	}
-	if platform == UsageAlertPlatformAnthropic && usage.SevenDayFable != nil {
+	if platform == UsageAlertPlatformAnthropic && usage.SevenDayFable != nil && !usage.SevenDayFable.UtilizationUnknown {
 		fable := usageAlertWindowFromProgress(usage.SevenDayFable)
 		// Fable is a 7d sub-limit under Overall and shares the parent reset.
 		if usage.SevenDay != nil && usage.SevenDay.ResetsAt != nil {
