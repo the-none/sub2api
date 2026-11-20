@@ -14,7 +14,8 @@ import (
 )
 
 // 下面两个函数是重构前的 parseGatewayRequestCurrentBody / setGatewayRequestRanges
-// 的逐字副本，作为差分测试的基准。任何一处语义变化都会在下面的对比里暴露。
+// 的副本，保留本分支跨协议 [1m] 归一化行为，作为差分测试的基准。
+// 任何一处语义变化都会在下面的对比里暴露。
 func legacyParseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) error {
 	if parsed == nil || parsed.Body == nil {
 		return fmt.Errorf("empty request body")
@@ -36,18 +37,16 @@ func legacyParseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string
 			return fmt.Errorf("invalid model field type")
 		}
 		parsed.Model = strings.Clone(modelResult.String())
-		if protocol == domain.PlatformAnthropic {
-			normalizedModel := normalizeClaudeCodeLongContextModel(parsed.Model)
-			if normalizedModel != parsed.Model {
-				normalizedBody, err := sjson.SetBytes(bodyBytes, "model", normalizedModel)
-				if err != nil {
-					return fmt.Errorf("normalize model field: %w", err)
-				}
-				parsed.Body.Replace(normalizedBody)
-				bodyBytes = normalizedBody
-				jsonStr = *(*string)(unsafe.Pointer(&bodyBytes))
-				parsed.Model = normalizedModel
+		normalizedModel := normalizeClaudeCodeLongContextModel(parsed.Model)
+		if normalizedModel != parsed.Model {
+			normalizedBody, err := sjson.SetBytes(bodyBytes, "model", normalizedModel)
+			if err != nil {
+				return fmt.Errorf("normalize model field: %w", err)
 			}
+			parsed.Body.Replace(normalizedBody)
+			bodyBytes = normalizedBody
+			jsonStr = *(*string)(unsafe.Pointer(&bodyBytes))
+			parsed.Model = normalizedModel
 		}
 	}
 
