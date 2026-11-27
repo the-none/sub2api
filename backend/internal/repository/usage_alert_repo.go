@@ -205,6 +205,8 @@ func (r *usageAlertRepository) AttachAccount(ctx context.Context, realAccountID,
 			dbaccount.IDEQ(rootID),
 			dbaccount.And(dbaccount.ParentAccountIDEQ(rootID), dbaccount.DeletedAtIsNil()),
 		)).
+		Order(dbent.Asc(dbaccount.FieldID)).
+		ForUpdate().
 		All(ctx)
 	if err != nil {
 		return err
@@ -302,6 +304,8 @@ func (r *usageAlertRepository) DetachAccount(ctx context.Context, accountID int6
 			dbaccount.IDEQ(rootID),
 			dbaccount.And(dbaccount.ParentAccountIDEQ(rootID), dbaccount.DeletedAtIsNil()),
 		)).
+		Order(dbent.Asc(dbaccount.FieldID)).
+		ForUpdate().
 		All(ctx)
 	if err != nil {
 		return err
@@ -343,6 +347,21 @@ func (r *usageAlertRepository) EnsureRealAccountForAccount(ctx context.Context, 
 	if account.RealAccountID != nil && *account.RealAccountID > 0 {
 		return r.GetRealAccount(ctx, *account.RealAccountID)
 	}
+	rootID := account.ID
+	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
+		rootID = *account.ParentAccountID
+	}
+	return r.resolveFamilyRealAccount(ctx, account.ID, rootID, account.Platform)
+}
+
+func (r *usageAlertRepository) ResolveShadowRealAccount(ctx context.Context, shadowAccountID, parentAccountID int64) (*service.RealAccount, error) {
+	if shadowAccountID <= 0 || parentAccountID <= 0 {
+		return nil, fmt.Errorf("shadow and parent account ids are required")
+	}
+	return r.resolveFamilyRealAccount(ctx, shadowAccountID, parentAccountID, "")
+}
+
+func (r *usageAlertRepository) resolveFamilyRealAccount(ctx context.Context, accountID, rootID int64, fallbackPlatform string) (*service.RealAccount, error) {
 	tx, err := r.client.Tx(ctx)
 	if err != nil {
 		return nil, err
@@ -353,10 +372,34 @@ func (r *usageAlertRepository) EnsureRealAccountForAccount(ctx context.Context, 
 			_ = tx.Rollback()
 		}
 	}()
-	current, err := tx.Account.Get(ctx, account.ID)
+	familyPredicate := dbaccount.Or(
+		dbaccount.IDEQ(rootID),
+		dbaccount.And(dbaccount.ParentAccountIDEQ(rootID), dbaccount.DeletedAtIsNil()),
+	)
+	family, err := tx.Account.Query().
+		Where(familyPredicate).
+		Order(dbent.Asc(dbaccount.FieldID)).
+		ForUpdate().
+		All(ctx)
 	if err != nil {
 		return nil, err
 	}
+	var current, root *dbent.Account
+	for _, member := range family {
+		if member.ID == accountID {
+			current = member
+		}
+		if member.ID == rootID {
+			root = member
+		}
+	}
+	if current == nil {
+		current, err = tx.Account.Get(ctx, accountID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Never overwrite an already-committed assignment on current or any family member.
 	if current.RealAccountID != nil && *current.RealAccountID > 0 {
 		row, err := tx.RealAccount.Get(ctx, *current.RealAccountID)
 		if err != nil {
@@ -368,33 +411,49 @@ func (r *usageAlertRepository) EnsureRealAccountForAccount(ctx context.Context, 
 		rollback = false
 		return realAccountEntityToService(row, false), nil
 	}
-	row, err := tx.RealAccount.Create().
-		SetName(account.Name).
-		SetPlatform(account.Platform).
-		SetIdentifier(autoCreatedRealAccountIdentifier).
-		Save(ctx)
-	if err != nil {
-		return nil, err
-	}
-	updated, err := tx.Account.Update().
-		Where(dbaccount.IDEQ(account.ID), dbaccount.RealAccountIDIsNil()).
-		SetRealAccountID(row.ID).
-		Save(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if updated == 0 {
-		if err := tx.RealAccount.DeleteOneID(row.ID).Exec(ctx); err != nil {
-			return nil, err
+	var chosenID int64
+	if root != nil && root.RealAccountID != nil && *root.RealAccountID > 0 {
+		chosenID = *root.RealAccountID
+	} else {
+		for _, member := range family {
+			if member.RealAccountID != nil && *member.RealAccountID > 0 {
+				chosenID = *member.RealAccountID
+				break
+			}
 		}
-		current, err := tx.Account.Get(ctx, account.ID)
+	}
+	var createdRow *dbent.RealAccount
+	if chosenID <= 0 {
+		owner := root
+		if owner == nil {
+			owner = current
+		}
+		platform := owner.Platform
+		if platform == "" {
+			platform = fallbackPlatform
+		}
+		if platform != service.PlatformOpenAI && platform != service.PlatformAnthropic {
+			return nil, fmt.Errorf("usage alerts only support openai and anthropic accounts")
+		}
+		createdRow, err = tx.RealAccount.Create().
+			SetName(owner.Name).
+			SetPlatform(platform).
+			SetIdentifier(autoCreatedRealAccountIdentifier).
+			Save(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if current.RealAccountID == nil || *current.RealAccountID <= 0 {
-			return nil, fmt.Errorf("real account was not bound")
-		}
-		row, err = tx.RealAccount.Get(ctx, *current.RealAccountID)
+		chosenID = createdRow.ID
+	}
+	if _, err := tx.Account.Update().
+		Where(familyPredicate, dbaccount.RealAccountIDIsNil()).
+		SetRealAccountID(chosenID).
+		Save(ctx); err != nil {
+		return nil, err
+	}
+	row := createdRow
+	if row == nil {
+		row, err = tx.RealAccount.Get(ctx, chosenID)
 		if err != nil {
 			return nil, err
 		}

@@ -874,6 +874,57 @@ func TestOpenAIQuotaAutoReset_ReplayOutcomeAndPreConsumeGuards(t *testing.T) {
 		require.Zero(t, recoverer.calls.Load())
 		require.Zero(t, recoverer.quotaRateLimitClear.Load())
 	})
+
+	t.Run("unconfirmed attempt followed by no_credit still clears stale 429 once schedulable", func(t *testing.T) {
+		now := time.Now().UTC()
+		rateLimitedAt := now.Add(-5 * time.Minute)
+		svc, repo, quota := newResetThresholdTestFixture(t, nil, 1)
+		quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{{ID: "credit-1", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339)}}
+		quota.failFirst = true
+		repo.mu.Lock()
+		repo.account.RateLimitedAt = &rateLimitedAt
+		repo.account.RateLimitResetAt = ptrTime(now.Add(24 * time.Hour))
+		repo.mu.Unlock()
+
+		// Step 1: redemption times out -> AttemptUnconfirmed=true.
+		err := svc.evaluateAccount(context.Background(), 501)
+		require.Error(t, err)
+		state := repo.stateForTest()
+		require.NotNil(t, state)
+		require.True(t, state.AttemptUnconfirmed)
+
+		// Step 2: subsequent quota read sees 0 credits while weekly usage is still 100% -> no_credit must keep AttemptUnconfirmed=true.
+		quota.usage.RateLimitResetCredits.AvailableCount = 0
+		quota.usage.autoResetCandidates = nil
+		repo.mu.Lock()
+		state.RetryAfter = now.Add(-time.Minute).Format(time.RFC3339Nano)
+		repo.account.Extra[OpenAIAutoResetCreditStateExtraKey] = state
+		repo.account.Extra["codex_usage_updated_at"] = now.Add(-time.Hour).Format(time.RFC3339)
+		repo.mu.Unlock()
+
+		recoverer := &autoResetSwitchableRecoverer{}
+		svc.recoverer = recoverer
+
+		require.NoError(t, svc.evaluateAccount(context.Background(), 501))
+		noCreditState := repo.stateForTest()
+		require.Equal(t, OpenAIAutoResetStatusNoCredit, noCreditState.Status)
+		require.True(t, noCreditState.AttemptUnconfirmed)
+		require.Zero(t, recoverer.quotaRateLimitClear.Load())
+
+		// Step 3: later quota read confirms schedulable usage -> must run QueryUsage, clear 429 once, and drop AttemptUnconfirmed.
+		quota.usage.RateLimit.Allowed = true
+		quota.usage.RateLimit.LimitReached = false
+		quota.usage.RateLimit.SecondaryWindow.UsedPercent = 0
+		repo.mu.Lock()
+		repo.account.Extra["codex_usage_updated_at"] = now.Format(time.RFC3339)
+		repo.account.Extra["codex_7d_used_percent"] = 0.0
+		repo.mu.Unlock()
+
+		require.NoError(t, svc.evaluateAccount(context.Background(), 501))
+		require.Equal(t, int32(1), recoverer.quotaRateLimitClear.Load())
+		require.Equal(t, OpenAIAutoResetStatusNoCredit, repo.stateForTest().Status)
+		require.False(t, repo.stateForTest().AttemptUnconfirmed)
+	})
 }
 
 type autoResetRealClientErrorQuota struct {

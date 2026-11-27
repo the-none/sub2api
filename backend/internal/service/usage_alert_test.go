@@ -2968,6 +2968,89 @@ func TestUsageAlertMergePendingWindowsRuleSemanticsAndStop(t *testing.T) {
 	require.True(t, svc.stopped.Load())
 }
 
+func TestUsageAlertMergedSnapshotPreservesPerWindowProvenance(t *testing.T) {
+	t0 := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Minute)
+	resetAt := t0.Add(5 * 24 * time.Hour)
+	fiveResetAt := t0.Add(5 * time.Hour)
+
+	previous := &UsageAlertSnapshot{
+		AccountID:     1,
+		RealAccountID: 9,
+		Platform:      UsageAlertPlatformOpenAI,
+		UsageType:     UsageAlertTypeOverall,
+		Source:        UsageAlertSourceOpenAICodexUsageAPI,
+		SampledAt:     t0.Add(-time.Minute),
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {
+				UsedPercent:      80,
+				RemainingPercent: 20,
+				ResetAt:          &resetAt,
+				Generation:       4,
+				BoundaryAt:       &resetAt,
+			},
+		},
+	}
+
+	// Queued 7d header sample with lower usage (stale/drifted header reading) followed by
+	// another linked account's 5h-only Usage API sample must NOT make the 7d header
+	// authoritative or bump 7d Generation.
+	queuedHeader := UsageAlertSnapshot{
+		AccountID:     1,
+		RealAccountID: 9,
+		Platform:      UsageAlertPlatformOpenAI,
+		UsageType:     UsageAlertTypeOverall,
+		Source:        UsageAlertSourceOpenAICodexHeaders,
+		SampledAt:     t0,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow7d: {
+				UsedPercent:      10,
+				RemainingPercent: 90,
+				ResetAt:          &resetAt,
+			},
+		},
+	}
+	linkedFiveHour := UsageAlertSnapshot{
+		AccountID:     2,
+		RealAccountID: 9,
+		Platform:      UsageAlertPlatformOpenAI,
+		UsageType:     UsageAlertTypeOverall,
+		Source:        UsageAlertSourceOpenAICodexUsageAPI,
+		SampledAt:     t1,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow5h: {
+				UsedPercent:      25,
+				RemainingPercent: 75,
+				ResetAt:          &fiveResetAt,
+			},
+		},
+	}
+
+	merged := mergePendingUsageAlertSnapshot(mergePendingUsageAlertSnapshot(nil, queuedHeader), linkedFiveHour)
+	require.Equal(t, UsageAlertSourceOpenAICodexHeaders, merged.Windows[UsageAlertWindow7d].Source)
+	require.Equal(t, int64(1), merged.Windows[UsageAlertWindow7d].AccountID)
+	require.Equal(t, UsageAlertSourceOpenAICodexUsageAPI, merged.Windows[UsageAlertWindow5h].Source)
+	require.Equal(t, int64(2), merged.Windows[UsageAlertWindow5h].AccountID)
+
+	evalSnap, persistedSnap, ok, _ := prepareUsageAlertSnapshot(previous, *merged)
+	require.True(t, ok)
+	require.Equal(t, int64(4), evalSnap.Windows[UsageAlertWindow7d].Generation)
+	require.Equal(t, int64(4), persistedSnap.Windows[UsageAlertWindow7d].Generation)
+
+	rule := validUsageAlertRuleForTest()
+	rule.ID = 77
+	rule.Window = UsageAlertWindow7d
+	ev := buildUsageAlertWebhookEvent(&evalSnap, &RealAccount{ID: 9, Name: "Main"}, UsageAlertTrigger{
+		Rule:        rule,
+		Window:      UsageAlertWindow7d,
+		Value:       evalSnap.Windows[UsageAlertWindow7d].RemainingPercent,
+		WindowState: evalSnap.Windows[UsageAlertWindow7d],
+		TriggeredAt: t1,
+	})
+	require.Equal(t, UsageAlertSourceOpenAICodexHeaders, ev.Source)
+	require.Equal(t, int64(1), ev.AccountID)
+}
+
 func TestUsageAlertSSRFBlocklistTrailingSlashProxyAndConcurrentStop(t *testing.T) {
 	t.Run("disallowed IP blocklist covers special-use IPv4 and IPv6 transitions", func(t *testing.T) {
 		blocked := []string{
@@ -3009,10 +3092,17 @@ func TestUsageAlertSSRFBlocklistTrailingSlashProxyAndConcurrentStop(t *testing.T
 		require.Equal(t, "https://hooks.example.com/v1/alert/", created.URL)
 	})
 
-	t.Run("environment proxy routes public/telegram requests while blocking private DNS", func(t *testing.T) {
+	t.Run("environment proxy routes public/telegram requests while pinning public IPs and blocking private DNS", func(t *testing.T) {
 		var proxiedTargets []string
+		var proxiedRequestURIs []string
 		proxySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodConnect {
+				proxiedTargets = append(proxiedTargets, r.RequestURI)
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
 			proxiedTargets = append(proxiedTargets, r.Host)
+			proxiedRequestURIs = append(proxiedRequestURIs, r.RequestURI)
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer proxySrv.Close()
@@ -3042,13 +3132,21 @@ func TestUsageAlertSSRFBlocklistTrailingSlashProxyAndConcurrentStop(t *testing.T
 		require.NoError(t, err)
 		require.NoError(t, respTG.Body.Close())
 
-		// Public JSON post webhook is allowed through the proxy.
+		// Public HTTP webhook through an HTTP proxy pins the validated IP in the request-URI (never sending hostname target).
 		reqPub, err := http.NewRequest(http.MethodPost, "http://hooks.example.com/alert/", nil)
 		require.NoError(t, err)
 		respPub, err := client.Do(reqPub)
 		require.NoError(t, err)
 		require.NoError(t, respPub.Body.Close())
-		require.Equal(t, []string{"api.telegram.org", "hooks.example.com"}, proxiedTargets)
+		require.Equal(t, []string{"api.telegram.org", "93.184.216.34:80"}, proxiedTargets)
+		require.Equal(t, []string{"http://api.telegram.org/bot123:abc/sendMessage", "http://93.184.216.34:80/alert/"}, proxiedRequestURIs)
+
+		// Public HTTPS webhook through an HTTP CONNECT proxy sends the pinned IP in CONNECT target, not the hostname.
+		reqHTTPS, err := http.NewRequest(http.MethodPost, "https://hooks.example.com/alert/", nil)
+		require.NoError(t, err)
+		_, err = client.Do(reqHTTPS)
+		require.Error(t, err)
+		require.Equal(t, "93.184.216.34:443", proxiedTargets[len(proxiedTargets)-1])
 
 		// Private DNS target is blocked even when a proxy is configured.
 		reqPriv, err := http.NewRequest(http.MethodPost, "http://rebind.example.com/hook", nil)

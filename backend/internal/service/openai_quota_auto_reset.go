@@ -336,6 +336,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		state.ErrorCode == OpenAIQuotaResetWarningAccountRecoveryFailed && state.AttemptUnconfirmed
 	needsQuery := openAIAutoResetSnapshotStale(account.Extra, now) ||
 		pendingRecovery ||
+		(priorUnconfirmedAttempt && !assessment.resetReached && account.Status != StatusError && (account.RateLimitedAt != nil || account.RateLimitResetAt != nil)) ||
 		(assessment.resetReached && !openAIAutoResetNoCreditConfirmed(state, now))
 	if assessment.pauseReached && !assessment.resetReached {
 		needsQuery = needsQuery || state == nil || state.Status == OpenAIAutoResetStatusChecking || state.Status == OpenAIAutoResetStatusFailed || openAIAutoResetStateStale(state, now)
@@ -344,9 +345,12 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		return nil
 	}
 	if !needsQuery {
-		if !assessment.pauseReached && state != nil && state.TriggerWindow != "" {
+		if !assessment.pauseReached && state != nil && (state.TriggerWindow != "" || state.AttemptUnconfirmed) {
 			state.TriggerWindow = ""
 			state.ErrorCode = ""
+			state.AttemptUnconfirmed = false
+			state.AttemptCycleHash = ""
+			state.AttemptCreditHash = ""
 			state.CheckedAt = now.UTC().Format(time.RFC3339)
 			if state.AvailableCount > 0 {
 				state.Status = OpenAIAutoResetStatusAvailable
@@ -411,14 +415,16 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		})
 	}
 	if available <= 0 {
-		return s.persistState(ctx, accountID, &OpenAIAutoResetCreditState{
+		noCredit := &OpenAIAutoResetCreditState{
 			Status:         OpenAIAutoResetStatusNoCredit,
 			TriggerWindow:  assessment.triggerWindow,
 			AvailableCount: 0,
 			CheckedAt:      now.UTC().Format(time.RFC3339),
 			LastResultAt:   now.UTC().Format(time.RFC3339),
 			ErrorCode:      "NO_RESET_CREDIT",
-		})
+		}
+		copyOpenAIAutoResetAttempt(noCredit, checking)
+		return s.persistState(ctx, accountID, noCredit)
 	}
 
 	cycleSeed := openAIAutoResetCycleSeed(usage)
@@ -553,14 +559,15 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	case "no_credit":
 		noCreditAt := time.Now().UTC().Format(time.RFC3339)
 		noCredit := &OpenAIAutoResetCreditState{
-			Status:            OpenAIAutoResetStatusNoCredit,
-			TriggerWindow:     assessment.triggerWindow,
-			AvailableCount:    0,
-			CheckedAt:         noCreditAt,
-			LastResultAt:      noCreditAt,
-			ErrorCode:         "NO_RESET_CREDIT",
-			AttemptCycleHash:  cycleHash,
-			AttemptCreditHash: creditHash,
+			Status:             OpenAIAutoResetStatusNoCredit,
+			TriggerWindow:      assessment.triggerWindow,
+			AvailableCount:     0,
+			CheckedAt:          noCreditAt,
+			LastResultAt:       noCreditAt,
+			ErrorCode:          "NO_RESET_CREDIT",
+			AttemptCycleHash:   cycleHash,
+			AttemptCreditHash:  creditHash,
+			AttemptUnconfirmed: priorUnconfirmedAttempt,
 		}
 		s.recordAudit(accountID, assessment, available, "no_credit", 0, noCredit.ErrorCode)
 		return persistFinal(noCredit)

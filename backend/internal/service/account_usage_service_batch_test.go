@@ -190,6 +190,38 @@ func TestAccountUsageService_GetUsageBatch_BestEffortByAccount(t *testing.T) {
 	}
 }
 
+func TestAccountUsageService_GetUsageBatch_MissingAndFailingConcurrent(t *testing.T) {
+	t.Parallel()
+
+	repo := &stubOpenAIAccountRepo{
+		accounts: []Account{
+			{ID: 8001, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+			{ID: 8002, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+			{ID: 8003, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		},
+	}
+	svc := &AccountUsageService{
+		accountRepo:  repo,
+		usageLogRepo: &usageBatchLogRepoStub{},
+		cache:        NewUsageCache(),
+	}
+
+	_, errorsByAccount, err := svc.GetUsageBatch(context.Background(), []int64{8001, 8999, 8002, 8998, 8003}, false)
+	if err != nil {
+		t.Fatalf("GetUsageBatch() error = %v", err)
+	}
+	for _, missingID := range []int64{8999, 8998} {
+		if errorsByAccount[missingID] != ErrAccountNotFound.Error() {
+			t.Fatalf("expected missing account %d error %q, got %q", missingID, ErrAccountNotFound.Error(), errorsByAccount[missingID])
+		}
+	}
+	for _, unsupportedID := range []int64{8001, 8002, 8003} {
+		if !strings.Contains(strings.ToLower(errorsByAccount[unsupportedID]), "does not support usage query") {
+			t.Fatalf("expected unsupported error for %d, got %q", unsupportedID, errorsByAccount[unsupportedID])
+		}
+	}
+}
+
 // Model ClearError's persisted effect so this regression catches both the write
 // and mutations of the account returned by the repository.
 type usageErrorAccountRepo struct {

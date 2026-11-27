@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -170,6 +171,10 @@ type UsageAlertWindowSnapshot struct {
 
 	OfficialResetAnchorAt *time.Time `json:"official_reset_anchor_at,omitempty"`
 	AwaitingOfficialReset bool       `json:"awaiting_official_reset,omitempty"`
+
+	// In-memory provenance for pending merged windows before persistence/evaluation.
+	Source    string `json:"-"`
+	AccountID int64  `json:"-"`
 }
 
 type UsageAlertSnapshot struct {
@@ -387,6 +392,22 @@ type safeUsageAlertTransport struct {
 	resolveFunc func(context.Context, string) ([]net.IP, error)
 }
 
+type usageAlertCloseHookReadCloser struct {
+	io.ReadCloser
+	once    sync.Once
+	onClose func()
+}
+
+func (c *usageAlertCloseHookReadCloser) Close() error {
+	err := c.ReadCloser.Close()
+	c.once.Do(func() {
+		if c.onClose != nil {
+			c.onClose()
+		}
+	})
+	return err
+}
+
 func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req == nil || req.URL == nil {
 		return nil, errors.New("webhook request url is missing")
@@ -408,16 +429,104 @@ func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, 
 	}
 	if proxyURL != nil {
 		host := strings.ToLower(strings.TrimSpace(req.URL.Hostname()))
+		dialAddr := canonicalProxyDialAddr(proxyURL)
 		// Skip local DNS resolution only for Telegram when an operator-configured
 		// environment proxy handles egress (e.g., GFW/split-horizon setups).
-		if host != telegramWebhookHost {
-			if _, err := resolveFn(req.Context(), host); err != nil {
-				return nil, err
+		if host == telegramWebhookHost {
+			if dialAddr != "" {
+				req = req.Clone(context.WithValue(req.Context(), usageAlertProxyDialKey{}, dialAddr))
+			}
+			return t.base.RoundTrip(req)
+		}
+		ips, err := resolveFn(req.Context(), host)
+		if err != nil {
+			return nil, err
+		}
+		if len(ips) == 0 {
+			return nil, errors.New("no resolved addresses available")
+		}
+		port := req.URL.Port()
+		if port == "" {
+			if strings.EqualFold(req.URL.Scheme, "https") {
+				port = "443"
+			} else {
+				port = "80"
 			}
 		}
-		if dialAddr := canonicalProxyDialAddr(proxyURL); dialAddr != "" {
-			req = req.Clone(context.WithValue(req.Context(), usageAlertProxyDialKey{}, dialAddr))
+		proxyScheme := strings.ToLower(strings.TrimSpace(proxyURL.Scheme))
+		isSOCKS := proxyScheme == "socks5" || proxyScheme == "socks5h"
+		isHTTPS := strings.EqualFold(req.URL.Scheme, "https")
+		var lastErr error
+		for i, ip := range ips {
+			if i > 0 && req.Body != nil {
+				if req.GetBody == nil {
+					break
+				}
+				body, bodyErr := req.GetBody()
+				if bodyErr != nil {
+					return nil, bodyErr
+				}
+				req.Body = body
+			}
+			ctx := req.Context()
+			if dialAddr != "" {
+				ctx = context.WithValue(ctx, usageAlertProxyDialKey{}, dialAddr)
+			}
+			attemptReq := req.Clone(ctx)
+			if attemptReq.Host == "" {
+				attemptReq.Host = req.URL.Host
+			}
+			ipHostPort := net.JoinHostPort(ip.String(), port)
+			attemptURL := *req.URL
+			attemptURL.Host = ipHostPort
+			if !isHTTPS && !isSOCKS {
+				escapedPath := req.URL.EscapedPath()
+				if escapedPath == "" {
+					escapedPath = "/"
+				}
+				attemptURL.Opaque = "//" + ipHostPort + escapedPath
+			}
+			attemptReq.URL = &attemptURL
+
+			if isHTTPS {
+				tr := t.base.Clone()
+				var tlsCfg *tls.Config
+				if tr.TLSClientConfig != nil {
+					tlsCfg = tr.TLSClientConfig.Clone()
+				} else {
+					tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
+				}
+				if tlsCfg.ServerName == "" {
+					tlsCfg.ServerName = host
+				}
+				tr.TLSClientConfig = tlsCfg
+				resp, rtErr := tr.RoundTrip(attemptReq)
+				if rtErr == nil && resp != nil {
+					if resp.Body == nil {
+						tr.CloseIdleConnections()
+					} else {
+						resp.Body = &usageAlertCloseHookReadCloser{
+							ReadCloser: resp.Body,
+							onClose:    tr.CloseIdleConnections,
+						}
+					}
+					return resp, nil
+				}
+				tr.CloseIdleConnections()
+				lastErr = rtErr
+				continue
+			}
+
+			resp, rtErr := t.base.RoundTrip(attemptReq)
+			if rtErr == nil {
+				return resp, nil
+			}
+			lastErr = rtErr
 		}
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, errors.New("no resolved addresses available")
 	}
 	return t.base.RoundTrip(req)
 }
@@ -997,12 +1106,24 @@ func mergePendingUsageAlertSnapshot(existing *UsageAlertSnapshot, incoming Usage
 			sampledAt := existing.SampledAt.UTC()
 			value.SampledAt = &sampledAt
 		}
+		if value.Source == "" {
+			value.Source = existing.Source
+		}
+		if value.AccountID <= 0 {
+			value.AccountID = existing.AccountID
+		}
 		mergedWindows[window] = value
 	}
 	for window, value := range cloned.Windows {
 		if value.SampledAt == nil && !cloned.SampledAt.IsZero() {
 			sampledAt := cloned.SampledAt.UTC()
 			value.SampledAt = &sampledAt
+		}
+		if value.Source == "" {
+			value.Source = cloned.Source
+		}
+		if value.AccountID <= 0 {
+			value.AccountID = cloned.AccountID
 		}
 		prev, exists := mergedWindows[window]
 		if !exists || prev.SampledAt == nil || value.SampledAt == nil || !value.SampledAt.Before(*prev.SampledAt) {
@@ -1106,6 +1227,10 @@ func usageAlertObservationPriority(snapshot UsageAlertSnapshot) int {
 	}
 }
 
+type shadowRealAccountResolver interface {
+	ResolveShadowRealAccount(ctx context.Context, shadowAccountID, parentAccountID int64) (*RealAccount, error)
+}
+
 func (s *UsageAlertService) resolveUsageAlertScope(ctx context.Context, accountID int64) (int64, string) {
 	if s.accountRepo == nil || accountID <= 0 {
 		return 0, UsageAlertTypeOverall
@@ -1122,6 +1247,14 @@ func (s *UsageAlertService) resolveUsageAlertScope(ctx context.Context, accountI
 		return *account.RealAccountID, usageType
 	}
 	if account.IsShadow() && account.ParentAccountID != nil && *account.ParentAccountID > 0 {
+		if resolver, ok := s.repo.(shadowRealAccountResolver); ok {
+			realAccount, resolveErr := resolver.ResolveShadowRealAccount(ctx, account.ID, *account.ParentAccountID)
+			if resolveErr != nil || realAccount == nil {
+				slog.Warn("usage_alert_resolve_shadow_real_account_failed", "account_id", accountID, "parent_account_id", *account.ParentAccountID, "error", resolveErr)
+				return 0, usageType
+			}
+			return realAccount.ID, usageType
+		}
 		parent, parentErr := s.accountRepo.GetByID(ctx, *account.ParentAccountID)
 		if parentErr != nil || parent == nil {
 			slog.Warn("usage_alert_get_shadow_parent_failed", "account_id", accountID, "parent_account_id", *account.ParentAccountID, "error", parentErr)
@@ -1435,12 +1568,16 @@ func prepareUsageAlertSnapshot(previous *UsageAlertSnapshot, current UsageAlertS
 		if value.SampledAt != nil && !value.SampledAt.IsZero() {
 			windowSampledAt = *value.SampledAt
 		}
+		windowSource := current.Source
+		if value.Source != "" {
+			windowSource = value.Source
+		}
 		initialized := false
 		if previous != nil {
 			if previousValue, ok := persistedWindows[window]; ok {
 				var accepted bool
 				if isCodexOverall7dWindow(current, window) {
-					value, accepted, refreshCodex7d = prepareCodex7dWindow(previousValue, value, current.Source, windowSampledAt)
+					value, accepted, refreshCodex7d = prepareCodex7dWindow(previousValue, value, windowSource, windowSampledAt)
 				} else {
 					value, accepted = prepareResetOrderedWindow(previousValue, value)
 				}
@@ -1448,12 +1585,12 @@ func prepareUsageAlertSnapshot(previous *UsageAlertSnapshot, current UsageAlertS
 					continue
 				}
 			} else {
-				value = initializeUsageAlertWindow(current, window, value)
+				value = initializeUsageAlertWindow(current, window, windowSource, value)
 				initialized = true
 			}
 		}
 		if previous == nil && !initialized {
-			value = initializeUsageAlertWindow(current, window, value)
+			value = initializeUsageAlertWindow(current, window, windowSource, value)
 		}
 		freshWindows[window] = value
 		persistedWindows[window] = value
@@ -1469,11 +1606,11 @@ func prepareUsageAlertSnapshot(previous *UsageAlertSnapshot, current UsageAlertS
 	return evaluation, persisted, true, refreshCodex7d
 }
 
-func initializeUsageAlertWindow(snapshot UsageAlertSnapshot, window string, value UsageAlertWindowSnapshot) UsageAlertWindowSnapshot {
+func initializeUsageAlertWindow(snapshot UsageAlertSnapshot, window, source string, value UsageAlertWindowSnapshot) UsageAlertWindowSnapshot {
 	value.Generation = 1
 	if isCodexOverall7dWindow(snapshot, window) {
 		value.BoundaryAt = value.ResetAt
-		value.AwaitingOfficialReset = snapshot.Source == UsageAlertSourceOpenAIQuotaReset
+		value.AwaitingOfficialReset = source == UsageAlertSourceOpenAIQuotaReset
 	}
 	return value
 }
@@ -2762,12 +2899,20 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 			usageAlertWindowGenerationIdentity(trigger.WindowState),
 		)
 	}
+	accountID := snapshot.AccountID
+	if trigger.WindowState.AccountID > 0 {
+		accountID = trigger.WindowState.AccountID
+	}
+	source := snapshot.Source
+	if trigger.WindowState.Source != "" {
+		source = trigger.WindowState.Source
+	}
 	eventHash := sha256.Sum256([]byte(eventIdentity))
 	event := UsageAlertWebhookEvent{
 		Event:            eventName,
 		EventID:          fmt.Sprintf("ua-%x", eventHash[:]),
 		TriggeredAt:      trigger.TriggeredAt,
-		AccountID:        snapshot.AccountID,
+		AccountID:        accountID,
 		RealAccountID:    snapshot.RealAccountID,
 		RealAccountName:  realAccountName,
 		UsageType:        snapshot.UsageType,
@@ -2775,7 +2920,7 @@ func buildUsageAlertWebhookEvent(snapshot *UsageAlertSnapshot, realAccount *Real
 		ParentUsageType:  snapshot.ParentUsageType,
 		QuotaDimension:   usageAlertLegacyQuotaDimension(snapshot.UsageType),
 		Platform:         snapshot.Platform,
-		Source:           snapshot.Source,
+		Source:           source,
 		RuleID:           trigger.Rule.ID,
 		RuleName:         trigger.Rule.Name,
 		Window:           trigger.Window,

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -78,4 +79,56 @@ func TestRealAccountsIdentifyDeletedAccountSources(t *testing.T) {
 	_, err = client.Account.UpdateOneID(retiredAccount.ID).ClearDeletedAt().Save(ctx)
 	require.NoError(t, err)
 	require.False(t, list()[retired.ID].HasOnlyDeletedAccounts, "restoring an account should make its source visible again")
+}
+
+func TestResolveShadowRealAccountPreservesConcurrentFamilyReassignment(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := &usageAlertRepository{client: client}
+
+	realA, err := client.RealAccount.Create().SetName("Real A").SetPlatform(service.PlatformOpenAI).Save(ctx)
+	require.NoError(t, err)
+	realB, err := client.RealAccount.Create().SetName("Real B").SetPlatform(service.PlatformOpenAI).Save(ctx)
+	require.NoError(t, err)
+
+	parent, err := client.Account.Create().
+		SetName("Parent").
+		SetPlatform(service.PlatformOpenAI).
+		SetType(service.AccountTypeOAuth).
+		SetRealAccountID(realA.ID).
+		Save(ctx)
+	require.NoError(t, err)
+	shadow, err := client.Account.Create().
+		SetName("Parent (Spark)").
+		SetPlatform(service.PlatformOpenAI).
+		SetType(service.AccountTypeOAuth).
+		SetParentAccountID(parent.ID).
+		SetQuotaDimension(service.QuotaDimensionSpark).
+		Save(ctx)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDIn(shadow.ID, parent.ID)).Exec(context.Background())
+		_ = client.RealAccount.DeleteOneID(realA.ID).Exec(context.Background())
+		_ = client.RealAccount.DeleteOneID(realB.ID).Exec(context.Background())
+	})
+
+	// Simulate an administrator committing a family move to realB after an
+	// observation previously saw shadow unbound with parent pointing at realA.
+	require.NoError(t, repo.AttachAccount(ctx, realB.ID, parent.ID))
+
+	resolved, err := repo.ResolveShadowRealAccount(ctx, shadow.ID, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resolved)
+	require.Equal(t, realB.ID, resolved.ID)
+
+	reloadedParent, err := client.Account.Get(ctx, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, reloadedParent.RealAccountID)
+	require.Equal(t, realB.ID, *reloadedParent.RealAccountID)
+
+	reloadedShadow, err := client.Account.Get(ctx, shadow.ID)
+	require.NoError(t, err)
+	require.NotNil(t, reloadedShadow.RealAccountID)
+	require.Equal(t, realB.ID, *reloadedShadow.RealAccountID)
 }
