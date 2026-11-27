@@ -3358,6 +3358,129 @@ func TestUsageAlertSSRFBlocklistTrailingSlashProxyAndConcurrentStop(t *testing.T
 		mu.Unlock()
 	})
 
+	t.Run("stalled HTTPS proxy TLS handshake honors caller cancellation and closes socket", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer func() { _ = ln.Close() }()
+
+		acceptedCh := make(chan struct{})
+		closedCh := make(chan struct{})
+		go func() {
+			conn, accErr := ln.Accept()
+			if accErr != nil {
+				return
+			}
+			close(acceptedCh)
+			_, _ = io.Copy(io.Discard, conn)
+			_ = conn.Close()
+			close(closedCh)
+		}()
+
+		proxyURL, err := url.Parse("https://" + ln.Addr().String())
+		require.NoError(t, err)
+		client := newSafeUsageAlertHTTPClientWithHooks(5*time.Second, http.ProxyURL(proxyURL), func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		})
+		reqCtx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, "https://hooks.example.net/alerts", strings.NewReader("alert"))
+		require.NoError(t, err)
+
+		errCh := make(chan error, 1)
+		go func() {
+			resp, doErr := client.Do(req)
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			errCh <- doErr
+		}()
+
+		<-acceptedCh
+		cancel()
+
+		select {
+		case doErr := <-errCh:
+			require.ErrorIs(t, doErr, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("client.Do did not unblock after cancellation during stalled proxy TLS")
+		}
+		select {
+		case <-closedCh:
+		case <-time.After(time.Second):
+			t.Fatal("proxy socket was not closed after caller cancellation")
+		}
+	})
+
+	t.Run("stalled CONNECT with background request enforces setup timeout and closes socket", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer func() { _ = ln.Close() }()
+
+		closedCh := make(chan struct{})
+		go func() {
+			conn, accErr := ln.Accept()
+			if accErr != nil {
+				return
+			}
+			_, _ = io.Copy(io.Discard, conn)
+			_ = conn.Close()
+			close(closedCh)
+		}()
+
+		proxyURL, err := url.Parse("http://" + ln.Addr().String())
+		require.NoError(t, err)
+		client := newSafeUsageAlertHTTPClientWithHooks(150*time.Millisecond, http.ProxyURL(proxyURL), func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		})
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://hooks.example.net/alerts", strings.NewReader("alert"))
+		require.NoError(t, err)
+
+		start := time.Now()
+		resp, rtErr := client.Transport.RoundTrip(req)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		require.ErrorIs(t, rtErr, context.DeadlineExceeded)
+		require.Less(t, time.Since(start), time.Second)
+		select {
+		case <-closedCh:
+		case <-time.After(time.Second):
+			t.Fatal("proxy socket was not closed after CONNECT setup timeout")
+		}
+	})
+
+	t.Run("oversized CONNECT response header is rejected cleanly", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer func() { _ = ln.Close() }()
+
+		go func() {
+			conn, accErr := ln.Accept()
+			if accErr != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+			br := bufio.NewReader(conn)
+			_, _ = http.ReadRequest(br)
+			_, _ = fmt.Fprintf(conn, "HTTP/1.1 200 Connection Established\r\nX-Huge: %s\r\n\r\n", strings.Repeat("a", 8192))
+		}()
+
+		proxyURL, err := url.Parse("http://" + ln.Addr().String())
+		require.NoError(t, err)
+		client := newSafeUsageAlertHTTPClientWithHooks(2*time.Second, http.ProxyURL(proxyURL), func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		})
+		safeTransport, ok := client.Transport.(*safeUsageAlertTransport)
+		require.True(t, ok)
+		safeTransport.base.MaxResponseHeaderBytes = 2048
+
+		resp, postErr := client.Post("https://hooks.example.net/alerts", "text/plain", strings.NewReader("alert"))
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		require.ErrorContains(t, postErr, "header too large")
+	})
+
 	t.Run("concurrent Observe and Stop never panic under race detector", func(t *testing.T) {
 		for iter := 0; iter < 20; iter++ {
 			svc := NewUsageAlertService(&usageAlertDeliveryRepoStub{rules: []*UsageAlertRule{}}, nil)

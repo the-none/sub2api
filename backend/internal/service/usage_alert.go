@@ -386,7 +386,11 @@ func (s *UsageAlertService) Stop() {
 	s.wg.Wait()
 }
 
-const telegramWebhookHost = "api.telegram.org"
+const (
+	telegramWebhookHost                  = "api.telegram.org"
+	defaultUsageAlertProxySetupTimeout   = 10 * time.Second
+	defaultUsageAlertMaxProxyHeaderBytes = int64(1 << 20)
+)
 
 type usageAlertProxyDecisionKey struct{}
 
@@ -396,19 +400,51 @@ type usageAlertProxyTunnel struct {
 }
 
 type usageAlertProxyDecision struct {
+	requestCtx          context.Context
 	transportProxyURL   *url.URL
 	directProxyDialAddr string
 	connectTunnel       *usageAlertProxyTunnel
 	socksTunnel         *usageAlertProxyTunnel
 }
 
-type usageAlertBufferedConn struct {
+type usageAlertPrefixedConn struct {
 	net.Conn
-	r *bufio.Reader
+	r io.Reader
 }
 
-func (c *usageAlertBufferedConn) Read(p []byte) (int, error) {
+func (c *usageAlertPrefixedConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
+}
+
+func deriveUsageAlertDialContext(dialCtx, reqCtx context.Context, fallbackTimeout time.Duration) (context.Context, context.CancelFunc) {
+	if dialCtx == nil {
+		dialCtx = context.Background()
+	}
+	if fallbackTimeout <= 0 {
+		fallbackTimeout = defaultUsageAlertProxySetupTimeout
+	}
+	deadline := time.Now().Add(fallbackTimeout)
+	if dialDeadline, ok := dialCtx.Deadline(); ok && dialDeadline.Before(deadline) {
+		deadline = dialDeadline
+	}
+	if reqCtx != nil {
+		if reqDeadline, ok := reqCtx.Deadline(); ok && reqDeadline.Before(deadline) {
+			deadline = reqDeadline
+		}
+	}
+	mergedCtx, cancel := context.WithDeadline(dialCtx, deadline)
+	if reqCtx == nil {
+		return mergedCtx, cancel
+	}
+	if reqCtx.Err() != nil {
+		cancel()
+		return mergedCtx, cancel
+	}
+	stopWatch := context.AfterFunc(reqCtx, cancel)
+	return mergedCtx, func() {
+		stopWatch()
+		cancel()
+	}
 }
 
 type safeUsageAlertTransport struct {
@@ -436,8 +472,11 @@ func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, 
 	if err != nil {
 		return nil, err
 	}
+	reqCtx := req.Context()
 	if proxyURL == nil {
-		clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, usageAlertProxyDecision{}))
+		clonedReq := req.Clone(context.WithValue(reqCtx, usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+			requestCtx: reqCtx,
+		}))
 		return t.base.RoundTrip(clonedReq)
 	}
 
@@ -453,6 +492,7 @@ func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, 
 	// environment proxy handles egress (e.g., split-horizon/GFW setups).
 	if host == telegramWebhookHost {
 		decision := usageAlertProxyDecision{
+			requestCtx:          reqCtx,
 			transportProxyURL:   proxyURL,
 			directProxyDialAddr: canonicalProxyDialAddr(proxyURL),
 		}
@@ -461,14 +501,14 @@ func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, 
 			decision.directProxyDialAddr = ""
 			decision.socksTunnel = &usageAlertProxyTunnel{proxyURL: proxyURL}
 		}
-		clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, decision))
+		clonedReq := req.Clone(context.WithValue(reqCtx, usageAlertProxyDecisionKey{}, decision))
 		if decision.socksTunnel != nil {
 			clonedReq.Close = true
 		}
 		return t.base.RoundTrip(clonedReq)
 	}
 
-	ips, err := resolveFn(req.Context(), host)
+	ips, err := resolveFn(reqCtx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +517,8 @@ func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, 
 	}
 
 	if proxyScheme == "socks5" || proxyScheme == "socks5h" {
-		clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+		clonedReq := req.Clone(context.WithValue(reqCtx, usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+			requestCtx:  reqCtx,
 			socksTunnel: &usageAlertProxyTunnel{proxyURL: proxyURL, ips: ips},
 		}))
 		clonedReq.Close = true
@@ -485,7 +526,8 @@ func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, 
 	}
 
 	if strings.EqualFold(req.URL.Scheme, "https") {
-		clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+		clonedReq := req.Clone(context.WithValue(reqCtx, usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+			requestCtx:    reqCtx,
 			connectTunnel: &usageAlertProxyTunnel{proxyURL: proxyURL, ips: ips},
 		}))
 		clonedReq.Close = true
@@ -497,7 +539,8 @@ func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, 
 	// header, so rewriting the request-target to an IP breaks origin vhost
 	// routing. Local URL, redirect, and DNS/IP checks have already validated the
 	// target host against the trusted operator proxy boundary.
-	clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+	clonedReq := req.Clone(context.WithValue(reqCtx, usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+		requestCtx:          reqCtx,
 		transportProxyURL:   proxyURL,
 		directProxyDialAddr: canonicalProxyDialAddr(proxyURL),
 	}))
@@ -555,14 +598,25 @@ func dialUsageAlertHTTPProxyTunnel(
 		proxyAuth = "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
 	}
 	isHTTPSProxy := strings.EqualFold(tunnel.proxyURL.Scheme, "https")
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		deadline = time.Now().Add(defaultUsageAlertProxySetupTimeout)
+	}
+	maxHeaderBytes := defaultUsageAlertMaxProxyHeaderBytes
+	if baseTransport != nil && baseTransport.MaxResponseHeaderBytes > 0 {
+		maxHeaderBytes = baseTransport.MaxResponseHeaderBytes
+	}
 
 	var lastErr error
 	for _, ip := range tunnel.ips {
-		conn, dialErr := baseDialer.DialContext(ctx, network, proxyAddr)
+		rawConn, dialErr := baseDialer.DialContext(ctx, network, proxyAddr)
 		if dialErr != nil {
 			// Proxy TCP connection failure affects the proxy itself; do not loop across origin IPs.
 			return nil, dialErr
 		}
+		stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+		_ = rawConn.SetDeadline(deadline)
+		conn := rawConn
 		if isHTTPSProxy {
 			var tlsCfg *tls.Config
 			if baseTransport != nil && baseTransport.TLSClientConfig != nil {
@@ -572,9 +626,13 @@ func dialUsageAlertHTTPProxyTunnel(
 			}
 			tlsCfg.ServerName = tunnel.proxyURL.Hostname()
 			tlsCfg.NextProtos = []string{"http/1.1"}
-			tlsConn := tls.Client(conn, tlsCfg)
+			tlsConn := tls.Client(rawConn, tlsCfg)
 			if hsErr := tlsConn.HandshakeContext(ctx); hsErr != nil {
-				_ = conn.Close()
+				stopCancel()
+				_ = rawConn.Close()
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, ctxErr
+				}
 				// Proxy TLS failure is on the proxy hop, independent of target IPs.
 				return nil, hsErr
 			}
@@ -592,10 +650,6 @@ func dialUsageAlertHTTPProxyTunnel(
 			connectReq.Header.Set("Proxy-Authorization", proxyAuth)
 		}
 
-		stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
-		if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
-			_ = conn.SetDeadline(deadline)
-		}
 		if writeErr := connectReq.Write(conn); writeErr != nil {
 			stopCancel()
 			_ = conn.Close()
@@ -605,15 +659,24 @@ func dialUsageAlertHTTPProxyTunnel(
 			lastErr = writeErr
 			continue
 		}
-		br := bufio.NewReader(conn)
+		lr := &io.LimitedReader{R: conn, N: maxHeaderBytes}
+		br := bufio.NewReader(lr)
 		resp, readErr := http.ReadResponse(br, connectReq)
-		stopCancel()
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if !stopCancel() {
 			_ = conn.Close()
-			return nil, ctxErr
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			return nil, net.ErrClosed
 		}
 		if readErr != nil {
 			_ = conn.Close()
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if lr.N <= 0 {
+				readErr = errors.New("proxy CONNECT response header too large")
+			}
 			lastErr = readErr
 			continue
 		}
@@ -623,9 +686,15 @@ func dialUsageAlertHTTPProxyTunnel(
 			lastErr = fmt.Errorf("proxy CONNECT failed: %s", resp.Status)
 			continue
 		}
+		_ = rawConn.SetDeadline(time.Time{})
 		_ = conn.SetDeadline(time.Time{})
-		if br.Buffered() > 0 {
-			return &usageAlertBufferedConn{Conn: conn, r: br}, nil
+		if buffered := br.Buffered(); buffered > 0 {
+			peeked, _ := br.Peek(buffered)
+			prefix := append([]byte(nil), peeked...)
+			return &usageAlertPrefixedConn{
+				Conn: conn,
+				r:    io.MultiReader(bytes.NewReader(prefix), conn),
+			}, nil
 		}
 		return conn, nil
 	}
@@ -710,6 +779,10 @@ func newSafeUsageAlertHTTPClientWithHooks(
 		resolveFunc = resolveAllowedWebhookIPs
 	}
 	baseDialer := &net.Dialer{Timeout: 5 * time.Second}
+	proxySetupTimeout := defaultUsageAlertProxySetupTimeout
+	if timeout > 0 && timeout < proxySetupTimeout {
+		proxySetupTimeout = timeout
+	}
 	var baseTransport *http.Transport
 	baseTransport = &http.Transport{
 		DisableKeepAlives: true,
@@ -723,15 +796,18 @@ func newSafeUsageAlertHTTPClientWithHooks(
 		},
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if decision, ok := ctx.Value(usageAlertProxyDecisionKey{}).(usageAlertProxyDecision); ok {
+				setupCtx, cancelSetup := deriveUsageAlertDialContext(ctx, decision.requestCtx, proxySetupTimeout)
+				defer cancelSetup()
 				if decision.connectTunnel != nil {
-					return dialUsageAlertHTTPProxyTunnel(ctx, baseDialer, baseTransport, network, addr, decision.connectTunnel)
+					return dialUsageAlertHTTPProxyTunnel(setupCtx, baseDialer, baseTransport, network, addr, decision.connectTunnel)
 				}
 				if decision.socksTunnel != nil {
-					return dialUsageAlertSOCKSProxyTunnel(ctx, baseDialer, network, addr, decision.socksTunnel)
+					return dialUsageAlertSOCKSProxyTunnel(setupCtx, baseDialer, network, addr, decision.socksTunnel)
 				}
 				if decision.directProxyDialAddr != "" && strings.EqualFold(addr, decision.directProxyDialAddr) {
-					return baseDialer.DialContext(ctx, network, addr)
+					return baseDialer.DialContext(setupCtx, network, addr)
 				}
+				ctx = setupCtx
 			}
 			host, _, err := net.SplitHostPort(addr)
 			if err != nil {
