@@ -252,6 +252,7 @@ func ProvideAccountUsageService(
 	usageAlertService *UsageAlertService,
 	openAIGatewayService *OpenAIGatewayService,
 	rateLimitService *RateLimitService,
+	opsService *OpsService,
 ) *AccountUsageService {
 	service := NewAccountUsageService(
 		accountRepo,
@@ -270,6 +271,9 @@ func ProvideAccountUsageService(
 	usageAlertService.SetOpenAICodexBoundaryRefresher(service)
 	service.SetOpenAIQuotaResetScheduler(rateLimitService)
 	service.agentIdentityWS = openAIGatewayService
+	if opsService != nil {
+		service.opsMonitoring = opsService
+	}
 	if openAIGatewayService != nil {
 		openAIGatewayService.SetUsageSnapshotRefresher(service)
 	}
