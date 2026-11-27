@@ -1,11 +1,13 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +24,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 const (
@@ -384,28 +388,33 @@ func (s *UsageAlertService) Stop() {
 
 const telegramWebhookHost = "api.telegram.org"
 
-type usageAlertProxyDialKey struct{}
+type usageAlertProxyDecisionKey struct{}
+
+type usageAlertProxyTunnel struct {
+	proxyURL *url.URL
+	ips      []net.IP
+}
+
+type usageAlertProxyDecision struct {
+	transportProxyURL   *url.URL
+	directProxyDialAddr string
+	connectTunnel       *usageAlertProxyTunnel
+	socksTunnel         *usageAlertProxyTunnel
+}
+
+type usageAlertBufferedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *usageAlertBufferedConn) Read(p []byte) (int, error) {
+	return c.r.Read(p)
+}
 
 type safeUsageAlertTransport struct {
 	base        *http.Transport
 	proxyFunc   func(*http.Request) (*url.URL, error)
 	resolveFunc func(context.Context, string) ([]net.IP, error)
-}
-
-type usageAlertCloseHookReadCloser struct {
-	io.ReadCloser
-	once    sync.Once
-	onClose func()
-}
-
-func (c *usageAlertCloseHookReadCloser) Close() error {
-	err := c.ReadCloser.Close()
-	c.once.Do(func() {
-		if c.onClose != nil {
-			c.onClose()
-		}
-	})
-	return err
 }
 
 func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -427,108 +436,240 @@ func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, 
 	if err != nil {
 		return nil, err
 	}
-	if proxyURL != nil {
-		host := strings.ToLower(strings.TrimSpace(req.URL.Hostname()))
-		dialAddr := canonicalProxyDialAddr(proxyURL)
-		// Skip local DNS resolution only for Telegram when an operator-configured
-		// environment proxy handles egress (e.g., GFW/split-horizon setups).
-		if host == telegramWebhookHost {
-			if dialAddr != "" {
-				req = req.Clone(context.WithValue(req.Context(), usageAlertProxyDialKey{}, dialAddr))
-			}
-			return t.base.RoundTrip(req)
-		}
-		ips, err := resolveFn(req.Context(), host)
-		if err != nil {
-			return nil, err
-		}
-		if len(ips) == 0 {
-			return nil, errors.New("no resolved addresses available")
-		}
-		port := req.URL.Port()
-		if port == "" {
-			if strings.EqualFold(req.URL.Scheme, "https") {
-				port = "443"
-			} else {
-				port = "80"
-			}
-		}
-		proxyScheme := strings.ToLower(strings.TrimSpace(proxyURL.Scheme))
-		isSOCKS := proxyScheme == "socks5" || proxyScheme == "socks5h"
-		isHTTPS := strings.EqualFold(req.URL.Scheme, "https")
-		var lastErr error
-		for i, ip := range ips {
-			if i > 0 && req.Body != nil {
-				if req.GetBody == nil {
-					break
-				}
-				body, bodyErr := req.GetBody()
-				if bodyErr != nil {
-					return nil, bodyErr
-				}
-				req.Body = body
-			}
-			ctx := req.Context()
-			if dialAddr != "" {
-				ctx = context.WithValue(ctx, usageAlertProxyDialKey{}, dialAddr)
-			}
-			attemptReq := req.Clone(ctx)
-			if attemptReq.Host == "" {
-				attemptReq.Host = req.URL.Host
-			}
-			ipHostPort := net.JoinHostPort(ip.String(), port)
-			attemptURL := *req.URL
-			attemptURL.Host = ipHostPort
-			if !isHTTPS && !isSOCKS {
-				escapedPath := req.URL.EscapedPath()
-				if escapedPath == "" {
-					escapedPath = "/"
-				}
-				attemptURL.Opaque = "//" + ipHostPort + escapedPath
-			}
-			attemptReq.URL = &attemptURL
+	if proxyURL == nil {
+		clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, usageAlertProxyDecision{}))
+		return t.base.RoundTrip(clonedReq)
+	}
 
-			if isHTTPS {
-				tr := t.base.Clone()
-				var tlsCfg *tls.Config
-				if tr.TLSClientConfig != nil {
-					tlsCfg = tr.TLSClientConfig.Clone()
-				} else {
-					tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
-				}
-				if tlsCfg.ServerName == "" {
-					tlsCfg.ServerName = host
-				}
-				tr.TLSClientConfig = tlsCfg
-				resp, rtErr := tr.RoundTrip(attemptReq)
-				if rtErr == nil && resp != nil {
-					if resp.Body == nil {
-						tr.CloseIdleConnections()
-					} else {
-						resp.Body = &usageAlertCloseHookReadCloser{
-							ReadCloser: resp.Body,
-							onClose:    tr.CloseIdleConnections,
-						}
-					}
-					return resp, nil
-				}
-				tr.CloseIdleConnections()
-				lastErr = rtErr
-				continue
-			}
+	host := strings.ToLower(strings.TrimSpace(req.URL.Hostname()))
+	proxyScheme := strings.ToLower(strings.TrimSpace(proxyURL.Scheme))
+	switch proxyScheme {
+	case "http", "https", "socks5", "socks5h":
+	default:
+		return nil, fmt.Errorf("unsupported webhook proxy scheme: %s", proxyURL.Scheme)
+	}
 
-			resp, rtErr := t.base.RoundTrip(attemptReq)
-			if rtErr == nil {
-				return resp, nil
-			}
-			lastErr = rtErr
+	// Skip local DNS resolution only for Telegram when an operator-configured
+	// environment proxy handles egress (e.g., split-horizon/GFW setups).
+	if host == telegramWebhookHost {
+		decision := usageAlertProxyDecision{
+			transportProxyURL:   proxyURL,
+			directProxyDialAddr: canonicalProxyDialAddr(proxyURL),
 		}
-		if lastErr != nil {
-			return nil, lastErr
+		if proxyScheme == "socks5" || proxyScheme == "socks5h" {
+			decision.transportProxyURL = nil
+			decision.directProxyDialAddr = ""
+			decision.socksTunnel = &usageAlertProxyTunnel{proxyURL: proxyURL}
 		}
+		clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, decision))
+		if decision.socksTunnel != nil {
+			clonedReq.Close = true
+		}
+		return t.base.RoundTrip(clonedReq)
+	}
+
+	ips, err := resolveFn(req.Context(), host)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
 		return nil, errors.New("no resolved addresses available")
 	}
-	return t.base.RoundTrip(req)
+
+	if proxyScheme == "socks5" || proxyScheme == "socks5h" {
+		clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+			socksTunnel: &usageAlertProxyTunnel{proxyURL: proxyURL, ips: ips},
+		}))
+		clonedReq.Close = true
+		return t.base.RoundTrip(clonedReq)
+	}
+
+	if strings.EqualFold(req.URL.Scheme, "https") {
+		clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+			connectTunnel: &usageAlertProxyTunnel{proxyURL: proxyURL, ips: ips},
+		}))
+		clonedReq.Close = true
+		return t.base.RoundTrip(clonedReq)
+	}
+
+	// For plain HTTP over an HTTP/HTTPS forward proxy (without CONNECT),
+	// RFC 9112 section 3.2.2 couples the request-target authority and Host
+	// header, so rewriting the request-target to an IP breaks origin vhost
+	// routing. Local URL, redirect, and DNS/IP checks have already validated the
+	// target host against the trusted operator proxy boundary.
+	clonedReq := req.Clone(context.WithValue(req.Context(), usageAlertProxyDecisionKey{}, usageAlertProxyDecision{
+		transportProxyURL:   proxyURL,
+		directProxyDialAddr: canonicalProxyDialAddr(proxyURL),
+	}))
+	return t.base.RoundTrip(clonedReq)
+}
+
+func dialUsageAlertResolvedIPs(ctx context.Context, network, addr string, dialFn func(context.Context, string, string) (net.Conn, error), ips []net.IP) (net.Conn, error) {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid webhook dial target: %w", err)
+	}
+	if len(ips) == 0 {
+		return nil, errors.New("no resolved addresses available")
+	}
+	var lastErr error
+	for _, ip := range ips {
+		conn, dialErr := dialFn(ctx, network, net.JoinHostPort(ip.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New("no resolved addresses available")
+}
+
+func dialUsageAlertHTTPProxyTunnel(
+	ctx context.Context,
+	baseDialer *net.Dialer,
+	baseTransport *http.Transport,
+	network, addr string,
+	tunnel *usageAlertProxyTunnel,
+) (net.Conn, error) {
+	if tunnel == nil || tunnel.proxyURL == nil {
+		return nil, errors.New("webhook proxy configuration is missing")
+	}
+	proxyAddr := canonicalProxyDialAddr(tunnel.proxyURL)
+	if proxyAddr == "" {
+		return nil, errors.New("webhook proxy address is invalid")
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid webhook dial target: %w", err)
+	}
+	if len(tunnel.ips) == 0 {
+		return nil, errors.New("no resolved addresses available")
+	}
+
+	var proxyAuth string
+	if tunnel.proxyURL.User != nil {
+		username := tunnel.proxyURL.User.Username()
+		password, _ := tunnel.proxyURL.User.Password()
+		proxyAuth = "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	}
+	isHTTPSProxy := strings.EqualFold(tunnel.proxyURL.Scheme, "https")
+
+	var lastErr error
+	for _, ip := range tunnel.ips {
+		conn, dialErr := baseDialer.DialContext(ctx, network, proxyAddr)
+		if dialErr != nil {
+			// Proxy TCP connection failure affects the proxy itself; do not loop across origin IPs.
+			return nil, dialErr
+		}
+		if isHTTPSProxy {
+			var tlsCfg *tls.Config
+			if baseTransport != nil && baseTransport.TLSClientConfig != nil {
+				tlsCfg = baseTransport.TLSClientConfig.Clone()
+			} else {
+				tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
+			}
+			tlsCfg.ServerName = tunnel.proxyURL.Hostname()
+			tlsCfg.NextProtos = []string{"http/1.1"}
+			tlsConn := tls.Client(conn, tlsCfg)
+			if hsErr := tlsConn.HandshakeContext(ctx); hsErr != nil {
+				_ = conn.Close()
+				// Proxy TLS failure is on the proxy hop, independent of target IPs.
+				return nil, hsErr
+			}
+			conn = tlsConn
+		}
+
+		connectTarget := net.JoinHostPort(ip.String(), port)
+		connectReq := &http.Request{
+			Method: http.MethodConnect,
+			URL:    &url.URL{Opaque: connectTarget},
+			Host:   connectTarget,
+			Header: make(http.Header),
+		}
+		if proxyAuth != "" {
+			connectReq.Header.Set("Proxy-Authorization", proxyAuth)
+		}
+
+		stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+		if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
+			_ = conn.SetDeadline(deadline)
+		}
+		if writeErr := connectReq.Write(conn); writeErr != nil {
+			stopCancel()
+			_ = conn.Close()
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			lastErr = writeErr
+			continue
+		}
+		br := bufio.NewReader(conn)
+		resp, readErr := http.ReadResponse(br, connectReq)
+		stopCancel()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			_ = conn.Close()
+			return nil, ctxErr
+		}
+		if readErr != nil {
+			_ = conn.Close()
+			lastErr = readErr
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			_ = conn.Close()
+			lastErr = fmt.Errorf("proxy CONNECT failed: %s", resp.Status)
+			continue
+		}
+		_ = conn.SetDeadline(time.Time{})
+		if br.Buffered() > 0 {
+			return &usageAlertBufferedConn{Conn: conn, r: br}, nil
+		}
+		return conn, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New("no resolved addresses available")
+}
+
+func dialUsageAlertSOCKSProxyTunnel(
+	ctx context.Context,
+	baseDialer *net.Dialer,
+	network, addr string,
+	tunnel *usageAlertProxyTunnel,
+) (net.Conn, error) {
+	if tunnel == nil || tunnel.proxyURL == nil {
+		return nil, errors.New("webhook proxy configuration is missing")
+	}
+	var auth *proxy.Auth
+	if tunnel.proxyURL.User != nil {
+		username := tunnel.proxyURL.User.Username()
+		password, _ := tunnel.proxyURL.User.Password()
+		auth = &proxy.Auth{User: username, Password: password}
+	}
+	proxyAddr := canonicalProxyDialAddr(tunnel.proxyURL)
+	if proxyAddr == "" {
+		return nil, errors.New("webhook proxy address is invalid")
+	}
+	socksDialer, err := proxy.SOCKS5("tcp", proxyAddr, auth, baseDialer)
+	if err != nil {
+		return nil, fmt.Errorf("create socks5 proxy dialer: %w", err)
+	}
+	dialFn := socksDialer.Dial
+	if ctxDialer, ok := socksDialer.(proxy.ContextDialer); ok {
+		dialFn = func(n, a string) (net.Conn, error) {
+			return ctxDialer.DialContext(ctx, n, a)
+		}
+	}
+	if len(tunnel.ips) == 0 {
+		return dialFn("tcp", addr)
+	}
+	return dialUsageAlertResolvedIPs(ctx, network, addr, func(_ context.Context, n, a string) (net.Conn, error) {
+		return dialFn(n, a)
+	}, tunnel.ips)
 }
 
 func canonicalProxyDialAddr(proxyURL *url.URL) string {
@@ -569,13 +710,30 @@ func newSafeUsageAlertHTTPClientWithHooks(
 		resolveFunc = resolveAllowedWebhookIPs
 	}
 	baseDialer := &net.Dialer{Timeout: 5 * time.Second}
-	baseTransport := &http.Transport{
-		Proxy: proxyFunc,
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if proxyAddr, ok := ctx.Value(usageAlertProxyDialKey{}).(string); ok && proxyAddr != "" && strings.EqualFold(addr, proxyAddr) {
-				return baseDialer.DialContext(ctx, network, addr)
+	var baseTransport *http.Transport
+	baseTransport = &http.Transport{
+		DisableKeepAlives: true,
+		Proxy: func(req *http.Request) (*url.URL, error) {
+			if req != nil {
+				if decision, ok := req.Context().Value(usageAlertProxyDecisionKey{}).(usageAlertProxyDecision); ok {
+					return decision.transportProxyURL, nil
+				}
 			}
-			host, port, err := net.SplitHostPort(addr)
+			return proxyFunc(req)
+		},
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if decision, ok := ctx.Value(usageAlertProxyDecisionKey{}).(usageAlertProxyDecision); ok {
+				if decision.connectTunnel != nil {
+					return dialUsageAlertHTTPProxyTunnel(ctx, baseDialer, baseTransport, network, addr, decision.connectTunnel)
+				}
+				if decision.socksTunnel != nil {
+					return dialUsageAlertSOCKSProxyTunnel(ctx, baseDialer, network, addr, decision.socksTunnel)
+				}
+				if decision.directProxyDialAddr != "" && strings.EqualFold(addr, decision.directProxyDialAddr) {
+					return baseDialer.DialContext(ctx, network, addr)
+				}
+			}
+			host, _, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, fmt.Errorf("invalid webhook dial target: %w", err)
 			}
@@ -583,18 +741,7 @@ func newSafeUsageAlertHTTPClientWithHooks(
 			if err != nil {
 				return nil, err
 			}
-			var lastErr error
-			for _, ip := range ips {
-				conn, dialErr := baseDialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-				if dialErr == nil {
-					return conn, nil
-				}
-				lastErr = dialErr
-			}
-			if lastErr != nil {
-				return nil, lastErr
-			}
-			return nil, errors.New("no resolved addresses available")
+			return dialUsageAlertResolvedIPs(ctx, network, addr, baseDialer.DialContext, ips)
 		},
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: timeout,

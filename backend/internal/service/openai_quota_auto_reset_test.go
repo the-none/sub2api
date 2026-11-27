@@ -925,6 +925,138 @@ func TestOpenAIQuotaAutoReset_ReplayOutcomeAndPreConsumeGuards(t *testing.T) {
 		require.Equal(t, OpenAIAutoResetStatusNoCredit, repo.stateForTest().Status)
 		require.False(t, repo.stateForTest().AttemptUnconfirmed)
 	})
+
+	t.Run("passive low Extra sample never erases cycle credit fence", func(t *testing.T) {
+		now := time.Now().UTC()
+		ctx := context.Background()
+		svc, repo, quota := newResetThresholdTestFixture(t, nil, 2)
+		quota.failFirst = true
+		a := openAIAutoResetCreditCandidate{ID: "A", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339)}
+		b := openAIAutoResetCreditCandidate{ID: "B", ExpiresAt: now.Add(2 * time.Hour).Format(time.RFC3339)}
+		quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{a, b}
+
+		require.Error(t, svc.evaluateAccount(ctx, 501))
+		state := repo.stateForTest()
+		require.True(t, state.AttemptUnconfirmed)
+		require.NotEmpty(t, state.AttemptCycleHash)
+		require.NotEmpty(t, state.AttemptCreditHash)
+
+		// A fresh passive Extra sample below threshold (!needsQuery) must keep AttemptCycleHash/AttemptCreditHash.
+		repo.mu.Lock()
+		state.RetryAfter = now.Add(-time.Minute).Format(time.RFC3339Nano)
+		repo.account.Extra[OpenAIAutoResetCreditStateExtraKey] = state
+		repo.account.Extra["codex_7d_used_percent"] = 0.0
+		repo.account.Extra["codex_usage_updated_at"] = now.Format(time.RFC3339)
+		repo.mu.Unlock()
+		require.NoError(t, svc.evaluateAccount(ctx, 501))
+		require.EqualValues(t, 1, quota.queryCalls.Load())
+		afterIdle := repo.stateForTest()
+		require.Equal(t, state.AttemptCycleHash, afterIdle.AttemptCycleHash)
+		require.Equal(t, state.AttemptCreditHash, afterIdle.AttemptCreditHash)
+
+		// When usage climbs back in the same cycle and only credit B is visible, Refuse switching credits.
+		repo.setExtraForTest("codex_7d_used_percent", 99.0)
+		quota.usage.RateLimitResetCredits.AvailableCount = 1
+		quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{b}
+		err := svc.evaluateAccount(ctx, 501)
+		require.Error(t, err)
+		require.Equal(t, "OPENAI_AUTO_RESET_ORIGINAL_CREDIT_UNAVAILABLE", infraerrors.Reason(err))
+		require.Len(t, quota.resetArgs, 1)
+	})
+
+	t.Run("weekly reset while 5h still full preserves AttemptUnconfirmed until both windows schedulable", func(t *testing.T) {
+		now := time.Now().UTC()
+		ctx := context.Background()
+		svc, repo, quota := newResetThresholdTestFixture(t, nil, 1)
+		quota.failFirst = true
+		recoverer := &autoResetSwitchableRecoverer{}
+		svc.recoverer = recoverer
+		repo.mu.Lock()
+		repo.account.RateLimitedAt = ptrTime(now.Add(-time.Minute))
+		repo.account.RateLimitResetAt = ptrTime(now.Add(24 * time.Hour))
+		repo.mu.Unlock()
+		quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{{ID: "A", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339)}}
+
+		require.Error(t, svc.evaluateAccount(ctx, 501))
+		state := repo.stateForTest()
+		require.True(t, state.AttemptUnconfirmed)
+		state.RetryAfter = now.Add(-time.Minute).Format(time.RFC3339Nano)
+		repo.setExtraForTest(OpenAIAutoResetCreditStateExtraKey, state)
+
+		// Weekly dropped to 0%, but 5h is still 100% paused -> AttemptUnconfirmed stays true, 429 stays intact.
+		quota.usage.RateLimitResetCredits.AvailableCount = 0
+		quota.usage.autoResetCandidates = nil
+		quota.usage.RateLimit.PrimaryWindow = &OpenAIRateLimitWindow{UsedPercent: 100, LimitWindowSeconds: 5 * 3600, ResetAt: now.Add(2 * time.Hour).Unix()}
+		quota.usage.RateLimit.SecondaryWindow.UsedPercent = 0
+		quota.usage.RateLimit.Allowed = false
+		quota.usage.RateLimit.LimitReached = true
+		repo.setExtraForTest("codex_usage_updated_at", now.Add(-time.Hour).Format(time.RFC3339))
+
+		require.NoError(t, svc.evaluateAccount(ctx, 501))
+		require.True(t, repo.stateForTest().AttemptUnconfirmed)
+		require.Zero(t, recoverer.quotaRateLimitClear.Load())
+
+		// Later both windows are usable -> clears 429 once and drops AttemptUnconfirmed.
+		quota.usage.RateLimit.PrimaryWindow.UsedPercent = 0
+		quota.usage.RateLimit.Allowed = true
+		quota.usage.RateLimit.LimitReached = false
+		repo.setExtraForTest("codex_usage_updated_at", now.Add(-time.Hour).Format(time.RFC3339))
+
+		require.NoError(t, svc.evaluateAccount(ctx, 501))
+		require.EqualValues(t, 1, recoverer.quotaRateLimitClear.Load())
+		require.False(t, repo.stateForTest().AttemptUnconfirmed)
+	})
+
+	t.Run("retry returning BUSY or NOTHING_TO_RESET preserves prior AttemptUnconfirmed for later 429 recovery", func(t *testing.T) {
+		retryErrors := []error{
+			infraerrors.Conflict("OPENAI_RESET_BUSY", "another reset is in progress"),
+			openAIResetNoopError(),
+		}
+		for _, retryErr := range retryErrors {
+			t.Run(infraerrors.Reason(retryErr), func(t *testing.T) {
+				now := time.Now().UTC()
+				ctx := context.Background()
+				svc, repo, quota := newResetThresholdTestFixture(t, nil, 1)
+				quota.failFirst = true
+				recoverer := &autoResetSwitchableRecoverer{}
+				svc.recoverer = recoverer
+				cfg := DefaultIdempotencyConfig()
+				cfg.ObserveOnly = false
+				cfg.FailedRetryBackoff = 0
+				svc.idempotency = NewIdempotencyCoordinator(newInMemoryIdempotencyRepo(), cfg)
+				repo.mu.Lock()
+				repo.account.RateLimitedAt = ptrTime(now.Add(-time.Minute))
+				repo.account.RateLimitResetAt = ptrTime(now.Add(24 * time.Hour))
+				repo.mu.Unlock()
+				quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{{ID: "A", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339)}}
+
+				// First attempt dispatches and fails ambiguously -> AttemptUnconfirmed=true.
+				require.Error(t, svc.evaluateAccount(ctx, 501))
+				state := repo.stateForTest()
+				require.True(t, state.AttemptUnconfirmed)
+
+				// Retry gets BUSY or NOTHING_TO_RESET -> AttemptUnconfirmed must stay true.
+				state.RetryAfter = now.Add(-time.Minute).Format(time.RFC3339Nano)
+				repo.setExtraForTest(OpenAIAutoResetCreditStateExtraKey, state)
+				svc.quota = &autoResetRetryErrQuota{autoResetTestQuota: quota, retryErr: retryErr}
+				require.NoError(t, svc.evaluateAccount(ctx, 501))
+				state = repo.stateForTest()
+				require.True(t, state.AttemptUnconfirmed)
+				require.Equal(t, infraerrors.Reason(retryErr), state.ErrorCode)
+
+				// Subsequent schedulable check clears the stale 429 once and drops AttemptUnconfirmed.
+				state.RetryAfter = now.Add(-time.Minute).Format(time.RFC3339Nano)
+				repo.setExtraForTest(OpenAIAutoResetCreditStateExtraKey, state)
+				repo.setExtraForTest("codex_usage_updated_at", now.Add(-time.Hour).Format(time.RFC3339))
+				quota.usage.RateLimit.Allowed = true
+				quota.usage.RateLimit.LimitReached = false
+				quota.usage.RateLimit.SecondaryWindow.UsedPercent = 0
+				require.NoError(t, svc.evaluateAccount(ctx, 501))
+				require.EqualValues(t, 1, recoverer.quotaRateLimitClear.Load())
+				require.False(t, repo.stateForTest().AttemptUnconfirmed)
+			})
+		}
+	})
 }
 
 type autoResetRealClientErrorQuota struct {
@@ -934,4 +1066,16 @@ type autoResetRealClientErrorQuota struct {
 
 func (q *autoResetRealClientErrorQuota) ResetCreditTargeted(ctx context.Context, accountID int64, creditID, redeemRequestID string) (*OpenAIQuotaResetResult, error) {
 	return q.real.ResetCreditTargeted(ctx, accountID, creditID, redeemRequestID)
+}
+
+type autoResetRetryErrQuota struct {
+	*autoResetTestQuota
+	retryErr error
+}
+
+func (q *autoResetRetryErrQuota) ResetCreditTargeted(ctx context.Context, accountID int64, creditID, redeemRequestID string) (*OpenAIQuotaResetResult, error) {
+	if q.resetCalls.Load() == 0 {
+		return q.autoResetTestQuota.ResetCreditTargeted(ctx, accountID, creditID, redeemRequestID)
+	}
+	return nil, q.retryErr
 }

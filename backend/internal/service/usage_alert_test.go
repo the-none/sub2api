@@ -1,10 +1,19 @@
 package service
 
 import (
+	"bufio"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -3092,9 +3101,13 @@ func TestUsageAlertSSRFBlocklistTrailingSlashProxyAndConcurrentStop(t *testing.T
 		require.Equal(t, "https://hooks.example.com/v1/alert/", created.URL)
 	})
 
-	t.Run("environment proxy routes public/telegram requests while pinning public IPs and blocking private DNS", func(t *testing.T) {
+	t.Run("environment proxy routes public/telegram requests while preserving vhost/TLS and blocking private DNS", func(t *testing.T) {
 		var proxiedTargets []string
 		var proxiedRequestURIs []string
+		mux := http.NewServeMux()
+		mux.HandleFunc("hooks.example.com/alert/", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
 		proxySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodConnect {
 				proxiedTargets = append(proxiedTargets, r.RequestURI)
@@ -3103,15 +3116,30 @@ func TestUsageAlertSSRFBlocklistTrailingSlashProxyAndConcurrentStop(t *testing.T
 			}
 			proxiedTargets = append(proxiedTargets, r.Host)
 			proxiedRequestURIs = append(proxiedRequestURIs, r.RequestURI)
+			if r.Host == "hooks.example.com" {
+				originReq := httptest.NewRequest(r.Method, r.URL.RequestURI(), r.Body)
+				originReq.Host = r.Host
+				mux.ServeHTTP(w, originReq)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer proxySrv.Close()
 		proxyURL, err := url.Parse(proxySrv.URL)
 		require.NoError(t, err)
 
+		var proxyCalls atomic.Int32
+		proxyHook := func(r *http.Request) (*url.URL, error) {
+			proxyCalls.Add(1)
+			// Simulate IP-based NO_PROXY bypass trap: only hostnames match proxy policy.
+			if net.ParseIP(r.URL.Hostname()) != nil {
+				return nil, nil
+			}
+			return proxyURL, nil
+		}
 		resolveHook := func(_ context.Context, host string) ([]net.IP, error) {
 			switch host {
-			case "hooks.example.com":
+			case "hooks.example.com", "hooks.example.net":
 				return []net.IP{net.ParseIP("93.184.216.34")}, nil
 			case "rebind.example.com":
 				return nil, errors.New("resolved ip 100.100.100.200 is not allowed")
@@ -3119,11 +3147,7 @@ func TestUsageAlertSSRFBlocklistTrailingSlashProxyAndConcurrentStop(t *testing.T
 				return nil, fmt.Errorf("unexpected host lookup: %s", host)
 			}
 		}
-		client := newSafeUsageAlertHTTPClientWithHooks(
-			2*time.Second,
-			func(*http.Request) (*url.URL, error) { return proxyURL, nil },
-			resolveHook,
-		)
+		client := newSafeUsageAlertHTTPClientWithHooks(2*time.Second, proxyHook, resolveHook)
 
 		// Telegram bypasses local DNS resolution when proxied.
 		reqTG, err := http.NewRequest(http.MethodPost, "http://api.telegram.org/bot123:abc/sendMessage", nil)
@@ -3132,27 +3156,206 @@ func TestUsageAlertSSRFBlocklistTrailingSlashProxyAndConcurrentStop(t *testing.T
 		require.NoError(t, err)
 		require.NoError(t, respTG.Body.Close())
 
-		// Public HTTP webhook through an HTTP proxy pins the validated IP in the request-URI (never sending hostname target).
-		reqPub, err := http.NewRequest(http.MethodPost, "http://hooks.example.com/alert/", nil)
+		// Public HTTP webhook through an HTTP proxy preserves virtual-host routing Host header and evaluates proxyHook once.
+		reqPub, err := http.NewRequest(http.MethodPost, "http://hooks.example.com/alert/", strings.NewReader("payload"))
 		require.NoError(t, err)
 		respPub, err := client.Do(reqPub)
 		require.NoError(t, err)
 		require.NoError(t, respPub.Body.Close())
-		require.Equal(t, []string{"api.telegram.org", "93.184.216.34:80"}, proxiedTargets)
-		require.Equal(t, []string{"http://api.telegram.org/bot123:abc/sendMessage", "http://93.184.216.34:80/alert/"}, proxiedRequestURIs)
+		require.Equal(t, http.StatusNoContent, respPub.StatusCode)
+		require.Equal(t, []string{"api.telegram.org", "hooks.example.com"}, proxiedTargets)
+		require.Equal(t, []string{"http://api.telegram.org/bot123:abc/sendMessage", "http://hooks.example.com/alert/"}, proxiedRequestURIs)
 
 		// Public HTTPS webhook through an HTTP CONNECT proxy sends the pinned IP in CONNECT target, not the hostname.
-		reqHTTPS, err := http.NewRequest(http.MethodPost, "https://hooks.example.com/alert/", nil)
+		reqHTTPS, err := http.NewRequest(http.MethodPost, "https://hooks.example.com/alert/", strings.NewReader("payload"))
 		require.NoError(t, err)
 		_, err = client.Do(reqHTTPS)
 		require.Error(t, err)
 		require.Equal(t, "93.184.216.34:443", proxiedTargets[len(proxiedTargets)-1])
+		require.EqualValues(t, 3, proxyCalls.Load())
 
 		// Private DNS target is blocked even when a proxy is configured.
 		reqPriv, err := http.NewRequest(http.MethodPost, "http://rebind.example.com/hook", nil)
 		require.NoError(t, err)
 		_, err = client.Do(reqPriv)
 		require.ErrorContains(t, err, "not allowed")
+	})
+
+	t.Run("HTTPS webhook through HTTPS forward proxy verifies proxy TLS identity and tunnels pinned IP with origin SNI", func(t *testing.T) {
+		originCert, originPool := makeTestWebhookCert(t, "hooks.example.net")
+		originMux := http.NewServeMux()
+		originMux.HandleFunc("hooks.example.net/alerts", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(http.StatusNoContent)
+		})
+		originLn, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer func() { _ = originLn.Close() }()
+		originSrv := &http.Server{
+			Handler:   originMux,
+			TLSConfig: &tls.Config{Certificates: []tls.Certificate{originCert}, MinVersion: tls.VersionTLS12},
+		}
+		go func() { _ = originSrv.ServeTLS(originLn, "", "") }()
+		defer func() { _ = originSrv.Close() }()
+
+		var connectTarget atomic.Value
+		var connects atomic.Int32
+		proxySrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodConnect {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			connects.Add(1)
+			connectTarget.Store(r.RequestURI)
+			upstreamConn, dialErr := net.DialTimeout("tcp", originLn.Addr().String(), 2*time.Second)
+			if dialErr != nil {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				_ = upstreamConn.Close()
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			clientConn, clientBuf, hjErr := hj.Hijack()
+			if hjErr != nil {
+				_ = upstreamConn.Close()
+				return
+			}
+			_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+			go func() {
+				defer func() { _ = upstreamConn.Close(); _ = clientConn.Close() }()
+				if clientBuf != nil && clientBuf.Reader.Buffered() > 0 {
+					_, _ = io.CopyN(upstreamConn, clientBuf, int64(clientBuf.Reader.Buffered()))
+				}
+				_, _ = io.Copy(upstreamConn, clientConn)
+			}()
+			go func() {
+				defer func() { _ = clientConn.Close(); _ = upstreamConn.Close() }()
+				_, _ = io.Copy(clientConn, upstreamConn)
+			}()
+		}))
+		defer proxySrv.Close()
+
+		proxyURL, err := url.Parse(proxySrv.URL)
+		require.NoError(t, err)
+		roots := originPool
+		roots.AddCert(proxySrv.Certificate())
+
+		client := newSafeUsageAlertHTTPClientWithHooks(2*time.Second, http.ProxyURL(proxyURL), func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		})
+		safeTransport, ok := client.Transport.(*safeUsageAlertTransport)
+		require.True(t, ok)
+		safeTransport.base.TLSClientConfig = &tls.Config{
+			RootCAs:    roots,
+			MinVersion: tls.VersionTLS12,
+		}
+		resp, err := client.Post("https://hooks.example.net/alerts", "text/plain", strings.NewReader("alert"))
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusNoContent, resp.StatusCode)
+		require.EqualValues(t, 1, connects.Load())
+		require.Equal(t, "93.184.216.34:443", connectTarget.Load())
+	})
+
+	t.Run("SOCKS5 proxy receives pinned public IP without replaying POST on response drop when retry_count=0", func(t *testing.T) {
+		var socksRequests []string
+		socksLn, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer func() { _ = socksLn.Close() }()
+
+		var accepted atomic.Int32
+		httpLn, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer func() { _ = httpLn.Close() }()
+		httpSrv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			if accepted.Add(1) == 1 {
+				if hj, ok := w.(http.Hijacker); ok {
+					c, _, hjErr := hj.Hijack()
+					if hjErr == nil {
+						_ = c.Close()
+					}
+				}
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})}
+		go func() { _ = httpSrv.Serve(httpLn) }()
+		defer func() { _ = httpSrv.Close() }()
+
+		var mu sync.Mutex
+		go func() {
+			for {
+				c, accErr := socksLn.Accept()
+				if accErr != nil {
+					return
+				}
+				go func(conn net.Conn) {
+					defer func() { _ = conn.Close() }()
+					br := bufio.NewReader(conn)
+					ver, _ := br.ReadByte()
+					nMethods, _ := br.ReadByte()
+					if ver != 5 {
+						return
+					}
+					_, _ = io.CopyN(io.Discard, br, int64(nMethods))
+					_, _ = conn.Write([]byte{5, 0})
+					hdr := make([]byte, 4)
+					if _, rErr := io.ReadFull(br, hdr); rErr != nil {
+						return
+					}
+					var dst string
+					switch hdr[3] {
+					case 1:
+						ip := make([]byte, 4)
+						_, _ = io.ReadFull(br, ip)
+						dst = net.IP(ip).String()
+					case 3:
+						l, _ := br.ReadByte()
+						name := make([]byte, l)
+						_, _ = io.ReadFull(br, name)
+						dst = string(name)
+					}
+					portBuf := make([]byte, 2)
+					_, _ = io.ReadFull(br, portBuf)
+					port := int(portBuf[0])<<8 | int(portBuf[1])
+					mu.Lock()
+					socksRequests = append(socksRequests, fmt.Sprintf("%s:%d", dst, port))
+					mu.Unlock()
+					up, dErr := net.Dial("tcp", httpLn.Addr().String())
+					if dErr != nil {
+						_, _ = conn.Write([]byte{5, 1, 0, 1, 0, 0, 0, 0, 0, 0})
+						return
+					}
+					defer func() { _ = up.Close() }()
+					_, _ = conn.Write([]byte{5, 0, 0, 1, 127, 0, 0, 1, 0, 0})
+					go func() { _, _ = io.Copy(up, br) }()
+					_, _ = io.Copy(conn, up)
+				}(c)
+			}
+		}()
+
+		socksURL, err := url.Parse("socks5h://" + socksLn.Addr().String())
+		require.NoError(t, err)
+		client := newSafeUsageAlertHTTPClientWithHooks(2*time.Second, http.ProxyURL(socksURL), func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("93.184.216.35")}, nil
+		})
+		svc := &UsageAlertService{httpClient: client}
+		err = svc.deliverWebhookWithRetry(context.Background(), UsageAlertWebhook{
+			Name:       "test",
+			URL:        "http://hooks.example.net/alerts",
+			Type:       UsageAlertWebhookTypeJSONPost,
+			Enabled:    true,
+			RetryCount: 0,
+		}, UsageAlertWebhookEvent{EventID: "review-test"})
+		require.Error(t, err)
+		require.EqualValues(t, 1, accepted.Load())
+		mu.Lock()
+		require.Equal(t, []string{"93.184.216.34:80"}, socksRequests)
+		mu.Unlock()
 	})
 
 	t.Run("concurrent Observe and Stop never panic under race detector", func(t *testing.T) {
@@ -3227,4 +3430,30 @@ func validUsageAlertRuleForTest() *UsageAlertRule {
 		CooldownMinutes: 60,
 		Enabled:         true,
 	}
+}
+
+func makeTestWebhookCert(t *testing.T, dnsNames ...string) (tls.Certificate, *x509.CertPool) {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: dnsNames[0]},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     dnsNames,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+	require.NoError(t, err)
+	cert, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+	return tls.Certificate{
+		Certificate: [][]byte{der},
+		PrivateKey:  priv,
+		Leaf:        cert,
+	}, pool
 }

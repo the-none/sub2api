@@ -336,7 +336,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		state.ErrorCode == OpenAIQuotaResetWarningAccountRecoveryFailed && state.AttemptUnconfirmed
 	needsQuery := openAIAutoResetSnapshotStale(account.Extra, now) ||
 		pendingRecovery ||
-		(priorUnconfirmedAttempt && !assessment.resetReached && account.Status != StatusError && (account.RateLimitedAt != nil || account.RateLimitResetAt != nil)) ||
+		(priorUnconfirmedAttempt && !assessment.resetReached && (!assessment.pauseReached || state.Status == OpenAIAutoResetStatusResetting) && account.Status != StatusError && (account.RateLimitedAt != nil || account.RateLimitResetAt != nil)) ||
 		(assessment.resetReached && !openAIAutoResetNoCreditConfirmed(state, now))
 	if assessment.pauseReached && !assessment.resetReached {
 		needsQuery = needsQuery || state == nil || state.Status == OpenAIAutoResetStatusChecking || state.Status == OpenAIAutoResetStatusFailed || openAIAutoResetStateStale(state, now)
@@ -345,12 +345,9 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		return nil
 	}
 	if !needsQuery {
-		if !assessment.pauseReached && state != nil && (state.TriggerWindow != "" || state.AttemptUnconfirmed) {
+		if !assessment.pauseReached && state != nil && state.TriggerWindow != "" {
 			state.TriggerWindow = ""
 			state.ErrorCode = ""
-			state.AttemptUnconfirmed = false
-			state.AttemptCycleHash = ""
-			state.AttemptCreditHash = ""
 			state.CheckedAt = now.UTC().Format(time.RFC3339)
 			if state.AvailableCount > 0 {
 				state.Status = OpenAIAutoResetStatusAvailable
@@ -398,9 +395,15 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	assessment = s.assessUsage(usage, account, config, now)
 	available := usage.RateLimitResetCredits.AvailableCount
 	if !assessment.resetReached {
-		if priorUnconfirmedAttempt && account.Status != StatusError && openAIUsageConfirmsSchedulable(usage, assessment.pauseReached, now) {
-			if err := maybeRecoverOpenAIQuotaBlocks(ctx, observedBeforeQuery, s.recoverer); err != nil {
-				return s.failState(ctx, accountID, checking, OpenAIQuotaResetWarningAccountRecoveryFailed, err)
+		unconfirmed := priorUnconfirmedAttempt
+		if priorUnconfirmedAttempt {
+			if account.Status == StatusError {
+				unconfirmed = false
+			} else if openAIUsageConfirmsSchedulable(usage, assessment.pauseReached, now) {
+				if err := maybeRecoverOpenAIQuotaBlocks(ctx, observedBeforeQuery, s.recoverer); err != nil {
+					return s.failState(ctx, accountID, checking, OpenAIQuotaResetWarningAccountRecoveryFailed, err)
+				}
+				unconfirmed = false
 			}
 		}
 		status := OpenAIAutoResetStatusNoCredit
@@ -408,10 +411,13 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 			status = OpenAIAutoResetStatusAvailable
 		}
 		return s.persistState(ctx, accountID, &OpenAIAutoResetCreditState{
-			Status:         status,
-			TriggerWindow:  assessment.triggerWindow,
-			AvailableCount: available,
-			CheckedAt:      now.UTC().Format(time.RFC3339),
+			Status:             status,
+			TriggerWindow:      assessment.triggerWindow,
+			AvailableCount:     available,
+			CheckedAt:          now.UTC().Format(time.RFC3339),
+			AttemptCycleHash:   checking.AttemptCycleHash,
+			AttemptCreditHash:  checking.AttemptCreditHash,
+			AttemptUnconfirmed: unconfirmed,
 		})
 	}
 	if available <= 0 {
@@ -441,7 +447,9 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		failed := checking
 		failed.AvailableCount = available
 		failed.TriggerWindow = assessment.triggerWindow
-		failed.AttemptCycleHash = cycleHash
+		if failed.AttemptCreditHash == "" || failed.AttemptCycleHash == cycleHash {
+			failed.AttemptCycleHash = cycleHash
+		}
 		return s.failState(ctx, accountID, failed, infraerrors.Reason(selectErr), selectErr)
 	}
 	creditHash := shortOpenAIAutoResetHash(candidate.ID)
@@ -524,7 +532,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		if openAIResetNotSent(err) || reason == "OPENAI_RESET_NOTHING_TO_RESET" {
 			resetting.Status = OpenAIAutoResetStatusAvailable
 			resetting.ErrorCode = reason
-			resetting.AttemptUnconfirmed = false
+			copyOpenAIAutoResetAttempt(resetting, checking)
 			resetting.LastResultAt = time.Now().UTC().Format(time.RFC3339)
 			return persistFinal(resetting)
 		}
@@ -541,14 +549,14 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 			if !priorUnconfirmedAttempt {
 				resetting.Status = OpenAIAutoResetStatusFailed
 				resetting.ErrorCode = reason
-				resetting.AttemptUnconfirmed = false
+				copyOpenAIAutoResetAttempt(resetting, checking)
 				resetting.LastResultAt = time.Now().UTC().Format(time.RFC3339)
 				return persistFinal(resetting)
 			}
 			return nil
 		}
 		if !sent && !priorUnconfirmedAttempt {
-			resetting.AttemptUnconfirmed = false
+			copyOpenAIAutoResetAttempt(resetting, checking)
 		}
 		s.recordAudit(accountID, assessment, available, "failed", 0, reason)
 		return failFinal(resetting, reason, err)
