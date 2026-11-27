@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -641,6 +643,7 @@ func TestObserveAsyncRetriesThresholdCrossingFromNormalState(t *testing.T) {
 		},
 	}
 	svc := NewUsageAlertService(repo, nil)
+	svc.httpClient = healthy.Client()
 	snapshot := UsageAlertSnapshot{
 		AccountID: 2, RealAccountID: realAccountID, UsageType: UsageAlertTypeOverall,
 		Platform: UsageAlertPlatformOpenAI, SampledAt: time.Now().UTC(),
@@ -1502,6 +1505,7 @@ func TestObserveAsyncAcceptsResetPrecisionDifferencesAcrossUsageSources(t *testi
 					webhook: &UsageAlertWebhook{ID: 2, Name: "test", URL: server.URL, Enabled: true},
 				}
 				svc := NewUsageAlertService(repo, nil)
+				svc.httpClient = server.Client()
 				now := time.Now().UTC()
 				headerReset := now.Add(72 * time.Hour).Truncate(time.Second)
 				apiReset := headerReset.Add(tc.delta)
@@ -2813,6 +2817,302 @@ func TestEvaluateRulesFailsClosedWhenStateReadFails(t *testing.T) {
 	require.ErrorContains(t, err, "get state for rule 7")
 	require.Empty(t, triggers)
 	require.Zero(t, repo.upsertStateCalls)
+}
+
+type usageAlertWebhookRepoStub struct {
+	UsageAlertRepository
+	webhooks map[int64]*UsageAlertWebhook
+	updated  *UsageAlertWebhook
+}
+
+func (s *usageAlertWebhookRepoStub) GetWebhook(_ context.Context, id int64) (*UsageAlertWebhook, error) {
+	w, ok := s.webhooks[id]
+	if !ok {
+		return nil, ErrAccountNotFound
+	}
+	return w, nil
+}
+
+func (s *usageAlertWebhookRepoStub) CreateWebhook(_ context.Context, webhook *UsageAlertWebhook) (*UsageAlertWebhook, error) {
+	s.updated = webhook
+	return webhook, nil
+}
+
+func (s *usageAlertWebhookRepoStub) UpdateWebhook(_ context.Context, webhook *UsageAlertWebhook) (*UsageAlertWebhook, error) {
+	s.updated = webhook
+	return webhook, nil
+}
+
+func TestUsageAlertWebhookSSRFRedactionAndTokenPreservation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("internal-secret-body"))
+	}))
+	defer server.Close()
+
+	t.Run("private webhook targets blocked at create update test and redirect", func(t *testing.T) {
+		repo := &usageAlertWebhookRepoStub{}
+		svc := NewUsageAlertService(repo, nil)
+		_, err := svc.CreateWebhook(context.Background(), &UsageAlertWebhook{
+			Name: "ssrf",
+			Type: UsageAlertWebhookTypeJSONPost,
+			URL:  "http://127.0.0.1:8080/hook",
+		})
+		require.ErrorContains(t, err, "not allowed")
+
+		err = svc.TestWebhook(context.Background(), &UsageAlertWebhook{
+			Name: "ssrf-test",
+			Type: UsageAlertWebhookTypeJSONPost,
+			URL:  "http://169.254.169.254/latest/meta-data",
+		})
+		require.ErrorContains(t, err, "not allowed")
+
+		redirectSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "http://127.0.0.1:1/private", http.StatusFound)
+		}))
+		defer redirectSrv.Close()
+		client := newSafeUsageAlertHTTPClient(time.Second)
+		require.Error(t, client.CheckRedirect(httptest.NewRequest(http.MethodPost, "http://127.0.0.1:1/private", nil), []*http.Request{httptest.NewRequest(http.MethodPost, redirectSrv.URL, nil)}))
+	})
+
+	t.Run("non-2xx response body is never echoed", func(t *testing.T) {
+		svc := &UsageAlertService{httpClient: server.Client()}
+		req, err := http.NewRequest(http.MethodPost, server.URL, nil)
+		require.NoError(t, err)
+		err = svc.doWebhookRequest(req)
+		require.EqualError(t, err, "webhook returned status 502")
+		require.NotContains(t, err.Error(), "internal-secret-body")
+	})
+
+	t.Run("sanitize strips telegram bot_token and update preserves blank token", func(t *testing.T) {
+		repo := &usageAlertWebhookRepoStub{
+			webhooks: map[int64]*UsageAlertWebhook{
+				5: {
+					ID: 5, Name: "tg", Type: UsageAlertWebhookTypeTelegram,
+					Config: map[string]any{"bot_token": "123:secret", "chat_id": "-1001"},
+				},
+			},
+		}
+		sanitized := SanitizeUsageAlertWebhook(repo.webhooks[5])
+		require.NotContains(t, sanitized.Config, "bot_token")
+		require.Equal(t, true, sanitized.Config["has_bot_token"])
+		require.Equal(t, "123:secret", repo.webhooks[5].Config["bot_token"], "must not mutate source map")
+
+		binding := SanitizeUsageAlertBinding(&UsageAlertBinding{ID: 1, Webhook: repo.webhooks[5]})
+		require.NotContains(t, binding.Webhook.Config, "bot_token")
+		require.Equal(t, true, binding.Webhook.Config["has_bot_token"])
+
+		svc := NewUsageAlertService(repo, nil)
+		updated, err := svc.UpdateWebhook(context.Background(), &UsageAlertWebhook{
+			ID:     5,
+			Name:   "tg-renamed",
+			Type:   UsageAlertWebhookTypeTelegram,
+			Config: map[string]any{"bot_token": "", "chat_id": "-1001"},
+		})
+		require.NoError(t, err)
+		require.Equal(t, "123:secret", updated.Config["bot_token"])
+	})
+}
+
+func TestUsageAlertMergePendingWindowsRuleSemanticsAndStop(t *testing.T) {
+	t0 := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Minute)
+	first := UsageAlertSnapshot{
+		AccountID: 1, RealAccountID: 9, Platform: UsageAlertPlatformAnthropic, UsageType: UsageAlertTypeOverall,
+		SampledAt: t0,
+		Windows:   map[string]UsageAlertWindowSnapshot{UsageAlertWindow5h: {UsedPercent: 30, RemainingPercent: 70}},
+	}
+	second := UsageAlertSnapshot{
+		AccountID: 1, RealAccountID: 9, Platform: UsageAlertPlatformAnthropic, UsageType: UsageAlertTypeOverall,
+		SampledAt: t1,
+		Windows:   map[string]UsageAlertWindowSnapshot{UsageAlertWindow7d: {UsedPercent: 45, RemainingPercent: 55}},
+	}
+	merged := mergePendingUsageAlertSnapshot(mergePendingUsageAlertSnapshot(nil, first), second)
+	require.Contains(t, merged.Windows, UsageAlertWindow5h)
+	require.Contains(t, merged.Windows, UsageAlertWindow7d)
+	require.Equal(t, 30.0, merged.Windows[UsageAlertWindow5h].UsedPercent)
+	require.Equal(t, 45.0, merged.Windows[UsageAlertWindow7d].UsedPercent)
+
+	base := validUsageAlertRuleForTest()
+	changed := validUsageAlertRuleForTest()
+	changed.Name = "only renamed"
+	changed.CooldownMinutes = 120
+	require.False(t, UsageAlertRuleSemanticsChanged(base, changed))
+	changed.Threshold = 15
+	require.True(t, UsageAlertRuleSemanticsChanged(base, changed))
+	platformChanged := validUsageAlertRuleForTest()
+	platformChanged.Platform = UsageAlertPlatformAnthropic
+	require.True(t, UsageAlertRuleSemanticsChanged(base, platformChanged))
+
+	// Per-window SampledAt from merged snapshots must survive prepareUsageAlertSnapshot.
+	perWindowCurrent := UsageAlertSnapshot{
+		AccountID:     1,
+		RealAccountID: 9,
+		Platform:      UsageAlertPlatformAnthropic,
+		UsageType:     UsageAlertTypeOverall,
+		SampledAt:     t1,
+		Windows: map[string]UsageAlertWindowSnapshot{
+			UsageAlertWindow5h: {UsedPercent: 30, RemainingPercent: 70, SampledAt: &t0},
+			UsageAlertWindow7d: {UsedPercent: 45, RemainingPercent: 55, SampledAt: &t1},
+		},
+	}
+	evalSnap, persistedSnap, ok, _ := prepareUsageAlertSnapshot(nil, perWindowCurrent)
+	require.True(t, ok)
+	require.NotNil(t, evalSnap.Windows[UsageAlertWindow5h].SampledAt)
+	require.Equal(t, t0, *evalSnap.Windows[UsageAlertWindow5h].SampledAt)
+	require.Equal(t, t0, *persistedSnap.Windows[UsageAlertWindow5h].SampledAt)
+	require.Equal(t, t1, *evalSnap.Windows[UsageAlertWindow7d].SampledAt)
+
+	svc := NewUsageAlertService(&usageAlertWebhookRepoStub{}, nil)
+	svc.Stop()
+	require.True(t, svc.stopped.Load())
+}
+
+func TestUsageAlertSSRFBlocklistTrailingSlashProxyAndConcurrentStop(t *testing.T) {
+	t.Run("disallowed IP blocklist covers special-use IPv4 and IPv6 transitions", func(t *testing.T) {
+		blocked := []string{
+			"0.0.0.1",
+			"100.100.100.200",
+			"192.0.0.1",
+			"198.18.0.1",
+			"240.0.0.1",
+			"255.255.255.255",
+			"64:ff9b::7f00:1",
+			"64:ff9b:1::1",
+			"2002:7f00:1::1",
+		}
+		for _, ipStr := range blocked {
+			ip := net.ParseIP(ipStr)
+			require.NotNil(t, ip, ipStr)
+			require.True(t, isDisallowedWebhookIP(ip), "expected %s to be blocked", ipStr)
+		}
+		allowed := []string{
+			"93.184.216.34",
+			"2606:2800:220:1:248:1893:25c8:1946",
+		}
+		for _, ipStr := range allowed {
+			ip := net.ParseIP(ipStr)
+			require.NotNil(t, ip, ipStr)
+			require.False(t, isDisallowedWebhookIP(ip), "expected %s to be allowed", ipStr)
+		}
+	})
+
+	t.Run("webhook URL preserves trailing slash", func(t *testing.T) {
+		repo := &usageAlertWebhookRepoStub{}
+		svc := NewUsageAlertService(repo, nil)
+		created, err := svc.CreateWebhook(context.Background(), &UsageAlertWebhook{
+			Name: "slash",
+			Type: UsageAlertWebhookTypeJSONPost,
+			URL:  "https://hooks.example.com/v1/alert/",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "https://hooks.example.com/v1/alert/", created.URL)
+	})
+
+	t.Run("environment proxy routes public/telegram requests while blocking private DNS", func(t *testing.T) {
+		var proxiedTargets []string
+		proxySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			proxiedTargets = append(proxiedTargets, r.Host)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer proxySrv.Close()
+		proxyURL, err := url.Parse(proxySrv.URL)
+		require.NoError(t, err)
+
+		resolveHook := func(_ context.Context, host string) ([]net.IP, error) {
+			switch host {
+			case "hooks.example.com":
+				return []net.IP{net.ParseIP("93.184.216.34")}, nil
+			case "rebind.example.com":
+				return nil, errors.New("resolved ip 100.100.100.200 is not allowed")
+			default:
+				return nil, fmt.Errorf("unexpected host lookup: %s", host)
+			}
+		}
+		client := newSafeUsageAlertHTTPClientWithHooks(
+			2*time.Second,
+			func(*http.Request) (*url.URL, error) { return proxyURL, nil },
+			resolveHook,
+		)
+
+		// Telegram bypasses local DNS resolution when proxied.
+		reqTG, err := http.NewRequest(http.MethodPost, "http://api.telegram.org/bot123:abc/sendMessage", nil)
+		require.NoError(t, err)
+		respTG, err := client.Do(reqTG)
+		require.NoError(t, err)
+		require.NoError(t, respTG.Body.Close())
+
+		// Public JSON post webhook is allowed through the proxy.
+		reqPub, err := http.NewRequest(http.MethodPost, "http://hooks.example.com/alert/", nil)
+		require.NoError(t, err)
+		respPub, err := client.Do(reqPub)
+		require.NoError(t, err)
+		require.NoError(t, respPub.Body.Close())
+		require.Equal(t, []string{"api.telegram.org", "hooks.example.com"}, proxiedTargets)
+
+		// Private DNS target is blocked even when a proxy is configured.
+		reqPriv, err := http.NewRequest(http.MethodPost, "http://rebind.example.com/hook", nil)
+		require.NoError(t, err)
+		_, err = client.Do(reqPriv)
+		require.ErrorContains(t, err, "not allowed")
+	})
+
+	t.Run("concurrent Observe and Stop never panic under race detector", func(t *testing.T) {
+		for iter := 0; iter < 20; iter++ {
+			svc := NewUsageAlertService(&usageAlertDeliveryRepoStub{rules: []*UsageAlertRule{}}, nil)
+			var callers sync.WaitGroup
+			for g := 0; g < 8; g++ {
+				callers.Add(1)
+				go func(id int64) {
+					defer callers.Done()
+					svc.Observe(context.Background(), &UsageAlertSnapshot{
+						AccountID:     id,
+						RealAccountID: id,
+						Platform:      UsageAlertPlatformOpenAI,
+						UsageType:     UsageAlertTypeOverall,
+						SampledAt:     time.Now().UTC(),
+						Windows: map[string]UsageAlertWindowSnapshot{
+							UsageAlertWindow7d: {UsedPercent: 50, RemainingPercent: 50},
+						},
+					})
+				}(int64(g + 1))
+			}
+			svc.Stop()
+			callers.Wait()
+		}
+	})
+
+	t.Run("rule scope rejects mismatched platform and reserved auto identifier", func(t *testing.T) {
+		reserved := "__auto__"
+		require.ErrorContains(t, validateRealAccount(&RealAccount{
+			Name:       "manual",
+			Platform:   UsageAlertPlatformOpenAI,
+			Identifier: &reserved,
+		}), "reserved")
+
+		repo := &usageAlertRealAccountLookupStub{
+			realAccount: &RealAccount{ID: 1, Name: "OpenAI Main", Platform: UsageAlertPlatformOpenAI},
+		}
+		svc := NewUsageAlertService(repo, nil)
+		rule := validUsageAlertRuleForTest()
+		rule.Platform = UsageAlertPlatformAnthropic
+		_, err := svc.CreateRule(context.Background(), rule)
+		require.ErrorContains(t, err, "does not match real account platform")
+
+		rule.Platform = UsageAlertPlatformAll
+		err = svc.populateUsageAlertRuleScope(context.Background(), rule)
+		require.NoError(t, err)
+		require.Equal(t, UsageAlertPlatformOpenAI, rule.Platform)
+	})
+}
+
+type usageAlertRealAccountLookupStub struct {
+	UsageAlertRepository
+	realAccount *RealAccount
+}
+
+func (s *usageAlertRealAccountLookupStub) GetRealAccount(_ context.Context, _ int64) (*RealAccount, error) {
+	return s.realAccount, nil
 }
 
 func validUsageAlertRuleForTest() *UsageAlertRule {

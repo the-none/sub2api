@@ -11,11 +11,15 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -268,17 +272,25 @@ type UsageAlertRepository interface {
 }
 
 type UsageAlertService struct {
-	repo                   UsageAlertRepository
-	accountRepo            AccountRepository
-	httpClient             *http.Client
-	codexBoundaryRefresher OpenAICodexUsageSnapshotRefresher
-	evaluationLocks        sync.Map
-	workers                sync.Map
-	cleanupMu              sync.Mutex
-	cleanupRunning         bool
-	lastCleanupAt          time.Time
-	codexBoundaryRefreshMu sync.Mutex
-	codexBoundaryRefreshAt map[int64]time.Time
+	repo                          UsageAlertRepository
+	accountRepo                   AccountRepository
+	httpClient                    *http.Client
+	disallowPrivateWebhookTargets bool
+	codexBoundaryRefresher        OpenAICodexUsageSnapshotRefresher
+	evaluationLocks               sync.Map
+	workers                       sync.Map
+	stopMu                        sync.Mutex
+	stopOnce                      sync.Once
+	stopCh                        chan struct{}
+	serviceCtx                    context.Context
+	serviceCancel                 context.CancelFunc
+	stopped                       atomic.Bool
+	wg                            sync.WaitGroup
+	cleanupMu                     sync.Mutex
+	cleanupRunning                bool
+	lastCleanupAt                 time.Time
+	codexBoundaryRefreshMu        sync.Mutex
+	codexBoundaryRefreshAt        map[int64]time.Time
 }
 
 type usageAlertObservationWorker struct {
@@ -298,11 +310,298 @@ type usageAlertDeliveryCleaner interface {
 }
 
 func NewUsageAlertService(repo UsageAlertRepository, accountRepo AccountRepository) *UsageAlertService {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &UsageAlertService{
-		repo:        repo,
-		accountRepo: accountRepo,
-		httpClient:  &http.Client{Timeout: 8 * time.Second},
+		repo:                          repo,
+		accountRepo:                   accountRepo,
+		httpClient:                    newSafeUsageAlertHTTPClient(8 * time.Second),
+		disallowPrivateWebhookTargets: true,
+		stopCh:                        make(chan struct{}),
+		serviceCtx:                    ctx,
+		serviceCancel:                 cancel,
 	}
+}
+
+func (s *UsageAlertService) stopSignal() <-chan struct{} {
+	s.stopMu.Lock()
+	defer s.stopMu.Unlock()
+	if s.stopCh == nil {
+		s.stopCh = make(chan struct{})
+	}
+	return s.stopCh
+}
+
+func (s *UsageAlertService) baseContext() context.Context {
+	if s == nil {
+		return context.Background()
+	}
+	s.stopMu.Lock()
+	defer s.stopMu.Unlock()
+	if s.serviceCtx == nil {
+		s.serviceCtx, s.serviceCancel = context.WithCancel(context.Background())
+	}
+	return s.serviceCtx
+}
+
+func (s *UsageAlertService) tryAddWorker() bool {
+	if s == nil {
+		return false
+	}
+	s.stopMu.Lock()
+	defer s.stopMu.Unlock()
+	if s.stopped.Load() {
+		return false
+	}
+	s.wg.Add(1)
+	return true
+}
+
+// Stop signals active observation workers to exit wait loops, cancels in-flight
+// background contexts, and waits for goroutines to drain.
+func (s *UsageAlertService) Stop() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		s.stopMu.Lock()
+		s.stopped.Store(true)
+		if s.stopCh == nil {
+			s.stopCh = make(chan struct{})
+		}
+		close(s.stopCh)
+		if s.serviceCancel != nil {
+			s.serviceCancel()
+		}
+		s.stopMu.Unlock()
+	})
+	s.wg.Wait()
+}
+
+const telegramWebhookHost = "api.telegram.org"
+
+type usageAlertProxyDialKey struct{}
+
+type safeUsageAlertTransport struct {
+	base        *http.Transport
+	proxyFunc   func(*http.Request) (*url.URL, error)
+	resolveFunc func(context.Context, string) ([]net.IP, error)
+}
+
+func (t *safeUsageAlertTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, errors.New("webhook request url is missing")
+	}
+	if err := validateUsageAlertOutboundURL(req.URL, false); err != nil {
+		return nil, fmt.Errorf("webhook url is not allowed: %w", err)
+	}
+	proxyFn := http.ProxyFromEnvironment
+	if t.proxyFunc != nil {
+		proxyFn = t.proxyFunc
+	}
+	resolveFn := resolveAllowedWebhookIPs
+	if t.resolveFunc != nil {
+		resolveFn = t.resolveFunc
+	}
+	proxyURL, err := proxyFn(req)
+	if err != nil {
+		return nil, err
+	}
+	if proxyURL != nil {
+		host := strings.ToLower(strings.TrimSpace(req.URL.Hostname()))
+		// Skip local DNS resolution only for Telegram when an operator-configured
+		// environment proxy handles egress (e.g., GFW/split-horizon setups).
+		if host != telegramWebhookHost {
+			if _, err := resolveFn(req.Context(), host); err != nil {
+				return nil, err
+			}
+		}
+		if dialAddr := canonicalProxyDialAddr(proxyURL); dialAddr != "" {
+			req = req.Clone(context.WithValue(req.Context(), usageAlertProxyDialKey{}, dialAddr))
+		}
+	}
+	return t.base.RoundTrip(req)
+}
+
+func canonicalProxyDialAddr(proxyURL *url.URL) string {
+	if proxyURL == nil {
+		return ""
+	}
+	host := proxyURL.Hostname()
+	if host == "" {
+		return ""
+	}
+	port := proxyURL.Port()
+	if port == "" {
+		switch strings.ToLower(proxyURL.Scheme) {
+		case "https":
+			port = "443"
+		case "socks5", "socks5h":
+			port = "1080"
+		default:
+			port = "80"
+		}
+	}
+	return net.JoinHostPort(host, port)
+}
+
+func newSafeUsageAlertHTTPClient(timeout time.Duration) *http.Client {
+	return newSafeUsageAlertHTTPClientWithHooks(timeout, http.ProxyFromEnvironment, resolveAllowedWebhookIPs)
+}
+
+func newSafeUsageAlertHTTPClientWithHooks(
+	timeout time.Duration,
+	proxyFunc func(*http.Request) (*url.URL, error),
+	resolveFunc func(context.Context, string) ([]net.IP, error),
+) *http.Client {
+	if proxyFunc == nil {
+		proxyFunc = http.ProxyFromEnvironment
+	}
+	if resolveFunc == nil {
+		resolveFunc = resolveAllowedWebhookIPs
+	}
+	baseDialer := &net.Dialer{Timeout: 5 * time.Second}
+	baseTransport := &http.Transport{
+		Proxy: proxyFunc,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if proxyAddr, ok := ctx.Value(usageAlertProxyDialKey{}).(string); ok && proxyAddr != "" && strings.EqualFold(addr, proxyAddr) {
+				return baseDialer.DialContext(ctx, network, addr)
+			}
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid webhook dial target: %w", err)
+			}
+			ips, err := resolveFunc(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			var lastErr error
+			for _, ip := range ips {
+				conn, dialErr := baseDialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				if dialErr == nil {
+					return conn, nil
+				}
+				lastErr = dialErr
+			}
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, errors.New("no resolved addresses available")
+		},
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: timeout,
+		IdleConnTimeout:       30 * time.Second,
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &safeUsageAlertTransport{
+			base:        baseTransport,
+			proxyFunc:   proxyFunc,
+			resolveFunc: resolveFunc,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("stopped after 5 redirects")
+			}
+			if req == nil || req.URL == nil {
+				return errors.New("redirect target is missing")
+			}
+			if err := validateUsageAlertOutboundURL(req.URL, false); err != nil {
+				return fmt.Errorf("redirect target is not allowed: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+func resolveAllowedWebhookIPs(ctx context.Context, host string) ([]net.IP, error) {
+	trimmed := strings.TrimSpace(host)
+	if trimmed == "" {
+		return nil, errors.New("webhook host is empty")
+	}
+	if parsed := net.ParseIP(trimmed); parsed != nil {
+		if isDisallowedWebhookIP(parsed) {
+			return nil, fmt.Errorf("webhook target ip %s is not allowed", parsed.String())
+		}
+		return []net.IP{parsed}, nil
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(lookupCtx, trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("dns resolution failed: %w", err)
+	}
+	if len(addrs) == 0 {
+		return nil, errors.New("dns resolution returned no addresses")
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, item := range addrs {
+		if isDisallowedWebhookIP(item.IP) {
+			return nil, fmt.Errorf("resolved ip %s is not allowed", item.IP.String())
+		}
+		ips = append(ips, item.IP)
+	}
+	return ips, nil
+}
+
+var (
+	disallowedWebhookPrefixes = []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("100.64.0.0/10"),
+		netip.MustParsePrefix("192.0.0.0/24"),
+		netip.MustParsePrefix("192.0.2.0/24"),
+		netip.MustParsePrefix("198.18.0.0/15"),
+		netip.MustParsePrefix("198.51.100.0/24"),
+		netip.MustParsePrefix("203.0.113.0/24"),
+		netip.MustParsePrefix("240.0.0.0/4"),
+		netip.MustParsePrefix("100::/64"),
+		netip.MustParsePrefix("2001::/32"),
+		netip.MustParsePrefix("2001:db8::/32"),
+		netip.MustParsePrefix("64:ff9b:1::/48"),
+	}
+	nat64WellKnownPrefix = netip.MustParsePrefix("64:ff9b::/96")
+	ipv4CompatiblePrefix = netip.MustParsePrefix("::/96")
+	sixToFourPrefix      = netip.MustParsePrefix("2002::/16")
+)
+
+func isDisallowedWebhookIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	return isDisallowedWebhookAddr(addr)
+}
+
+func isDisallowedWebhookAddr(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		return true
+	}
+	addr = addr.Unmap()
+	if addr.IsLoopback() ||
+		addr.IsPrivate() ||
+		addr.IsLinkLocalUnicast() ||
+		addr.IsLinkLocalMulticast() ||
+		addr.IsMulticast() ||
+		addr.IsUnspecified() {
+		return true
+	}
+	for _, prefix := range disallowedWebhookPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	if addr.Is6() {
+		b := addr.As16()
+		if nat64WellKnownPrefix.Contains(addr) || ipv4CompatiblePrefix.Contains(addr) {
+			return isDisallowedWebhookAddr(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}))
+		}
+		if sixToFourPrefix.Contains(addr) {
+			return isDisallowedWebhookAddr(netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}))
+		}
+	}
+	return false
 }
 
 func (s *UsageAlertService) SetOpenAICodexBoundaryRefresher(refresher OpenAICodexUsageSnapshotRefresher) {
@@ -374,6 +673,28 @@ func (s *UsageAlertService) UpdateRule(ctx context.Context, rule *UsageAlertRule
 		return nil, err
 	}
 	ensureUsageAlertRuleName(rule)
+	keys := make([]string, 0, 2)
+	if s != nil && s.repo != nil && rule.ID > 0 {
+		existing, err := s.repo.GetRule(ctx, rule.ID)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil && existing.RealAccountID != nil && *existing.RealAccountID > 0 {
+			keys = append(keys, usageAlertEvaluationLockKey(*existing.RealAccountID, existing.UsageType))
+		}
+	}
+	if rule.RealAccountID != nil && *rule.RealAccountID > 0 {
+		newKey := usageAlertEvaluationLockKey(*rule.RealAccountID, rule.UsageType)
+		if len(keys) == 0 || keys[0] != newKey {
+			keys = append(keys, newKey)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		lock := s.evaluationLockByKey(key)
+		lock.Lock()
+		defer lock.Unlock()
+	}
 	return s.repo.UpdateRule(ctx, rule)
 }
 
@@ -386,17 +707,118 @@ func (s *UsageAlertService) ListWebhooks(ctx context.Context) ([]*UsageAlertWebh
 }
 
 func (s *UsageAlertService) CreateWebhook(ctx context.Context, webhook *UsageAlertWebhook) (*UsageAlertWebhook, error) {
-	if err := validateUsageAlertWebhook(webhook); err != nil {
+	if err := s.validateWebhookTarget(webhook); err != nil {
 		return nil, err
 	}
 	return s.repo.CreateWebhook(ctx, webhook)
 }
 
 func (s *UsageAlertService) UpdateWebhook(ctx context.Context, webhook *UsageAlertWebhook) (*UsageAlertWebhook, error) {
-	if err := validateUsageAlertWebhook(webhook); err != nil {
+	if err := s.populatePreservedWebhookSecrets(ctx, webhook, true); err != nil {
+		return nil, err
+	}
+	if err := s.validateWebhookTarget(webhook); err != nil {
 		return nil, err
 	}
 	return s.repo.UpdateWebhook(ctx, webhook)
+}
+
+func (s *UsageAlertService) populatePreservedWebhookSecrets(ctx context.Context, webhook *UsageAlertWebhook, requireExisting bool) error {
+	if s == nil || s.repo == nil || webhook == nil || webhook.ID <= 0 {
+		return nil
+	}
+	if strings.TrimSpace(webhook.Type) != UsageAlertWebhookTypeTelegram {
+		return nil
+	}
+	if strings.TrimSpace(usageAlertConfigString(webhook.Config, "bot_token")) != "" {
+		return nil
+	}
+	existing, err := s.repo.GetWebhook(ctx, webhook.ID)
+	if err != nil {
+		if requireExisting {
+			return err
+		}
+		return nil
+	}
+	if existing == nil || existing.Type != UsageAlertWebhookTypeTelegram {
+		return nil
+	}
+	token := strings.TrimSpace(usageAlertConfigString(existing.Config, "bot_token"))
+	if token == "" {
+		return nil
+	}
+	cloned := make(map[string]any, len(webhook.Config)+1)
+	for k, v := range webhook.Config {
+		cloned[k] = v
+	}
+	cloned["bot_token"] = token
+	webhook.Config = cloned
+	return nil
+}
+
+// SanitizeUsageAlertWebhook returns a shallow copy with secret config fields
+// removed so admin read APIs never echo raw Telegram bot tokens.
+func SanitizeUsageAlertWebhook(webhook *UsageAlertWebhook) *UsageAlertWebhook {
+	if webhook == nil {
+		return nil
+	}
+	out := *webhook
+	if len(webhook.Config) > 0 {
+		cfg := make(map[string]any, len(webhook.Config))
+		for k, v := range webhook.Config {
+			if k == "bot_token" {
+				cfg["has_bot_token"] = strings.TrimSpace(fmt.Sprint(v)) != "" && v != nil
+				continue
+			}
+			cfg[k] = v
+		}
+		out.Config = cfg
+	}
+	return &out
+}
+
+// SanitizeUsageAlertBinding returns a binding copy with any nested webhook
+// secret fields stripped.
+func SanitizeUsageAlertBinding(binding *UsageAlertBinding) *UsageAlertBinding {
+	if binding == nil {
+		return nil
+	}
+	out := *binding
+	out.Webhook = SanitizeUsageAlertWebhook(binding.Webhook)
+	return &out
+}
+
+// UsageAlertRuleSemanticsChanged reports whether updating a rule alters its scope
+// or evaluation semantics so persisted trigger states should be reset.
+func UsageAlertRuleSemanticsChanged(before, after *UsageAlertRule) bool {
+	if before == nil || after == nil {
+		return true
+	}
+	if strings.TrimSpace(before.Platform) != strings.TrimSpace(after.Platform) ||
+		!int64PtrEqual(before.RealAccountID, after.RealAccountID) ||
+		normalizeUsageAlertUsageType(before.UsageType) != normalizeUsageAlertUsageType(after.UsageType) ||
+		strings.TrimSpace(before.Window) != strings.TrimSpace(after.Window) ||
+		strings.TrimSpace(before.Metric) != strings.TrimSpace(after.Metric) ||
+		strings.TrimSpace(before.Operator) != strings.TrimSpace(after.Operator) ||
+		before.Threshold != after.Threshold {
+		return true
+	}
+	return !float64PtrEqual(before.StepPercent, after.StepPercent) ||
+		!float64PtrEqual(before.MinResetAfterHours, after.MinResetAfterHours)
+}
+
+func int64PtrEqual(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func float64PtrEqual(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func (s *UsageAlertService) DeleteWebhook(ctx context.Context, id int64) error {
@@ -453,7 +875,10 @@ func (s *UsageAlertService) TestWebhook(ctx context.Context, webhook *UsageAlert
 		webhook.Name = "Manual test"
 	}
 	webhook.Enabled = true
-	if err := validateUsageAlertWebhook(webhook); err != nil {
+	if err := s.populatePreservedWebhookSecrets(ctx, webhook, false); err != nil {
+		return err
+	}
+	if err := s.validateWebhookTarget(webhook); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -485,7 +910,7 @@ func (s *UsageAlertService) TestWebhook(ctx context.Context, webhook *UsageAlert
 }
 
 func (s *UsageAlertService) Observe(ctx context.Context, snapshot *UsageAlertSnapshot) {
-	if s == nil || s.repo == nil || snapshot == nil || snapshot.AccountID <= 0 || len(snapshot.Windows) == 0 {
+	if s == nil || s.repo == nil || s.stopped.Load() || snapshot == nil || snapshot.AccountID <= 0 || len(snapshot.Windows) == 0 {
 		return
 	}
 	if snapshot.SampledAt.IsZero() {
@@ -513,6 +938,9 @@ func (s *UsageAlertService) Observe(ctx context.Context, snapshot *UsageAlertSna
 }
 
 func (s *UsageAlertService) enqueueObservation(snapshot UsageAlertSnapshot) {
+	if s.stopped.Load() {
+		return
+	}
 	key := fmt.Sprintf("%d:%s", snapshot.RealAccountID, normalizeUsageAlertUsageType(snapshot.UsageType))
 	actual, _ := s.workers.LoadOrStore(key, &usageAlertObservationWorker{wake: make(chan struct{}, 1)})
 	worker, ok := actual.(*usageAlertObservationWorker)
@@ -521,14 +949,13 @@ func (s *UsageAlertService) enqueueObservation(snapshot UsageAlertSnapshot) {
 	}
 
 	worker.mu.Lock()
-	snapshotCopy := snapshot
 	switch usageAlertObservationPriority(snapshot) {
 	case 2:
-		worker.manualPending = &snapshotCopy
+		worker.manualPending = mergePendingUsageAlertSnapshot(worker.manualPending, snapshot)
 	case 1:
-		worker.authorityPending = &snapshotCopy
+		worker.authorityPending = mergePendingUsageAlertSnapshot(worker.authorityPending, snapshot)
 	default:
-		worker.pending = &snapshotCopy
+		worker.pending = mergePendingUsageAlertSnapshot(worker.pending, snapshot)
 	}
 	if worker.running {
 		select {
@@ -538,17 +965,66 @@ func (s *UsageAlertService) enqueueObservation(snapshot UsageAlertSnapshot) {
 		worker.mu.Unlock()
 		return
 	}
+	if !s.tryAddWorker() {
+		worker.mu.Unlock()
+		return
+	}
 	worker.running = true
 	worker.mu.Unlock()
 
 	go s.runObservationWorker(worker)
 }
 
+func cloneUsageAlertSnapshot(snapshot UsageAlertSnapshot) UsageAlertSnapshot {
+	cloned := snapshot
+	if len(snapshot.Windows) > 0 {
+		cloned.Windows = make(map[string]UsageAlertWindowSnapshot, len(snapshot.Windows))
+		for k, v := range snapshot.Windows {
+			cloned.Windows[k] = v
+		}
+	}
+	return cloned
+}
+
+func mergePendingUsageAlertSnapshot(existing *UsageAlertSnapshot, incoming UsageAlertSnapshot) *UsageAlertSnapshot {
+	cloned := cloneUsageAlertSnapshot(incoming)
+	if existing == nil {
+		return &cloned
+	}
+	mergedWindows := make(map[string]UsageAlertWindowSnapshot, len(existing.Windows)+len(cloned.Windows))
+	for window, value := range existing.Windows {
+		if value.SampledAt == nil && !existing.SampledAt.IsZero() {
+			sampledAt := existing.SampledAt.UTC()
+			value.SampledAt = &sampledAt
+		}
+		mergedWindows[window] = value
+	}
+	for window, value := range cloned.Windows {
+		if value.SampledAt == nil && !cloned.SampledAt.IsZero() {
+			sampledAt := cloned.SampledAt.UTC()
+			value.SampledAt = &sampledAt
+		}
+		prev, exists := mergedWindows[window]
+		if !exists || prev.SampledAt == nil || value.SampledAt == nil || !value.SampledAt.Before(*prev.SampledAt) {
+			mergedWindows[window] = value
+		}
+	}
+	out := cloned
+	if !existing.SampledAt.IsZero() && existing.SampledAt.After(out.SampledAt) {
+		out.SampledAt = existing.SampledAt
+	}
+	out.Windows = mergedWindows
+	return &out
+}
+
 func (s *UsageAlertService) runObservationWorker(worker *usageAlertObservationWorker) {
+	defer s.wg.Done()
+	stopSig := s.stopSignal()
 	for {
 		worker.mu.Lock()
-		pending := worker.retryPending
-		if pending != nil {
+		var pending *UsageAlertSnapshot
+		if !s.stopped.Load() && worker.retryPending != nil {
+			pending = worker.retryPending
 			worker.retryPending = nil
 		} else if worker.manualPending != nil {
 			pending = worker.manualPending
@@ -569,7 +1045,7 @@ func (s *UsageAlertService) runObservationWorker(worker *usageAlertObservationWo
 		worker.mu.Unlock()
 		retry := s.observeAsync(*pending)
 		worker.mu.Lock()
-		if !retry {
+		if !retry || s.stopped.Load() {
 			worker.retryDelay = 0
 			select {
 			case <-worker.wake:
@@ -578,7 +1054,7 @@ func (s *UsageAlertService) runObservationWorker(worker *usageAlertObservationWo
 			worker.mu.Unlock()
 			continue
 		}
-		retrySnapshot := *pending
+		retrySnapshot := cloneUsageAlertSnapshot(*pending)
 		worker.retryPending = &retrySnapshot
 		if worker.retryDelay <= 0 {
 			worker.retryDelay = usageAlertRetryMinDelay
@@ -593,6 +1069,13 @@ func (s *UsageAlertService) runObservationWorker(worker *usageAlertObservationWo
 		select {
 		case <-timer.C:
 		case <-worker.wake:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		case <-stopSig:
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
@@ -668,7 +1151,7 @@ func (s *UsageAlertService) observeAsync(snapshot UsageAlertSnapshot) bool {
 	evaluationLock.Lock()
 	defer evaluationLock.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(s.baseContext(), 3*time.Minute)
 	defer cancel()
 
 	var previous *UsageAlertSnapshot
@@ -845,8 +1328,8 @@ func (s *UsageAlertService) deliverUsageAlertEvent(ctx context.Context, realAcco
 			return false
 		}
 
-		if err := s.deliverWebhookWithRetry(context.Background(), *webhook, event); err != nil {
-			releaseCtx, cancelRelease := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := s.deliverWebhookWithRetry(ctx, *webhook, event); err != nil {
+			releaseCtx, cancelRelease := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			releaseErr := s.repo.ReleaseWebhookDelivery(releaseCtx, event.EventID, webhook.ID, claimToken)
 			cancelRelease()
 			if releaseErr != nil {
@@ -855,7 +1338,7 @@ func (s *UsageAlertService) deliverUsageAlertEvent(ctx context.Context, realAcco
 			slog.Warn("usage_alert_webhook_failed", "webhook_id", webhook.ID, "event_id", event.EventID, "attempts", webhook.RetryCount+1, "error", err)
 			return false
 		}
-		completeCtx, cancelComplete := context.WithTimeout(context.Background(), 5*time.Second)
+		completeCtx, cancelComplete := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		err = s.repo.CompleteWebhookDelivery(completeCtx, event.EventID, webhook.ID, claimToken)
 		cancelComplete()
 		if err != nil {
@@ -868,7 +1351,7 @@ func (s *UsageAlertService) deliverUsageAlertEvent(ctx context.Context, realAcco
 
 func (s *UsageAlertService) maybeCleanupWebhookDeliveries() {
 	cleaner, ok := s.repo.(usageAlertDeliveryCleaner)
-	if !ok {
+	if !ok || s.stopped.Load() {
 		return
 	}
 	now := time.Now().UTC()
@@ -880,8 +1363,15 @@ func (s *UsageAlertService) maybeCleanupWebhookDeliveries() {
 	s.cleanupRunning = true
 	s.cleanupMu.Unlock()
 
+	if !s.tryAddWorker() {
+		s.cleanupMu.Lock()
+		s.cleanupRunning = false
+		s.cleanupMu.Unlock()
+		return
+	}
 	go func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer s.wg.Done()
+		cleanupCtx, cancel := context.WithTimeout(s.baseContext(), 30*time.Second)
 		err := cleaner.CleanupWebhookDeliveries(cleanupCtx, now.Add(-usageAlertDeliveryRetention))
 		cancel()
 		s.cleanupMu.Lock()
@@ -904,8 +1394,11 @@ func newUsageAlertClaimToken() (string, error) {
 	return fmt.Sprintf("%x", token[:]), nil
 }
 
-func (s *UsageAlertService) evaluationLock(realAccountID int64, usageType string) *sync.Mutex {
-	key := fmt.Sprintf("%d:%s", realAccountID, normalizeUsageAlertUsageType(usageType))
+func usageAlertEvaluationLockKey(realAccountID int64, usageType string) string {
+	return fmt.Sprintf("%d:%s", realAccountID, normalizeUsageAlertUsageType(usageType))
+}
+
+func (s *UsageAlertService) evaluationLockByKey(key string) *sync.Mutex {
 	actual, _ := s.evaluationLocks.LoadOrStore(key, &sync.Mutex{})
 	lock, ok := actual.(*sync.Mutex)
 	if !ok {
@@ -913,6 +1406,10 @@ func (s *UsageAlertService) evaluationLock(realAccountID int64, usageType string
 		s.evaluationLocks.Store(key, lock)
 	}
 	return lock
+}
+
+func (s *UsageAlertService) evaluationLock(realAccountID int64, usageType string) *sync.Mutex {
+	return s.evaluationLockByKey(usageAlertEvaluationLockKey(realAccountID, usageType))
 }
 
 // prepareUsageAlertSnapshot separates windows that are safe to evaluate from
@@ -929,15 +1426,21 @@ func prepareUsageAlertSnapshot(previous *UsageAlertSnapshot, current UsageAlertS
 
 	refreshCodex7d := false
 	for window, value := range current.Windows {
-		if !current.SampledAt.IsZero() {
+		if value.SampledAt == nil && !current.SampledAt.IsZero() {
 			value.SampledAt = usageAlertTimePtr(current.SampledAt)
+		} else if value.SampledAt != nil {
+			value.SampledAt = usageAlertTimePtr(*value.SampledAt)
+		}
+		windowSampledAt := current.SampledAt
+		if value.SampledAt != nil && !value.SampledAt.IsZero() {
+			windowSampledAt = *value.SampledAt
 		}
 		initialized := false
 		if previous != nil {
 			if previousValue, ok := persistedWindows[window]; ok {
 				var accepted bool
 				if isCodexOverall7dWindow(current, window) {
-					value, accepted, refreshCodex7d = prepareCodex7dWindow(previousValue, value, current.Source, current.SampledAt)
+					value, accepted, refreshCodex7d = prepareCodex7dWindow(previousValue, value, current.Source, windowSampledAt)
 				} else {
 					value, accepted = prepareResetOrderedWindow(previousValue, value)
 				}
@@ -1387,6 +1890,9 @@ func (s *UsageAlertService) populateUsageAlertRuleScope(ctx context.Context, rul
 	if realAccount == nil {
 		return fmt.Errorf("real account not found")
 	}
+	if rule.Platform != "" && rule.Platform != UsageAlertPlatformAll && rule.Platform != realAccount.Platform {
+		return fmt.Errorf("rule platform %q does not match real account platform %q", rule.Platform, realAccount.Platform)
+	}
 	rule.Platform = realAccount.Platform
 	rule.UsageType = normalizeUsageAlertUsageType(rule.UsageType)
 	if !usageAlertTypeSupportsRule(realAccount.Platform, rule.UsageType, rule.Window) {
@@ -1453,7 +1959,13 @@ func (s *UsageAlertService) deliverWebhookWithRetry(ctx context.Context, webhook
 			return nil
 		}
 		if attempt < attempts {
-			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			timer := time.NewTimer(time.Duration(attempt) * 500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
 		}
 	}
 	return err
@@ -1522,12 +2034,8 @@ func (s *UsageAlertService) doWebhookRequest(req *http.Request) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-	msg := strings.TrimSpace(string(body))
-	if msg == "" {
-		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
-	}
-	return fmt.Errorf("webhook returned status %d: %s", resp.StatusCode, msg)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 }
 
 func validateRealAccount(account *RealAccount) error {
@@ -1541,6 +2049,9 @@ func validateRealAccount(account *RealAccount) error {
 	}
 	if account.Platform != UsageAlertPlatformOpenAI && account.Platform != UsageAlertPlatformAnthropic {
 		return ErrUsageAlertInvalidPlatform
+	}
+	if account.Identifier != nil && strings.TrimSpace(*account.Identifier) == "__auto__" {
+		return fmt.Errorf("real account identifier %q is reserved", "__auto__")
 	}
 	return nil
 }
@@ -1643,6 +2154,66 @@ func formatUsageAlertRuleNumber(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
+func validateUsageAlertWebhookURL(raw string, allowPrivate bool) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", errors.New("url is required")
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("invalid url: %w", err)
+	}
+	if err := validateUsageAlertOutboundURL(parsed, allowPrivate); err != nil {
+		return "", err
+	}
+	// Preserve trailing "/" and raw path encoding because webhook endpoints
+	// can treat /hook and /hook/ distinctly or 301-redirect POST to GET.
+	return trimmed, nil
+}
+
+func validateUsageAlertOutboundURL(parsed *url.URL, allowPrivate bool) error {
+	if parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
+		return errors.New("invalid url")
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "https" && scheme != "http" {
+		return fmt.Errorf("invalid url scheme: %s", parsed.Scheme)
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return errors.New("invalid host")
+	}
+	if port := parsed.Port(); port != "" {
+		num, err := strconv.Atoi(port)
+		if err != nil || num <= 0 || num > 65535 {
+			return fmt.Errorf("invalid port: %s", port)
+		}
+	}
+	if !allowPrivate {
+		if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+			return fmt.Errorf("host is not allowed: %s", host)
+		}
+		if ip := net.ParseIP(host); ip != nil && isDisallowedWebhookIP(ip) {
+			return fmt.Errorf("host is not allowed: %s", host)
+		}
+	}
+	return nil
+}
+
+func (s *UsageAlertService) validateWebhookTarget(webhook *UsageAlertWebhook) error {
+	if err := validateUsageAlertWebhook(webhook); err != nil {
+		return err
+	}
+	if s != nil && s.disallowPrivateWebhookTargets && webhook != nil && webhook.Type == UsageAlertWebhookTypeJSONPost {
+		normalized, err := validateUsageAlertWebhookURL(webhook.URL, false)
+		if err != nil {
+			return fmt.Errorf("webhook url is not allowed: %w", err)
+		}
+		webhook.URL = normalized
+	}
+	return nil
+}
+
 func validateUsageAlertWebhook(webhook *UsageAlertWebhook) error {
 	if webhook == nil {
 		return fmt.Errorf("usage alert webhook is required")
@@ -1664,10 +2235,11 @@ func validateUsageAlertWebhook(webhook *UsageAlertWebhook) error {
 		if webhook.URL == "" {
 			return fmt.Errorf("webhook url is required")
 		}
-		parsed, err := url.ParseRequestURI(webhook.URL)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		normalized, err := validateUsageAlertWebhookURL(webhook.URL, true)
+		if err != nil {
 			return fmt.Errorf("webhook url is invalid")
 		}
+		webhook.URL = normalized
 	case UsageAlertWebhookTypeTelegram:
 		if _, err := usageAlertTelegramConfig(webhook.Config); err != nil {
 			return err

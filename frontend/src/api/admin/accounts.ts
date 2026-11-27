@@ -969,9 +969,77 @@ export interface OpenAIResetReservation {
   error_code?: string
 }
 
-export async function getOpenAIResetReservation(id: number): Promise<OpenAIResetReservation | null> {
-  const { data } = await apiClient.get<OpenAIResetReservation | null>(`/admin/openai/accounts/${id}/reset-reservation`)
-  return data
+type PendingResetReservationLookup = {
+  id: number
+  resolve: (value: OpenAIResetReservation | null) => void
+  reject: (reason?: unknown) => void
+}
+
+let pendingResetReservationQueue: PendingResetReservationLookup[] = []
+let resetReservationFlushScheduled = false
+
+async function flushResetReservationQueue() {
+  resetReservationFlushScheduled = false
+  const batch = pendingResetReservationQueue
+  pendingResetReservationQueue = []
+  if (batch.length === 0) return
+
+  const byId = new Map<number, PendingResetReservationLookup[]>()
+  for (const item of batch) {
+    const waiters = byId.get(item.id)
+    if (waiters) waiters.push(item)
+    else byId.set(item.id, [item])
+  }
+  const uniqueIds = Array.from(byId.keys())
+  if (uniqueIds.length === 1) {
+    const id = uniqueIds[0]!
+    try {
+      const { data } = await apiClient.get<OpenAIResetReservation | null>(`/admin/openai/accounts/${id}/reset-reservation`)
+      for (const waiter of byId.get(id) ?? []) {
+        waiter.resolve(data)
+      }
+    } catch (error) {
+      for (const waiter of byId.get(id) ?? []) {
+        waiter.reject(error)
+      }
+    }
+    return
+  }
+
+  const chunkSize = 200
+  for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+    const chunk = uniqueIds.slice(i, i + chunkSize)
+    try {
+      const { data } = await apiClient.post<Record<string, OpenAIResetReservation | null>>(
+        '/admin/openai/accounts/reset-reservations/batch',
+        { account_ids: chunk }
+      )
+      for (const id of chunk) {
+        const value = data?.[String(id)] ?? null
+        for (const waiter of byId.get(id) ?? []) {
+          waiter.resolve(value)
+        }
+      }
+    } catch (error) {
+      for (const id of chunk) {
+        for (const waiter of byId.get(id) ?? []) {
+          waiter.reject(error)
+        }
+      }
+    }
+  }
+}
+
+export function getOpenAIResetReservation(id: number): Promise<OpenAIResetReservation | null> {
+  return new Promise((resolve, reject) => {
+    pendingResetReservationQueue.push({ id, resolve, reject })
+    if (!resetReservationFlushScheduled) {
+      resetReservationFlushScheduled = true
+      queueMicrotask(() => {
+        void flushResetReservationQueue()
+      })
+    }
+  })
 }
 
 export async function createOpenAIResetReservation(id: number, leadMinutes: number): Promise<OpenAIResetReservation> {

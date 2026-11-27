@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -38,6 +40,69 @@ func (r *openAIResetReservationRepository) Get(ctx context.Context, accountID in
 func (r *openAIResetReservationRepository) GetActiveByIdentity(ctx context.Context, identity string) (*service.OpenAIResetReservation, error) {
 	return r.read(ctx, `SELECT payload FROM openai_reset_reservations WHERE identity_hash = $1
 		AND status IN ('pending', 'resetting', 'unknown', 'consumed')`, identity)
+}
+
+func (r *openAIResetReservationRepository) GetByAccountIDs(ctx context.Context, accountIDs []int64) (map[int64]*service.OpenAIResetReservation, error) {
+	out := make(map[int64]*service.OpenAIResetReservation, len(accountIDs))
+	if len(accountIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(accountIDs))
+	args := make([]any, len(accountIDs))
+	for i, id := range accountIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+	query := fmt.Sprintf(`SELECT payload FROM openai_reset_reservations WHERE account_id IN (%s)`, strings.Join(placeholders, ","))
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var record service.OpenAIResetReservation
+		if err := json.Unmarshal(payload, &record); err != nil {
+			return nil, err
+		}
+		out[record.AccountID] = &record
+	}
+	return out, rows.Err()
+}
+
+func (r *openAIResetReservationRepository) GetActiveByIdentities(ctx context.Context, identities []string) (map[string]*service.OpenAIResetReservation, error) {
+	out := make(map[string]*service.OpenAIResetReservation, len(identities))
+	if len(identities) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(identities))
+	args := make([]any, len(identities))
+	for i, identity := range identities {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = identity
+	}
+	query := fmt.Sprintf(`SELECT payload FROM openai_reset_reservations WHERE identity_hash IN (%s)
+		AND status IN ('pending', 'resetting', 'unknown', 'consumed')`, strings.Join(placeholders, ","))
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var record service.OpenAIResetReservation
+		if err := json.Unmarshal(payload, &record); err != nil {
+			return nil, err
+		}
+		out[record.IdentityHash] = &record
+	}
+	return out, rows.Err()
 }
 
 func (r *openAIResetReservationRepository) CompareAndSwap(ctx context.Context, record *service.OpenAIResetReservation, expected int64) (bool, error) {

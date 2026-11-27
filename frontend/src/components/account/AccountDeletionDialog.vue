@@ -33,7 +33,7 @@ import usageAlertAPI from '@/api/admin/usageAlert'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { accountDeletionImpacts, type AccountDeletionImpact } from '@/utils/accountDeletionImpact'
 
-const props = defineProps<{ show: boolean; accountIds: number[]; message: string; deleting?: boolean }>()
+const props = defineProps<{ show: boolean; accountIds: number[]; platforms?: string[]; message: string; deleting?: boolean }>()
 const emit = defineEmits<{ (e: 'confirm'): void; (e: 'cancel'): void }>()
 const { t } = useI18n()
 const loading = ref(false)
@@ -47,6 +47,10 @@ async function loadImpact() {
   failed.value = false
   loading.value = props.show
   if (!props.show) return
+  if (props.platforms && props.platforms.length > 0 && !props.platforms.some((p) => p === 'openai' || p === 'anthropic')) {
+    loading.value = false
+    return
+  }
   const ids = [...props.accountIds]
   try {
     const [realAccounts, rules, bindings] = await Promise.all([
@@ -70,6 +74,13 @@ function cancel() {
   if (!props.deleting) emit('cancel')
 }
 
-watch(() => [props.show, props.accountIds] as const, loadImpact, { immediate: true })
+const watchKey = () => {
+  if (!props.show) return 'closed'
+  const ids = [...props.accountIds].sort((a, b) => a - b).join(',')
+  const platforms = props.platforms ? [...new Set(props.platforms)].sort().join(',') : '*'
+  return `open:${ids}:${platforms}`
+}
+
+watch(watchKey, loadImpact, { immediate: true })
 onBeforeUnmount(() => { request++ })
 </script>

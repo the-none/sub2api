@@ -9,6 +9,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -99,7 +100,7 @@ func reservationFixture(t *testing.T) (*OpenAIResetReservationService, *reservat
 	}}
 	quota := &autoResetTestQuota{usage: &OpenAIQuotaUsage{
 		AccountID: "subscription-a", FetchedAt: now.Unix(),
-		RateLimit:             &OpenAIRateLimit{PrimaryWindow: &OpenAIRateLimitWindow{UsedPercent: 30, LimitWindowSeconds: 604800}},
+		RateLimit:             &OpenAIRateLimit{PrimaryWindow: &OpenAIRateLimitWindow{UsedPercent: 30, LimitWindowSeconds: 604800, ResetAfterSeconds: 24 * 3600}},
 		RateLimitResetCredits: &OpenAIRateLimitResetCredits{AvailableCount: 2},
 		autoResetCandidates: []openAIAutoResetCreditCandidate{
 			{ID: "second-secret", ExpiresAt: now.Add(48 * time.Hour).Format(time.RFC3339)},
@@ -440,4 +441,216 @@ func TestResetReservationWaitingPreservesLegacyAvailableCreditState(t *testing.T
 	require.NoError(t, auto.evaluateAccount(context.Background(), 12))
 	require.Equal(t, int32(2), quota.queryCalls.Load(), "fresh waiting state must not amplify upstream queries")
 	require.Zero(t, quota.resetCalls.Load())
+}
+
+func TestResetReservationFixesAndAliasGetBatch(t *testing.T) {
+	t.Run("organization_id fallback and ExecuteAt clamped to CreatedAt", func(t *testing.T) {
+		s, _, accounts, quota := reservationFixture(t)
+		now := s.now()
+		accounts.account.Credentials = map[string]any{"organization_id": "org-only"}
+		quota.usage.AccountID = "org-only"
+		quota.usage.autoResetCandidates[0].ExpiresAt = now.Add(10 * time.Minute).Format(time.RFC3339)
+		quota.usage.autoResetCandidates = quota.usage.autoResetCandidates[:1]
+		quota.usage.RateLimitResetCredits.AvailableCount = 1
+		view, err := s.Create(context.Background(), 12, 20)
+		require.NoError(t, err)
+		require.Equal(t, now, view.ExecuteAt)
+	})
+
+	t.Run("pre-cutoff final check preserves retry inside 11m30s window", func(t *testing.T) {
+		s, repo, _, quota := reservationFixture(t)
+		expires := s.now().Add(11 * time.Minute)
+		quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{{ID: "first-secret", ExpiresAt: expires.Format(time.RFC3339)}}
+		quota.usage.RateLimitResetCredits.AvailableCount = 1
+		_, err := s.Create(context.Background(), 12, 20)
+		require.NoError(t, err)
+
+		quota.usage.RateLimit.PrimaryWindow.UsedPercent = 20
+		_, err = s.Process(context.Background(), 12)
+		require.NoError(t, err)
+		r, _ := repo.Get(context.Background(), 12)
+		require.Equal(t, expires.Add(-openAIResetPreCutoffFinalLead), *r.NextCheckAt)
+
+		s.now = func() time.Time { return *r.NextCheckAt }
+		quota.usage.RateLimit.PrimaryWindow.UsedPercent = 25
+		_, err = s.Process(context.Background(), 12)
+		require.NoError(t, err)
+		r, _ = repo.Get(context.Background(), 12)
+		require.Equal(t, "completed", r.Status)
+		require.Equal(t, int32(1), quota.resetCalls.Load())
+	})
+
+	t.Run("alias Get and GetBatch expose shared subscription reservation", func(t *testing.T) {
+		s, _, _, _ := reservationFixture(t)
+		_, err := s.Create(context.Background(), 12, 20)
+		require.NoError(t, err)
+		aliasRepo := &stubQuotaAccountRepo{accounts: map[int64]*Account{
+			12: {ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Credentials: map[string]any{"chatgpt_account_id": "subscription-a"}},
+			13: {ID: 13, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Credentials: map[string]any{"chatgpt_account_id": "subscription-a"}},
+		}}
+		s.accounts = aliasRepo
+		view13, err := s.Get(context.Background(), 13)
+		require.NoError(t, err)
+		require.NotNil(t, view13)
+		require.Equal(t, "pending", view13.Status)
+
+		batch, err := s.GetBatch(context.Background(), []int64{12, 13})
+		require.NoError(t, err)
+		require.NotNil(t, batch[12])
+		require.NotNil(t, batch[13])
+		require.Equal(t, batch[12].ID, batch[13].ID)
+	})
+
+	t.Run("stale threshold before ExecuteAt updates Extra and throttles NextCheckAt", func(t *testing.T) {
+		s, repo, accounts, quota := reservationFixture(t)
+		now := s.now().UTC()
+		quota.usage.RateLimit.PrimaryWindow.ResetAt = now.Add(24 * time.Hour).Unix()
+		accounts.account.Extra = map[string]any{
+			OpenAIAutoResetCreditEnabledExtraKey:     true,
+			OpenAIAutoResetCredit7dThresholdExtraKey: 0.9,
+			"codex_7d_used_percent":                  95.0,
+			"codex_usage_updated_at":                 now.Format(time.RFC3339),
+			"codex_7d_reset_at":                      now.Add(24 * time.Hour).Format(time.RFC3339),
+		}
+		_, err := s.Create(context.Background(), 12, 20)
+		require.NoError(t, err)
+
+		// Upstream usage is actually below reset threshold (40%).
+		quota.usage.RateLimit.PrimaryWindow.UsedPercent = 40
+		handled, err := s.Process(context.Background(), 12)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.Equal(t, int32(2), quota.queryCalls.Load(), "Create + one Process query")
+		require.Equal(t, 40.0, accounts.account.Extra["codex_7d_used_percent"])
+
+		r, err := repo.Get(context.Background(), 12)
+		require.NoError(t, err)
+		require.NotNil(t, r.NextCheckAt)
+		require.Equal(t, now.Add(openAIResetRetryInterval), *r.NextCheckAt)
+
+		// Advancing 1 minute (while ExecuteAt is still 39m away) must NOT query again.
+		nextNow := r.NextCheckAt.Add(-9 * time.Minute)
+		s.now = func() time.Time { return nextNow }
+		handled, err = s.Process(context.Background(), 12)
+		require.NoError(t, err)
+		require.False(t, handled)
+		require.Equal(t, int32(2), quota.queryCalls.Load(), "fresh Extra yields to legacy state maintenance without querying")
+
+		// Even if Extra reverts to >= threshold (e.g. header rounding), NextCheckAt throttles queries.
+		accounts.account.Extra["codex_7d_used_percent"] = 95.0
+		handled, err = s.Process(context.Background(), 12)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.Equal(t, int32(2), quota.queryCalls.Load(), "must not re-query before NextCheckAt")
+	})
+
+	t.Run("GetBatch propagates GetByIDs failure instead of masking errors", func(t *testing.T) {
+		s, _, _, _ := reservationFixture(t)
+		dbErr := errors.New("accounts query failed")
+		s.accounts = &reservationGetBatchErrorRepo{err: dbErr}
+		_, err := s.GetBatch(context.Background(), []int64{12})
+		require.ErrorIs(t, err, dbErr)
+	})
+
+	t.Run("stale processing syncs fresh Extra before transitioning to unknown", func(t *testing.T) {
+		s, repo, accounts, quota := reservationFixture(t)
+		_, err := s.Create(context.Background(), 12, 20)
+		require.NoError(t, err)
+		r, err := repo.Get(context.Background(), 12)
+		require.NoError(t, err)
+		attemptedAt := s.now().UTC().Add(-3 * time.Minute)
+		r.Status = "resetting"
+		r.AttemptedAt = &attemptedAt
+		require.NoError(t, s.save(context.Background(), r))
+
+		// Insert an orphaned processing idempotency record older than 2m.
+		key := "oars:" + r.IdentityHash + ":" + r.CreditHash
+		_, err = s.idempotency.repo.CreateProcessing(context.Background(), &IdempotencyRecord{
+			Scope:              "openai_reset_reservation",
+			IdempotencyKeyHash: HashIdempotencyKey(key),
+			RequestFingerprint: HashIdempotencyKey(key),
+			Status:             IdempotencyStatusProcessing,
+			ExpiresAt:          s.now().UTC().Add(time.Hour),
+		})
+		require.NoError(t, err)
+
+		quota.usage.RateLimit.PrimaryWindow.UsedPercent = 0
+		handled, err := s.Process(context.Background(), 12)
+		require.NoError(t, err)
+		require.True(t, handled)
+		updated, err := repo.Get(context.Background(), 12)
+		require.NoError(t, err)
+		require.Equal(t, "unknown", updated.Status)
+		require.Equal(t, 0.0, accounts.account.Extra["codex_7d_used_percent"])
+	})
+
+	t.Run("inside final 90s cutoff still runs read-only reconciliation for prior attempt", func(t *testing.T) {
+		s, repo, accounts, quota := reservationFixture(t)
+		view, err := s.Create(context.Background(), 12, 20)
+		require.NoError(t, err)
+		r, err := repo.Get(context.Background(), 12)
+		require.NoError(t, err)
+		attemptedAt := s.now().UTC()
+		r.Status = "resetting"
+		r.AttemptedAt = &attemptedAt
+		require.NoError(t, s.save(context.Background(), r))
+
+		// Advance inside [ExpiresAt - 90s, ExpiresAt), e.g., ExpiresAt - 60s.
+		s.now = func() time.Time { return view.ExpiresAt.Add(-60 * time.Second) }
+		quota.usage.RateLimit.PrimaryWindow.UsedPercent = 0
+		quota.usage.RateLimit.PrimaryWindow.ResetAfterSeconds = 7 * 24 * 3600
+		handled, err := s.Process(context.Background(), 12)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.Zero(t, quota.resetCalls.Load(), "must not send consume past cutoff")
+		require.Equal(t, 0.0, accounts.account.Extra["codex_7d_used_percent"])
+		updated, err := repo.Get(context.Background(), 12)
+		require.NoError(t, err)
+		require.Equal(t, "unknown", updated.Status)
+	})
+
+	t.Run("real OpenAIQuotaService pre-POST client error rolls back first attempt to pending", func(t *testing.T) {
+		s, repo, accounts, quota := reservationFixture(t)
+		accounts.mu.Lock()
+		accounts.account.Credentials["access_token"] = "tok-valid"
+		accounts.account.Credentials["expires_at"] = s.now().UTC().Add(time.Hour).Format(time.RFC3339)
+		accounts.mu.Unlock()
+
+		realQuota := NewOpenAIQuotaService(
+			accounts,
+			nil,
+			NewOpenAITokenProvider(accounts, nil, nil),
+			func(string) (*req.Client, error) {
+				return nil, errors.New("proxy client init failed")
+			},
+			nil,
+		)
+		s.quota = &autoResetRealClientErrorQuota{
+			autoResetTestQuota: quota,
+			real:               realQuota,
+		}
+
+		view, err := s.Create(context.Background(), 12, 20)
+		require.NoError(t, err)
+		s.now = func() time.Time { return view.ExecuteAt }
+
+		handled, err := s.Process(context.Background(), 12)
+		require.NoError(t, err)
+		require.True(t, handled)
+
+		updated, err := repo.Get(context.Background(), 12)
+		require.NoError(t, err)
+		require.Equal(t, "pending", updated.Status)
+		require.Nil(t, updated.AttemptedAt)
+		require.Equal(t, "OPENAI_QUOTA_CLIENT_ERROR", updated.ErrorCode)
+	})
+}
+
+type reservationGetBatchErrorRepo struct {
+	AccountRepository
+	err error
+}
+
+func (r *reservationGetBatchErrorRepo) GetByIDs(context.Context, []int64) ([]*Account, error) {
+	return nil, r.err
 }

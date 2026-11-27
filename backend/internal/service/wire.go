@@ -275,6 +275,7 @@ func ProvideAccountUsageService(
 	}
 	if openAIQuotaService != nil {
 		openAIQuotaService.SetResetReconciler(service)
+		openAIQuotaService.SetUsageAlertService(usageAlertService)
 	}
 	return service
 }

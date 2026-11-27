@@ -13,7 +13,20 @@ import (
 	"github.com/google/uuid"
 )
 
-const openAIResetReservationCutoff = 90 * time.Second
+const (
+	openAIResetReservationCutoff         = 90 * time.Second
+	openAIResetQueryFailureRetryInterval = time.Minute
+	openAIResetPreCutoffFinalLead        = openAIResetReservationCutoff + 75*time.Second
+)
+
+func scheduleOpenAIResetPreConsumeRetry(now, expiresAt time.Time, interval time.Duration) time.Time {
+	next := now.Add(interval)
+	finalCheck := expiresAt.Add(-openAIResetPreCutoffFinalLead)
+	if now.Before(finalCheck) && next.After(finalCheck) {
+		return finalCheck
+	}
+	return next
+}
 
 // "code" is redacted by the generic idempotency store as an OAuth secret key.
 // Store the verified, non-sensitive outcome under a distinct field.
@@ -89,6 +102,11 @@ type OpenAIResetReservationRepository interface {
 	ListRunnable(context.Context, int64, int) ([]int64, error)
 }
 
+type openAIResetReservationBatchRepo interface {
+	GetByAccountIDs(ctx context.Context, accountIDs []int64) (map[int64]*OpenAIResetReservation, error)
+	GetActiveByIdentities(ctx context.Context, identities []string) (map[string]*OpenAIResetReservation, error)
+}
+
 type OpenAIResetReservationService struct {
 	repo        OpenAIResetReservationRepository
 	accounts    AccountRepository
@@ -117,11 +135,14 @@ func openAIResetIdentity(account *Account) string {
 	if account == nil {
 		return ""
 	}
-	id, _ := account.Credentials["chatgpt_account_id"].(string)
-	if strings.TrimSpace(id) == "" {
+	id := strings.TrimSpace(account.GetCredential("chatgpt_account_id"))
+	if id == "" {
+		id = strings.TrimSpace(account.GetCredential("organization_id"))
+	}
+	if id == "" {
 		return ""
 	}
-	return shortOpenAIAutoResetHash(strings.TrimSpace(id))
+	return shortOpenAIAutoResetHash(id)
 }
 
 // lease serializes all reset entry points, including aliases of one subscription.
@@ -206,11 +227,149 @@ func (s *OpenAIResetReservationService) guardConsumption(ctx context.Context, ac
 }
 
 func (s *OpenAIResetReservationService) Get(ctx context.Context, accountID int64) (*OpenAIResetReservationView, error) {
-	if _, err := s.accounts.GetByID(ctx, accountID); err != nil {
+	account, err := s.accounts.GetByID(ctx, accountID)
+	if err != nil {
 		return nil, err
 	}
 	reservation, err := s.repo.Get(ctx, accountID)
-	return reservation.View(), err
+	if err != nil {
+		return nil, err
+	}
+	if !reservation.active() {
+		if identity := openAIResetIdentity(account); identity != "" {
+			active, activeErr := s.repo.GetActiveByIdentity(ctx, identity)
+			if activeErr != nil {
+				return nil, activeErr
+			}
+			if active.active() {
+				reservation = active
+			}
+		}
+	}
+	return reservation.View(), nil
+}
+
+// GetBatch returns the effective reset reservation view (direct or shared
+// subscription alias) for each requested account ID.
+func (s *OpenAIResetReservationService) GetBatch(ctx context.Context, accountIDs []int64) (map[int64]*OpenAIResetReservationView, error) {
+	out := make(map[int64]*OpenAIResetReservationView, len(accountIDs))
+	if len(accountIDs) == 0 {
+		return out, nil
+	}
+	uniqueIDs := make([]int64, 0, len(accountIDs))
+	seen := make(map[int64]struct{}, len(accountIDs))
+	for _, id := range accountIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	if len(uniqueIDs) == 0 {
+		return out, nil
+	}
+
+	accountsByID := make(map[int64]*Account, len(uniqueIDs))
+	loaded, err := s.accounts.GetByIDs(ctx, uniqueIDs)
+	if err != nil {
+		return nil, err
+	}
+	if loaded == nil {
+		// Fallback for minimal test stubs whose GetByIDs returns nil, nil.
+		for _, id := range uniqueIDs {
+			acc, getErr := s.accounts.GetByID(ctx, id)
+			if getErr != nil {
+				if errors.Is(getErr, ErrAccountNotFound) {
+					continue
+				}
+				return nil, getErr
+			}
+			if acc != nil {
+				accountsByID[id] = acc
+			}
+		}
+	} else {
+		for _, acc := range loaded {
+			if acc != nil {
+				accountsByID[acc.ID] = acc
+			}
+		}
+	}
+
+	direct := make(map[int64]*OpenAIResetReservation, len(uniqueIDs))
+	activeByIdentity := make(map[string]*OpenAIResetReservation)
+	if batchRepo, ok := s.repo.(openAIResetReservationBatchRepo); ok {
+		var err error
+		direct, err = batchRepo.GetByAccountIDs(ctx, uniqueIDs)
+		if err != nil {
+			return nil, err
+		}
+		identitySet := make(map[string]struct{}, len(uniqueIDs))
+		identities := make([]string, 0, len(uniqueIDs))
+		for _, id := range uniqueIDs {
+			r := direct[id]
+			if r.active() {
+				continue
+			}
+			identity := openAIResetIdentity(accountsByID[id])
+			if identity == "" {
+				continue
+			}
+			if _, exists := identitySet[identity]; !exists {
+				identitySet[identity] = struct{}{}
+				identities = append(identities, identity)
+			}
+		}
+		if len(identities) > 0 {
+			activeByIdentity, err = batchRepo.GetActiveByIdentities(ctx, identities)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		for _, id := range uniqueIDs {
+			if accountsByID[id] == nil {
+				continue
+			}
+			r, err := s.repo.Get(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if r != nil {
+				direct[id] = r
+			}
+			if !r.active() {
+				if identity := openAIResetIdentity(accountsByID[id]); identity != "" {
+					if _, loaded := activeByIdentity[identity]; !loaded {
+						active, err := s.repo.GetActiveByIdentity(ctx, identity)
+						if err != nil {
+							return nil, err
+						}
+						activeByIdentity[identity] = active
+					}
+				}
+			}
+		}
+	}
+
+	for _, id := range uniqueIDs {
+		if accountsByID[id] == nil {
+			continue
+		}
+		reservation := direct[id]
+		if !reservation.active() {
+			if identity := openAIResetIdentity(accountsByID[id]); identity != "" {
+				if shared := activeByIdentity[identity]; shared.active() {
+					reservation = shared
+				}
+			}
+		}
+		out[id] = reservation.View()
+	}
+	return out, nil
 }
 
 func (s *OpenAIResetReservationService) save(ctx context.Context, r *OpenAIResetReservation) error {
@@ -277,10 +436,14 @@ func (s *OpenAIResetReservationService) Create(ctx context.Context, accountID in
 	if !expires.After(now.Add(openAIResetReservationCutoff)) {
 		return nil, infraerrors.Conflict("OPENAI_RESET_TOO_LATE", "the earliest reset is expired or too close to expiry")
 	}
+	executeAt := expires.Add(-time.Duration(leadMinutes) * time.Minute)
+	if executeAt.Before(now) {
+		executeAt = now
+	}
 	r := &OpenAIResetReservation{
 		ID: uuid.NewString(), AccountID: accountID, IdentityHash: openAIResetIdentity(account),
 		CreditHash: shortOpenAIAutoResetHash(candidate.ID), Status: "pending",
-		ExpiresAt: expires, ExecuteAt: expires.Add(-time.Duration(leadMinutes) * time.Minute), CreatedAt: now,
+		ExpiresAt: expires, ExecuteAt: executeAt, CreatedAt: now,
 	}
 	if previous != nil {
 		r.Version = previous.Version
@@ -301,6 +464,15 @@ func (s *OpenAIResetReservationService) Cancel(ctx context.Context, accountID in
 	r, err := s.repo.Get(ctx, accountID)
 	if err != nil {
 		return nil, err
+	}
+	if r == nil || r.ID != reservationID {
+		if account, accErr := s.accounts.GetByID(ctx, accountID); accErr == nil && account != nil {
+			if identity := openAIResetIdentity(account); identity != "" {
+				if active, activeErr := s.repo.GetActiveByIdentity(ctx, identity); activeErr == nil && active != nil && active.ID == reservationID {
+					r = active
+				}
+			}
+		}
 	}
 	if r == nil || r.ID != reservationID {
 		return nil, infraerrors.Conflict("OPENAI_RESET_RESERVATION_CHANGED", "refresh the reservation before cancelling")
@@ -376,6 +548,7 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 	// A successful receipt can survive a failed reservation write or a crash.
 	// Read it BEFORE querying the remaining cards or checking the deadline.
 	key := "oars:" + r.IdentityHash + ":" + r.CreditHash
+	staleProcessing := false
 	if r.AttemptedAt != nil {
 		record, receiptErr := s.idempotency.repo.GetByScopeAndKeyHash(ctx, "openai_reset_reservation", HashIdempotencyKey(key))
 		if receiptErr != nil {
@@ -404,7 +577,7 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 			return true, s.recover(ctx, r)
 		}
 		if record != nil && record.Status == IdempotencyStatusProcessing && s.now().Sub(*r.AttemptedAt) > 2*time.Minute {
-			return finish("unknown", "RESET_RESULT_UNCONFIRMED")
+			staleProcessing = true
 		}
 	}
 	if r.Status == "unknown" {
@@ -413,9 +586,6 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 	now := s.now().UTC()
 	pastCutoff := !now.Before(r.ExpiresAt.Add(-openAIResetReservationCutoff))
 	if pastCutoff {
-		if r.AttemptedAt != nil && !r.OnlyNoopAttempts {
-			return finish("unknown", "RESET_RESULT_UNCONFIRMED")
-		}
 		if r.AttemptedAt == nil {
 			code := r.ErrorCode
 			if code == "" {
@@ -439,17 +609,18 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 			return false, nil
 		}
 	}
-	if !pastCutoff && r.NextCheckAt != nil && now.Before(*r.NextCheckAt) {
+	bypassNextCheckForStaleProcessing := staleProcessing && r.ErrorCode != "RESET_QUERY_FAILED" && r.ErrorCode != "RESET_DETAILS_UNCONFIRMED"
+	if !pastCutoff && !bypassNextCheckForStaleProcessing && r.NextCheckAt != nil && now.Before(*r.NextCheckAt) {
 		return true, nil
 	}
-	if !pastCutoff && r.NextCheckAt == nil && r.AttemptedAt != nil && now.Before(r.UpdatedAt.Add(openAIResetRetryInterval)) {
+	if !pastCutoff && !bypassNextCheckForStaleProcessing && r.NextCheckAt == nil && r.AttemptedAt != nil && now.Before(r.UpdatedAt.Add(openAIResetRetryInterval)) {
 		return true, nil
 	}
 	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < openaiQuotaUpstreamTimeout+5*time.Second {
 		return true, nil
 	}
 	firstAttempt := r.AttemptedAt == nil
-	nextCheck := now.Add(openAIResetRetryInterval)
+	nextCheck := scheduleOpenAIResetPreConsumeRetry(now, r.ExpiresAt, openAIResetQueryFailureRetryInterval)
 	r.NextCheckAt = &nextCheck
 	// Persist before querying so query failures and hot notifications cannot
 	// amplify retries, including after a process restart.
@@ -468,6 +639,28 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 		return true, s.save(ctx, r)
 	}
 	_ = s.quota.CacheResetCreditsSnapshot(ctx, accountID, usage.RateLimitResetCredits)
+	reconcileUnknown := func(code string) (bool, error) {
+		updates := buildOpenAIAutoResetUsageUpdates(usage, now)
+		if len(updates) > 0 {
+			if err := s.accounts.UpdateExtra(ctx, accountID, updates); err != nil && now.Before(r.ExpiresAt) {
+				return true, err
+			}
+		}
+		if observer, ok := s.quota.(openAIQuotaUsageAlertObserver); ok {
+			observer.ObserveQuotaUsage(ctx, accountID, usage)
+		}
+		pause5h, pause7d := resolveOpenAIQuotaAutoPauseThresholds(ctx, account)
+		u5h := readOpenAIQuotaUsedPercent(updates, "5h") / 100
+		u7d := readOpenAIQuotaUsedPercent(updates, "7d") / 100
+		pauseReached := (!resolveAccountExtraBool(account.Extra, "auto_pause_5h_disabled") && pause5h > 0 && u5h >= pause5h) ||
+			(!resolveAccountExtraBool(account.Extra, "auto_pause_7d_disabled") && pause7d > 0 && u7d >= pause7d)
+		if openAIUsageConfirmsSchedulable(usage, pauseReached, now) {
+			if err := maybeRecoverOpenAIQuotaBlocks(ctx, account, s.recoverer); err != nil && now.Before(r.ExpiresAt) {
+				return true, err
+			}
+		}
+		return finish("unknown", code)
+	}
 	var candidate *openAIAutoResetCreditCandidate
 	for i := range usage.autoResetCandidates {
 		if shortOpenAIAutoResetHash(usage.autoResetCandidates[i].ID) == r.CreditHash {
@@ -477,20 +670,42 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 	}
 	if candidate == nil {
 		if r.AttemptedAt != nil {
-			return finish("unknown", "RESET_RESULT_UNCONFIRMED")
+			return reconcileUnknown("RESET_RESULT_UNCONFIRMED")
 		}
 		return finish("unavailable", "RESERVED_CREDIT_UNAVAILABLE")
 	}
+	if staleProcessing {
+		return reconcileUnknown("RESET_RESULT_UNCONFIRMED")
+	}
 	if pastCutoff {
+		if r.AttemptedAt != nil && !r.OnlyNoopAttempts {
+			return reconcileUnknown("RESET_RESULT_UNCONFIRMED")
+		}
 		return finish("expired", "OPENAI_RESET_NOTHING_TO_RESET")
 	}
 	config := ResolveOpenAIAutoResetCreditConfig(account)
 	updates := buildOpenAIAutoResetUsageUpdates(usage, now)
 	thresholdReached := config.Enabled && openAIResetWeeklyThresholdReached(readOpenAIQuotaUsedPercent(updates, "7d")/100, config.Threshold7d)
 	if r.AttemptedAt == nil && now.Before(r.ExecuteAt) && !thresholdReached {
-		return true, nil
+		if len(updates) > 0 {
+			if err := s.accounts.UpdateExtra(ctx, accountID, updates); err != nil {
+				return true, err
+			}
+		}
+		if observer, ok := s.quota.(openAIQuotaUsageAlertObserver); ok {
+			observer.ObserveQuotaUsage(ctx, accountID, usage)
+		}
+		nextWait := scheduleOpenAIResetPreConsumeRetry(now, r.ExpiresAt, openAIResetRetryInterval)
+		if r.ExecuteAt.Before(nextWait) {
+			nextWait = r.ExecuteAt
+		}
+		r.NextCheckAt = &nextWait
+		r.ErrorCode = ""
+		return true, s.save(ctx, r)
 	}
 	if !openAIResetUsageEligible(usage, now) {
+		nextLow := scheduleOpenAIResetPreConsumeRetry(now, r.ExpiresAt, openAIResetRetryInterval)
+		r.NextCheckAt = &nextLow
 		r.ErrorCode = "OPENAI_RESET_USAGE_TOO_LOW"
 		return true, s.save(ctx, r)
 	}
@@ -515,6 +730,8 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 	onlyNoops := firstAttempt || r.OnlyNoopAttempts
 	r.LastAttemptAt, r.OnlyNoopAttempts = &now, false
 	r.Status, r.ErrorCode = "resetting", ""
+	nextRetry := s.now().UTC().Add(openAIResetRetryInterval)
+	r.NextCheckAt = &nextRetry
 	if err := s.save(ctx, r); err != nil {
 		return true, err
 	}
@@ -522,8 +739,9 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 	result, err := s.idempotency.Execute(ctx, IdempotencyExecuteOptions{
 		Scope: "openai_reset_reservation", ActorScope: r.IdentityHash, Method: http.MethodPost,
 		Route: "/system/openai/reset-credit/reservation", IdempotencyKey: key, RequireKey: true,
-		Payload: map[string]string{"identity_hash": r.IdentityHash, "credit_hash": r.CreditHash},
-		TTL:     r.ExpiresAt.Sub(now) + 30*24*time.Hour,
+		Payload:          map[string]string{"identity_hash": r.IdentityHash, "credit_hash": r.CreditHash},
+		TTL:              r.ExpiresAt.Sub(now) + 30*24*time.Hour,
+		ExecutionTimeout: openAIResetIdempotencyExecutionTimeout,
 	}, func(execCtx context.Context) (any, error) {
 		current, loadErr := s.accounts.GetByID(execCtx, accountID)
 		if loadErr != nil {
@@ -539,7 +757,8 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 			return nil, infraerrors.Conflict("OPENAI_RESET_RETRY_LATER", "insufficient time to start redemption")
 		}
 		sent = true
-		reset, resetErr := s.quota.ResetCreditTargeted(withOpenAIResetUsage(execCtx, accountID, usage), accountID, candidate.ID, uuid.NewSHA1(uuid.NameSpaceURL, []byte(key)).String())
+		dispatchCtx := withOpenAIResetDispatchTracker(withOpenAIResetUsage(execCtx, accountID, usage), &sent)
+		reset, resetErr := s.quota.ResetCreditTargeted(dispatchCtx, accountID, candidate.ID, uuid.NewSHA1(uuid.NameSpaceURL, []byte(key)).String())
 		if resetErr != nil {
 			if openAIResetNotSent(resetErr) {
 				sent = false
@@ -568,16 +787,19 @@ func (s *OpenAIResetReservationService) Process(ctx context.Context, accountID i
 		// Start the next interval after the call completes, not before the
 		// preceding usage query. Otherwise the next check can arrive a few
 		// seconds before the shared cooldown expires and lose an opportunity.
-		nextCheck = s.now().UTC().Add(openAIResetRetryInterval)
+		reason := infraerrors.Reason(err)
+		notDispatched := (!sent && reason != infraerrors.Reason(ErrIdempotencyInProgress) && reason != infraerrors.Reason(ErrIdempotencyRetryBackoff)) || openAIResetNotSent(err)
+		if notDispatched && reason != "OPENAI_RESET_COOLDOWN" {
+			nextCheck = scheduleOpenAIResetPreConsumeRetry(s.now().UTC(), r.ExpiresAt, openAIResetRetryInterval)
+		} else {
+			nextCheck = s.now().UTC().Add(openAIResetRetryInterval)
+		}
 		r.NextCheckAt = &nextCheck
-		if firstAttempt && !sent && infraerrors.Reason(err) != infraerrors.Reason(ErrIdempotencyInProgress) {
+		if firstAttempt && notDispatched {
 			r.Status, r.AttemptedAt = "pending", nil
 		}
-		r.ErrorCode = infraerrors.Reason(err)
-		if r.ErrorCode == "OPENAI_RESET_NOTHING_TO_RESET" {
-			r.OnlyNoopAttempts = onlyNoops
-		}
-		if openAIResetNotSent(err) {
+		r.ErrorCode = reason
+		if r.ErrorCode == "OPENAI_RESET_NOTHING_TO_RESET" || notDispatched {
 			r.OnlyNoopAttempts = onlyNoops
 		}
 		if r.ErrorCode == "" {

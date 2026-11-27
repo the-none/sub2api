@@ -94,7 +94,9 @@ export interface UsageAlertBinding {
 
 export type RealAccountPayload = Pick<RealAccount, 'name' | 'platform' | 'identifier' | 'notes'>
 export type UsageAlertRulePayload = Omit<UsageAlertRule, 'id' | 'created_at' | 'updated_at'>
-export type UsageAlertWebhookPayload = Omit<UsageAlertWebhook, 'id' | 'created_at' | 'updated_at'>
+export type UsageAlertWebhookPayload = Omit<UsageAlertWebhook, 'id' | 'created_at' | 'updated_at'> & {
+  id?: number
+}
 export type UsageAlertBindingPayload = Pick<UsageAlertBinding, 'real_account_id' | 'webhook_id' | 'enabled'>
 
 const base = '/admin/usage-alert'

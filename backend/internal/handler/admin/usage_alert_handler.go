@@ -76,6 +76,7 @@ func (r usageAlertRuleRequest) resolvedUsageType() string {
 }
 
 type usageAlertWebhookRequest struct {
+	ID         int64          `json:"id"`
 	Name       string         `json:"name" binding:"required"`
 	Type       string         `json:"type"`
 	URL        string         `json:"url"`
@@ -394,7 +395,11 @@ func (h *UsageAlertHandler) ListWebhooks(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, items)
+	out := make([]*service.UsageAlertWebhook, 0, len(items))
+	for _, item := range items {
+		out = append(out, service.SanitizeUsageAlertWebhook(item))
+	}
+	response.Success(c, out)
 }
 
 func (h *UsageAlertHandler) CreateWebhook(c *gin.Context) {
@@ -415,7 +420,7 @@ func (h *UsageAlertHandler) CreateWebhook(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, service.SanitizeUsageAlertWebhook(item))
 }
 
 func (h *UsageAlertHandler) UpdateWebhook(c *gin.Context) {
@@ -441,7 +446,7 @@ func (h *UsageAlertHandler) UpdateWebhook(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, service.SanitizeUsageAlertWebhook(item))
 }
 
 func (h *UsageAlertHandler) DeleteWebhook(c *gin.Context) {
@@ -463,6 +468,7 @@ func (h *UsageAlertHandler) TestWebhook(c *gin.Context) {
 		return
 	}
 	err := h.service.TestWebhook(c.Request.Context(), &service.UsageAlertWebhook{
+		ID:         req.ID,
 		Name:       req.Name,
 		Type:       req.Type,
 		URL:        req.URL,
@@ -483,7 +489,11 @@ func (h *UsageAlertHandler) ListBindings(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, items)
+	out := make([]*service.UsageAlertBinding, 0, len(items))
+	for _, item := range items {
+		out = append(out, service.SanitizeUsageAlertBinding(item))
+	}
+	response.Success(c, out)
 }
 
 func (h *UsageAlertHandler) CreateBinding(c *gin.Context) {
@@ -501,7 +511,7 @@ func (h *UsageAlertHandler) CreateBinding(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, service.SanitizeUsageAlertBinding(item))
 }
 
 func (h *UsageAlertHandler) UpdateBinding(c *gin.Context) {
@@ -524,7 +534,7 @@ func (h *UsageAlertHandler) UpdateBinding(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, service.SanitizeUsageAlertBinding(item))
 }
 
 func (h *UsageAlertHandler) DeleteBinding(c *gin.Context) {

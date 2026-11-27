@@ -475,7 +475,7 @@
       @updated="handleBulkUpdated"
     />
     <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
-    <AccountDeletionDialog :show="showDeleteDialog" :account-ids="deletingAccountIds" :deleting="deletingAccounts" :message="deletionIsBulk ? t('admin.accounts.bulkActions.confirmDelete', { count: deletingAccountIds.length }) : t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
+    <AccountDeletionDialog :show="showDeleteDialog" :account-ids="deletingAccountIds" :platforms="deletingAccountPlatforms" :deleting="deletingAccounts" :message="deletionIsBulk ? t('admin.accounts.bulkActions.confirmDelete', { count: deletingAccountIds.length }) : t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
       <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -607,6 +607,19 @@ const showDeleteDialog = ref(false)
 const deletingAccountIds = ref<number[]>([])
 const deletingAccounts = ref(false)
 const deletionIsBulk = ref(false)
+const deletingAccountPlatforms = computed<string[] | undefined>(() => {
+  if (!deletionIsBulk.value) {
+    return deletingAcc.value?.platform ? [deletingAcc.value.platform] : undefined
+  }
+  const byId = new Map(accounts.value.map(a => [a.id, a.platform]))
+  const platforms: string[] = []
+  for (const id of deletingAccountIds.value) {
+    const platform = byId.get(id)
+    if (!platform) return undefined
+    if (!platforms.includes(platform)) platforms.push(platform)
+  }
+  return platforms.length > 0 ? platforms : undefined
+})
 const showCreateShadowDialog = ref(false)
 const showReAuth = ref(false)
 const showTest = ref(false)

@@ -33,6 +33,30 @@ func (h *OpenAIOAuthHandler) GetResetReservation(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *OpenAIOAuthHandler) GetBatchResetReservations(c *gin.Context) {
+	if h.resetReservations == nil {
+		response.BadRequest(c, "reset reservations are not enabled")
+		return
+	}
+	var input struct {
+		AccountIDs []int64 `json:"account_ids" binding:"required,min=1,max=200"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid account IDs")
+		return
+	}
+	results, err := h.resetReservations.GetBatch(c.Request.Context(), input.AccountIDs)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	out := make(map[string]any, len(results))
+	for id, view := range results {
+		out[strconv.FormatInt(id, 10)] = view
+	}
+	response.Success(c, out)
+}
+
 func (h *OpenAIOAuthHandler) CreateResetReservation(c *gin.Context) {
 	id, ok := h.resetReservationAccountID(c)
 	if !ok {

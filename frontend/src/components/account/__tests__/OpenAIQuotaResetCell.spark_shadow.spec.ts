@@ -475,4 +475,22 @@ describe('OpenAIQuotaResetCell 自动用卡运行态', () => {
     expect(wrapper.find('[data-testid="auto-reset-credit-state"]').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('将 OPENAI_RESET_RESERVED 映射为可读预约提示', async () => {
+    vi.mocked(resetOpenAIQuota).mockRejectedValueOnce({ reason: 'OPENAI_RESET_RESERVED', message: 'reserved' })
+    const account = makeAccount({
+      extra: {
+        codex_reset_credit_snapshot: {
+          available_count: 1,
+          credits: [{ expires_at: FUTURE_EXPIRY_EARLY }],
+        },
+      },
+    })
+    const wrapper = mount(OpenAIQuotaResetCell, { props: { account } })
+    await resetButton(wrapper).trigger('click')
+    wrapper.findComponent(ConfirmDialog).vm.$emit('confirm')
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.accounts.resetReservation.reservedManualHint')
+    wrapper.unmount()
+  })
 })

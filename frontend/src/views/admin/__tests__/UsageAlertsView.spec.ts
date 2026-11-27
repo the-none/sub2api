@@ -220,4 +220,36 @@ describe('admin UsageAlertsView', () => {
 
     wrapper.unmount()
   })
+
+  it('uses lite paginated account loading and keeps blank Telegram token placeholder on edit', async () => {
+    listWebhooks.mockResolvedValueOnce([{
+      id: 9,
+      name: 'TG Alert',
+      type: 'telegram',
+      config: { has_bot_token: true, chat_id: '-1008', language: 'zh', timezone: 'Asia/Shanghai' },
+      retry_count: 2,
+      enabled: true
+    }])
+    const wrapper = mount(UsageAlertsView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } }
+    })
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenCalledWith(1, 1000, expect.objectContaining({ platform: 'openai', lite: '1' }))
+    expect(listAccounts).toHaveBeenCalledWith(1, 1000, expect.objectContaining({ platform: 'anthropic', lite: '1' }))
+
+    const editBtn = wrapper.findAll('button').find((b) =>
+      b.text() === '编辑' && b.element.parentElement?.parentElement?.textContent?.includes('TG Alert')
+    )
+    expect(editBtn).toBeTruthy()
+    await editBtn?.trigger('click')
+
+    const tokenInput = wrapper.find('input[type="password"]')
+    expect(tokenInput.exists()).toBe(true)
+    expect((tokenInput.element as HTMLInputElement).value).toBe('')
+    expect(tokenInput.attributes('required')).toBeUndefined()
+    expect(tokenInput.attributes('placeholder')).toContain('保持原 Token')
+
+    wrapper.unmount()
+  })
 })

@@ -10,7 +10,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const openAIResetRetryInterval = 10 * time.Minute
+const (
+	openAIResetRetryInterval               = 10 * time.Minute
+	openAIResetIdempotencyExecutionTimeout = 45 * time.Second
+)
 
 func openAIResetWeeklyThresholdReached(utilization, threshold float64) bool {
 	return !math.IsNaN(utilization) && !math.IsInf(utilization, 0) &&
@@ -60,6 +63,65 @@ func openAIResetOutcome(code string) string {
 	}
 }
 
+// IsOpenAIQuotaResetConfirmedSuccess reports whether an upstream consume code
+// explicitly confirms a successful credit redemption.
+func IsOpenAIQuotaResetConfirmedSuccess(code string) bool {
+	return openAIResetOutcome(code) == "ok"
+}
+
+func openAIUsageConfirmsSchedulable(usage *OpenAIQuotaUsage, pauseReached bool, now time.Time) bool {
+	if pauseReached || usage == nil || usage.RateLimit == nil {
+		return false
+	}
+	if !usage.RateLimit.Allowed || usage.RateLimit.LimitReached {
+		return false
+	}
+	nowUnix := now.Unix()
+	hasValidWindow := false
+	for _, window := range []*OpenAIRateLimitWindow{usage.RateLimit.PrimaryWindow, usage.RateLimit.SecondaryWindow} {
+		if window == nil {
+			continue
+		}
+		if math.IsNaN(window.UsedPercent) || math.IsInf(window.UsedPercent, 0) || window.UsedPercent < 0 {
+			return false
+		}
+		resetAt := window.ResetAt
+		if resetAt <= 0 && window.ResetAfterSeconds > 0 {
+			base := usage.FetchedAt
+			if base <= 0 {
+				base = nowUnix
+			}
+			resetAt = base + window.ResetAfterSeconds
+		}
+		if resetAt <= nowUnix {
+			continue
+		}
+		if window.UsedPercent >= 100 {
+			return false
+		}
+		hasValidWindow = true
+	}
+	return hasValidWindow
+}
+
+type openAIObservedQuotaRateLimitRecoverer interface {
+	ClearObservedOpenAIQuotaRateLimit(ctx context.Context, observed *Account) error
+}
+
+func maybeRecoverOpenAIQuotaBlocks(ctx context.Context, observed *Account, recoverer openAIAutoResetRecovery) error {
+	if recoverer == nil || observed == nil || observed.Status == StatusError ||
+		(observed.RateLimitedAt == nil && observed.RateLimitResetAt == nil) {
+		return nil
+	}
+	narrow, ok := recoverer.(openAIObservedQuotaRateLimitRecoverer)
+	if !ok {
+		return nil
+	}
+	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return narrow.ClearObservedOpenAIQuotaRateLimit(recoveryCtx, observed)
+}
+
 func openAIResetNoopError() error {
 	return infraerrors.Conflict("OPENAI_RESET_NOTHING_TO_RESET", "upstream has no eligible window to reset; no reset was performed")
 }
@@ -73,6 +135,30 @@ type openAIResetUsageEvidence struct {
 
 func withOpenAIResetUsage(ctx context.Context, accountID int64, usage *OpenAIQuotaUsage) context.Context {
 	return context.WithValue(ctx, openAIResetUsageContextKey{}, openAIResetUsageEvidence{accountID, usage})
+}
+
+type openAIResetDispatchContextKey struct{}
+
+// withOpenAIResetDispatchTracker attaches a boolean pointer tracking whether
+// ResetCredit / ResetCreditTargeted reached the upstream HTTP POST call.
+// Callers initialize *dispatched = true inside the idempotency callback as a
+// fail-closed default for unit-test stubs; OpenAIQuotaService.resetCredit
+// resets *dispatched = false on entry and flips it to true immediately before
+// the first HTTP POST.
+func withOpenAIResetDispatchTracker(ctx context.Context, dispatched *bool) context.Context {
+	if dispatched == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, openAIResetDispatchContextKey{}, dispatched)
+}
+
+func setOpenAIResetDispatched(ctx context.Context, value bool) {
+	if ctx == nil {
+		return
+	}
+	if flag, ok := ctx.Value(openAIResetDispatchContextKey{}).(*bool); ok && flag != nil {
+		*flag = value
+	}
 }
 
 // Called under the account/identity lease by every real redemption path.

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -198,7 +200,24 @@ func (r *autoResetTestAccountRepo) GetByID(_ context.Context, id int64) (*Accoun
 	return &copy, nil
 }
 
-func (r *autoResetTestAccountRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+func (r *autoResetTestAccountRepo) GetByIDs(ctx context.Context, ids []int64) ([]*Account, error) {
+	out := make([]*Account, 0, len(ids))
+	for _, id := range ids {
+		if r.account != nil && r.account.ID == id {
+			acc, err := r.GetByID(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, acc)
+		}
+	}
+	return out, nil
+}
+
+func (r *autoResetTestAccountRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.account.Extra == nil {
@@ -477,4 +496,391 @@ func TestOpenAIQuotaAutoResetService_QueryFailureBacksOffBeforeRetry(t *testing.
 	require.NoError(t, service.evaluateAccount(context.Background(), 501))
 	require.Equal(t, int32(2), quota.queryCalls.Load(), "重试间隔过后应恢复查询")
 	require.Equal(t, OpenAIAutoResetStatusNoCredit, repo.stateForTest().Status)
+}
+
+type autoResetTrackingRecoverer struct {
+	calls               atomic.Int32
+	quotaRateLimitClear atomic.Int32
+	quotaClearErr       error
+}
+
+func (r *autoResetTrackingRecoverer) RecoverAccountState(context.Context, int64, AccountRecoveryOptions) (*SuccessfulTestRecoveryResult, error) {
+	r.calls.Add(1)
+	return &SuccessfulTestRecoveryResult{ClearedRateLimit: true}, nil
+}
+
+func (r *autoResetTrackingRecoverer) ClearObservedOpenAIQuotaRateLimit(context.Context, *Account) error {
+	r.quotaRateLimitClear.Add(1)
+	return r.quotaClearErr
+}
+
+func TestOpenAIQuotaAutoResetService_RejectsUnknownOutcomeAndRecoversTimeout429(t *testing.T) {
+	now := time.Now().UTC()
+	rateLimitedAt := now.Add(-5 * time.Minute)
+	svc, repo, quota := newResetThresholdTestFixture(t, nil, 1)
+	quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{{ID: "credit-1", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339)}}
+	svc.quota = &reservationOutcomeQuota{autoResetTestQuota: quota, outcome: "unexpected_code"}
+	recoverer := &autoResetTrackingRecoverer{quotaClearErr: errors.New("db unavailable")}
+	svc.recoverer = recoverer
+
+	err := svc.evaluateAccount(context.Background(), 501)
+	require.Error(t, err)
+	require.Zero(t, recoverer.calls.Load())
+	require.Zero(t, recoverer.quotaRateLimitClear.Load())
+	require.Equal(t, OpenAIAutoResetStatusFailed, repo.stateForTest().Status)
+
+	repo.mu.Lock()
+	repo.account.RateLimitedAt = &rateLimitedAt
+	repo.account.Extra[OpenAIAutoResetCreditStateExtraKey] = &OpenAIAutoResetCreditState{
+		Status:    OpenAIAutoResetStatusResetting,
+		CheckedAt: now.Add(-time.Hour).Format(time.RFC3339),
+	}
+	repo.mu.Unlock()
+	quota.usage.RateLimit.Allowed = true
+	quota.usage.RateLimit.LimitReached = false
+	quota.usage.RateLimit.SecondaryWindow.UsedPercent = 0
+	quota.usage.RateLimitResetCredits.AvailableCount = 0
+	quota.usage.autoResetCandidates = nil
+	svc.quota = quota
+
+	// Missing or empty zero-horizon windows must NOT confirm schedulability.
+	savedPrimary := quota.usage.RateLimit.PrimaryWindow
+	savedSecondary := quota.usage.RateLimit.SecondaryWindow
+	quota.usage.RateLimit.PrimaryWindow = nil
+	quota.usage.RateLimit.SecondaryWindow = nil
+	require.False(t, openAIUsageConfirmsSchedulable(quota.usage, false, now))
+	quota.usage.RateLimit.SecondaryWindow = &OpenAIRateLimitWindow{}
+	require.False(t, openAIUsageConfirmsSchedulable(quota.usage, false, now))
+	quota.usage.RateLimit.PrimaryWindow = savedPrimary
+	quota.usage.RateLimit.SecondaryWindow = savedSecondary
+
+	// Transient recovery failure keeps AttemptUnconfirmed and TriggerWindow intact during 1m backoff.
+	repo.mu.Lock()
+	repo.account.Extra[OpenAIAutoResetCreditStateExtraKey] = &OpenAIAutoResetCreditState{
+		Status:            OpenAIAutoResetStatusResetting,
+		TriggerWindow:     "7d",
+		AttemptCreditHash: "hash-credit-1",
+		CheckedAt:         now.Add(-time.Hour).Format(time.RFC3339),
+	}
+	repo.mu.Unlock()
+	err = svc.evaluateAccount(context.Background(), 501)
+	require.ErrorContains(t, err, "db unavailable")
+	require.Equal(t, int32(1), recoverer.quotaRateLimitClear.Load())
+	failedState := repo.stateForTest()
+	require.Equal(t, OpenAIAutoResetStatusFailed, failedState.Status)
+	require.Equal(t, OpenAIQuotaResetWarningAccountRecoveryFailed, failedState.ErrorCode)
+	require.True(t, failedState.AttemptUnconfirmed)
+	require.Equal(t, "hash-credit-1", failedState.AttemptCreditHash)
+
+	// Hot notification during active backoff when !pauseReached must NOT overwrite StatusFailed.
+	repo.mu.Lock()
+	repo.account.Extra["codex_7d_used_percent"] = 0.0
+	repo.account.Extra["codex_usage_updated_at"] = now.Add(-time.Hour).Format(time.RFC3339)
+	repo.mu.Unlock()
+	require.NoError(t, svc.evaluateAccount(context.Background(), 501))
+	require.Equal(t, OpenAIAutoResetStatusFailed, repo.stateForTest().Status)
+	require.True(t, repo.stateForTest().AttemptUnconfirmed)
+
+	// Next cycle after backoff succeeds and clears 429 once.
+	recoverer.quotaClearErr = nil
+	repo.mu.Lock()
+	failedState.LastResultAt = now.Add(-2 * time.Minute).Format(time.RFC3339)
+	repo.account.Extra[OpenAIAutoResetCreditStateExtraKey] = failedState
+	repo.mu.Unlock()
+	require.NoError(t, svc.evaluateAccount(context.Background(), 501))
+	require.Zero(t, recoverer.calls.Load(), "must not run broad RecoverAccountState")
+	require.Equal(t, int32(2), recoverer.quotaRateLimitClear.Load())
+	require.Equal(t, OpenAIAutoResetStatusNoCredit, repo.stateForTest().Status)
+	require.False(t, repo.stateForTest().AttemptUnconfirmed)
+
+	// Settled StatusSuccess -> transient QueryUsage failure -> QueryUsage success must NOT re-arm recovery.
+	for _, settled := range []string{OpenAIAutoResetStatusSuccess, OpenAIAutoResetStatusNoCredit} {
+		repo.mu.Lock()
+		repo.account.Extra[OpenAIAutoResetCreditStateExtraKey] = &OpenAIAutoResetCreditState{
+			Status:            settled,
+			AttemptCreditHash: "hash-credit-1",
+			CheckedAt:         now.Add(-time.Hour).Format(time.RFC3339),
+		}
+		repo.account.Extra["codex_usage_updated_at"] = now.Add(-time.Hour).Format(time.RFC3339)
+		repo.mu.Unlock()
+		quota.queryErr = errors.New("temporary query failure")
+		require.Error(t, svc.evaluateAccount(context.Background(), 501))
+		require.Equal(t, OpenAIAutoResetStatusFailed, repo.stateForTest().Status)
+		require.False(t, repo.stateForTest().AttemptUnconfirmed)
+
+		quota.queryErr = nil
+		s := repo.stateForTest()
+		s.LastResultAt = now.Add(-2 * time.Minute).Format(time.RFC3339)
+		repo.mu.Lock()
+		repo.account.Extra[OpenAIAutoResetCreditStateExtraKey] = s
+		repo.mu.Unlock()
+		require.NoError(t, svc.evaluateAccount(context.Background(), 501))
+		require.Zero(t, recoverer.calls.Load())
+		require.Equal(t, int32(2), recoverer.quotaRateLimitClear.Load())
+	}
+}
+
+type openAIObservedClearRepoStub struct {
+	AccountRepository
+	calls   int
+	cleared bool
+	err     error
+}
+
+type openAIObservedBlockRecorder struct {
+	cleared []int64
+}
+
+func (b *openAIObservedBlockRecorder) BlockAccountScheduling(*Account, time.Time, string) {}
+func (b *openAIObservedBlockRecorder) ClearAccountSchedulingBlock(id int64) {
+	b.cleared = append(b.cleared, id)
+}
+
+func (r *openAIObservedClearRepoStub) ClearRateLimit(context.Context, int64) error {
+	panic("ClearRateLimit must not be called by ClearObservedOpenAIQuotaRateLimit")
+}
+
+func (r *openAIObservedClearRepoStub) ClearTempUnschedulable(context.Context, int64) error {
+	panic("ClearTempUnschedulable must not be called by ClearObservedOpenAIQuotaRateLimit")
+}
+
+func (r *openAIObservedClearRepoStub) ClearModelRateLimits(context.Context, int64) error {
+	panic("ClearModelRateLimits must not be called by ClearObservedOpenAIQuotaRateLimit")
+}
+
+func (r *openAIObservedClearRepoStub) ClearError(context.Context, int64) error {
+	panic("ClearError must not be called by ClearObservedOpenAIQuotaRateLimit")
+}
+
+func (r *openAIObservedClearRepoStub) ClearOpenAIRateLimitIfObserved(_ context.Context, _ int64, _, _ *time.Time) (bool, error) {
+	r.calls++
+	return r.cleared, r.err
+}
+
+func TestClearObservedOpenAIQuotaRateLimit_PreservesNonQuotaRuntimeState(t *testing.T) {
+	now := time.Now().UTC()
+	limitedAt := now.Add(-5 * time.Minute)
+	resetAt := now.Add(time.Hour)
+	overloadUntil := now.Add(30 * time.Minute)
+	tempUnschedUntil := now.Add(20 * time.Minute)
+
+	repo := &openAIObservedClearRepoStub{cleared: true}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	blocker := &openAIObservedBlockRecorder{}
+	svc.runtimeBlocker = blocker
+
+	account := &Account{
+		ID:                     88,
+		Platform:               PlatformOpenAI,
+		Status:                 StatusActive,
+		RateLimitedAt:          &limitedAt,
+		RateLimitResetAt:       &resetAt,
+		OverloadUntil:          &overloadUntil,
+		TempUnschedulableUntil: &tempUnschedUntil,
+		Extra:                  map[string]any{modelRateLimitsKey: map[string]any{"image": map[string]any{"rate_limit_reset_at": resetAt.Format(time.RFC3339)}}},
+	}
+
+	require.NoError(t, svc.ClearObservedOpenAIQuotaRateLimit(context.Background(), account))
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, []int64{88}, blocker.cleared)
+	require.NotNil(t, account.OverloadUntil)
+	require.NotNil(t, account.TempUnschedulableUntil)
+
+	// Rearmed 429 generation (repository returns false) must not notify scheduler.
+	repo.cleared = false
+	blocker.cleared = nil
+	require.NoError(t, svc.ClearObservedOpenAIQuotaRateLimit(context.Background(), account))
+	require.Equal(t, 2, repo.calls)
+	require.Empty(t, blocker.cleared)
+
+	// StatusError accounts must never be touched.
+	account.Status = StatusError
+	require.NoError(t, svc.ClearObservedOpenAIQuotaRateLimit(context.Background(), account))
+	require.Equal(t, 2, repo.calls)
+}
+
+func TestOpenAIQuotaAutoResetAndSparkUpdatesFallbackToResetAt(t *testing.T) {
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	future := now.Add(3 * time.Hour)
+	usage := &OpenAIQuotaUsage{
+		RateLimit: &OpenAIRateLimit{
+			PrimaryWindow: &OpenAIRateLimitWindow{
+				UsedPercent: 80, LimitWindowSeconds: 604800, ResetAfterSeconds: 0, ResetAt: future.Unix(),
+			},
+		},
+		AdditionalRateLimits: []OpenAIAdditionalRateLimit{{
+			MeteredFeature: "codex_bengalfox",
+			RateLimit: &OpenAIRateLimit{
+				PrimaryWindow: &OpenAIRateLimitWindow{
+					UsedPercent: 90, LimitWindowSeconds: 18000, ResetAfterSeconds: 0, ResetAt: future.Unix(),
+				},
+			},
+		}},
+	}
+	overall := buildOpenAIAutoResetUsageUpdates(usage, now)
+	require.Equal(t, int(3*time.Hour/time.Second), overall["codex_7d_reset_after_seconds"])
+	spark := buildCodexSparkWindowExtraUpdates(usage, now)
+	require.Equal(t, int(3*time.Hour/time.Second), spark["codex_5h_reset_after_seconds"])
+}
+
+type autoResetFailThirdGetRepo struct {
+	*autoResetTestAccountRepo
+	getCalls atomic.Int32
+	failCall int32
+}
+
+func (r *autoResetFailThirdGetRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	if r.getCalls.Add(1) == r.failCall {
+		return nil, errors.New("pre-consume get failed")
+	}
+	return r.autoResetTestAccountRepo.GetByID(ctx, id)
+}
+
+type autoResetSwitchableRecoverer struct {
+	calls               atomic.Int32
+	quotaRateLimitClear atomic.Int32
+	recoverErr          error
+	onRecover           func()
+}
+
+func (r *autoResetSwitchableRecoverer) RecoverAccountState(context.Context, int64, AccountRecoveryOptions) (*SuccessfulTestRecoveryResult, error) {
+	r.calls.Add(1)
+	if r.onRecover != nil {
+		r.onRecover()
+	}
+	if r.recoverErr != nil {
+		return nil, r.recoverErr
+	}
+	return &SuccessfulTestRecoveryResult{ClearedRateLimit: true}, nil
+}
+
+func (r *autoResetSwitchableRecoverer) ClearObservedOpenAIQuotaRateLimit(context.Context, *Account) error {
+	r.quotaRateLimitClear.Add(1)
+	return nil
+}
+
+func TestOpenAIQuotaAutoReset_ReplayOutcomeAndPreConsumeGuards(t *testing.T) {
+	t.Run("pre-consume GetByID failure never persists resetting or arms 429 clear", func(t *testing.T) {
+		now := time.Now().UTC()
+		rateLimitedAt := now.Add(-5 * time.Minute)
+		svc, baseRepo, quota := newResetThresholdTestFixture(t, nil, 1)
+		quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{{ID: "credit-1", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339)}}
+		baseRepo.mu.Lock()
+		baseRepo.account.RateLimitedAt = &rateLimitedAt
+		baseRepo.mu.Unlock()
+
+		recoverer := &autoResetSwitchableRecoverer{}
+		wrappedRepo := &autoResetFailThirdGetRepo{autoResetTestAccountRepo: baseRepo, failCall: 3}
+		svc.accountRepo = wrappedRepo
+		svc.recoverer = recoverer
+
+		err := svc.evaluateAccount(context.Background(), 501)
+		require.ErrorContains(t, err, "pre-consume get failed")
+		require.Zero(t, quota.resetCalls.Load(), "ResetCreditTargeted must not be called")
+		state := baseRepo.stateForTest()
+		require.NotNil(t, state)
+		require.Equal(t, OpenAIAutoResetStatusChecking, state.Status)
+		require.False(t, state.AttemptUnconfirmed)
+
+		// Next evaluation with below-threshold schedulable usage must NOT clear 429.
+		svc.accountRepo = baseRepo
+		quota.usage.RateLimit.Allowed = true
+		quota.usage.RateLimit.LimitReached = false
+		quota.usage.RateLimit.SecondaryWindow.UsedPercent = 0
+		require.NoError(t, svc.evaluateAccount(context.Background(), 501))
+		require.Zero(t, recoverer.calls.Load())
+		require.Zero(t, recoverer.quotaRateLimitClear.Load())
+	})
+
+	t.Run("idempotency replay preserves unredacted outcome and persists after parent ctx cancel", func(t *testing.T) {
+		now := time.Now().UTC()
+		svc, repo, quota := newResetThresholdTestFixture(t, nil, 1)
+		quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{{ID: "credit-1", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339)}}
+		idempCfg := DefaultIdempotencyConfig()
+		idempCfg.ObserveOnly = false
+		idempCfg.FailedRetryBackoff = 0
+		svc.idempotency = NewIdempotencyCoordinator(newInMemoryIdempotencyRepo(), idempCfg)
+
+		recoverer := &autoResetSwitchableRecoverer{recoverErr: errors.New("recover failed once")}
+		svc.recoverer = recoverer
+
+		// First attempt consumes upstream ("ok") and fails during post-processing.
+		err := svc.evaluateAccount(context.Background(), 501)
+		require.ErrorContains(t, err, OpenAIQuotaResetWarningAccountRecoveryFailed)
+		require.Equal(t, int32(1), quota.resetCalls.Load())
+		require.Equal(t, OpenAIAutoResetStatusFailed, repo.stateForTest().Status)
+		require.True(t, repo.stateForTest().AttemptUnconfirmed)
+
+		// Clear RetryAfter, allow recovery to succeed, and cancel outer ctx during post-processing.
+		recoverer.recoverErr = nil
+		evalCtx, cancelEval := context.WithCancel(context.Background())
+		recoverer.onRecover = cancelEval
+		state := repo.stateForTest()
+		state.RetryAfter = now.Add(-time.Second).Format(time.RFC3339Nano)
+		state.LastResultAt = now.Add(-2 * time.Minute).Format(time.RFC3339)
+		repo.setExtraForTest(OpenAIAutoResetCreditStateExtraKey, state)
+
+		require.NoError(t, svc.evaluateAccount(evalCtx, 501))
+		require.Equal(t, int32(1), quota.resetCalls.Load(), "replay must reuse stored outcome without second consume")
+		finalState := repo.stateForTest()
+		require.Equal(t, OpenAIAutoResetStatusSuccess, finalState.Status)
+		require.False(t, finalState.AttemptUnconfirmed)
+	})
+
+	t.Run("real OpenAIQuotaService pre-POST client error keeps AttemptUnconfirmed false", func(t *testing.T) {
+		now := time.Now().UTC()
+		rateLimitedAt := now.Add(-5 * time.Minute)
+		svc, repo, quota := newResetThresholdTestFixture(t, nil, 1)
+		quota.usage.autoResetCandidates = []openAIAutoResetCreditCandidate{{ID: "credit-1", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339)}}
+		repo.mu.Lock()
+		repo.account.RateLimitedAt = &rateLimitedAt
+		repo.account.Credentials = map[string]any{
+			"chatgpt_account_id": "acct-501",
+			"access_token":       "tok-valid",
+			"expires_at":         now.Add(time.Hour).Format(time.RFC3339),
+		}
+		repo.mu.Unlock()
+
+		realQuota := NewOpenAIQuotaService(
+			repo,
+			nil,
+			NewOpenAITokenProvider(repo, nil, nil),
+			func(string) (*req.Client, error) {
+				return nil, errors.New("proxy client init failed")
+			},
+			nil,
+		)
+		recoverer := &autoResetSwitchableRecoverer{}
+		svc.quota = &autoResetRealClientErrorQuota{
+			autoResetTestQuota: quota,
+			real:               realQuota,
+		}
+		svc.recoverer = recoverer
+
+		err := svc.evaluateAccount(context.Background(), 501)
+		require.Error(t, err)
+		require.Equal(t, "OPENAI_QUOTA_CLIENT_ERROR", infraerrors.Reason(err))
+		state := repo.stateForTest()
+		require.NotNil(t, state)
+		require.Equal(t, OpenAIAutoResetStatusFailed, state.Status)
+		require.Equal(t, "OPENAI_QUOTA_CLIENT_ERROR", state.ErrorCode)
+		require.False(t, state.AttemptUnconfirmed)
+
+		// Next schedulable evaluation must NOT clear 429 because no POST was dispatched.
+		quota.usage.RateLimit.Allowed = true
+		quota.usage.RateLimit.LimitReached = false
+		quota.usage.RateLimit.SecondaryWindow.UsedPercent = 0
+		require.NoError(t, svc.evaluateAccount(context.Background(), 501))
+		require.Zero(t, recoverer.calls.Load())
+		require.Zero(t, recoverer.quotaRateLimitClear.Load())
+	})
+}
+
+type autoResetRealClientErrorQuota struct {
+	*autoResetTestQuota
+	real *OpenAIQuotaService
+}
+
+func (q *autoResetRealClientErrorQuota) ResetCreditTargeted(ctx context.Context, accountID int64, creditID, redeemRequestID string) (*OpenAIQuotaResetResult, error) {
+	return q.real.ResetCreditTargeted(ctx, accountID, creditID, redeemRequestID)
 }

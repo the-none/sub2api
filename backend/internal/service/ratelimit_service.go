@@ -2484,6 +2484,34 @@ func (s *RateLimitService) RecoverAccountAfterSuccessfulTest(ctx context.Context
 	return s.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{})
 }
 
+type openAIQuotaRateLimitClearer interface {
+	ClearOpenAIRateLimitIfObserved(ctx context.Context, id int64, observedLimitedAt, observedResetAt *time.Time) (bool, error)
+}
+
+// ClearObservedOpenAIQuotaRateLimit clears only the account-level OpenAI 429
+// rate-limit fields observed prior to a confirming upstream probe, leaving
+// overload, temp-unschedulable, model rate limits, and error states intact.
+func (s *RateLimitService) ClearObservedOpenAIQuotaRateLimit(ctx context.Context, observed *Account) error {
+	if s == nil || s.accountRepo == nil || observed == nil || observed.ID <= 0 || observed.Status == StatusError {
+		return nil
+	}
+	if observed.RateLimitedAt == nil && observed.RateLimitResetAt == nil {
+		return nil
+	}
+	clearer, ok := s.accountRepo.(openAIQuotaRateLimitClearer)
+	if !ok {
+		return fmt.Errorf("account repository cannot clear an observed OpenAI rate limit")
+	}
+	cleared, err := clearer.ClearOpenAIRateLimitIfObserved(ctx, observed.ID, observed.RateLimitedAt, observed.RateLimitResetAt)
+	if err != nil {
+		return err
+	}
+	if cleared {
+		s.notifyAccountSchedulingBlockCleared(observed.ID)
+	}
+	return nil
+}
+
 func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
 	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
 		return err

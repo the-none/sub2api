@@ -90,4 +90,33 @@ describe('AccountDeletionDialog', () => {
     expect(wrapper.emitted('cancel')).toHaveLength(1)
     wrapper.unmount()
   })
+
+  it('skips usage-alert impact checks for non-OpenAI/Anthropic platforms', async () => {
+    const wrapper = mount(AccountDeletionDialog, {
+      props: { show: true, accountIds: [9], platforms: ['gemini'], message: 'Delete account?' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' } } }
+    })
+    await flushPromises()
+    expect(listRealAccounts).not.toHaveBeenCalled()
+    expect(listRules).not.toHaveBeenCalled()
+    expect(listBindings).not.toHaveBeenCalled()
+    expect(wrapper.getComponent(ConfirmDialog).props('confirmDisabled')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not re-fetch when array prop references change without value changes', async () => {
+    const wrapper = mount(AccountDeletionDialog, {
+      props: { show: true, accountIds: [4], platforms: ['openai'], message: 'Delete account?' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' } } }
+    })
+    await flushPromises()
+    expect(listRealAccounts).toHaveBeenCalledTimes(1)
+    expect(wrapper.getComponent(ConfirmDialog).props('confirmDisabled')).toBe(false)
+
+    await wrapper.setProps({ accountIds: [4], platforms: ['openai'] })
+    await flushPromises()
+    expect(listRealAccounts).toHaveBeenCalledTimes(1)
+    expect(wrapper.getComponent(ConfirmDialog).props('confirmDisabled')).toBe(false)
+    wrapper.unmount()
+  })
 })

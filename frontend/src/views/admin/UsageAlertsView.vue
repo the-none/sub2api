@@ -281,7 +281,14 @@
                 <template v-else>
                   <label class="block md:col-span-3">
                     <span class="input-label">{{ text.telegramBotToken }}</span>
-                    <input v-model.trim="webhookForm.telegramBotToken" class="input" type="password" autocomplete="off" required />
+                    <input
+                      v-model.trim="webhookForm.telegramBotToken"
+                      class="input"
+                      type="password"
+                      autocomplete="off"
+                      :required="!webhookForm.id || !webhookHasSavedBotToken"
+                      :placeholder="webhookForm.id && webhookHasSavedBotToken ? text.telegramBotTokenSaved : ''"
+                    />
                   </label>
                   <label class="block">
                     <span class="input-label">{{ text.telegramChatID }}</span>
@@ -464,6 +471,7 @@ const zhText = {
   retry: '重试',
   channelType: '类型',
   telegramBotToken: 'Bot Token',
+  telegramBotTokenSaved: '已保存，留空则保持原 Token',
   telegramChatID: 'Chat ID',
   telegramTopicID: 'Topic ID',
   notificationLanguage: '通知语言',
@@ -535,6 +543,7 @@ const enText: typeof zhText = {
   retry: 'Retry',
   channelType: 'Type',
   telegramBotToken: 'Bot Token',
+  telegramBotTokenSaved: 'Saved; leave blank to keep existing token',
   telegramChatID: 'Chat ID',
   telegramTopicID: 'Topic ID',
   notificationLanguage: 'Language',
@@ -623,6 +632,7 @@ function defaultWebhookLanguage() {
   return locale.value.startsWith('zh') ? 'zh' : 'en'
 }
 
+const webhookHasSavedBotToken = ref(false)
 const webhookForm = reactive({
   id: null as number | null,
   name: '',
@@ -687,6 +697,24 @@ function syncRuleOperatorToMetric() {
   ruleForm.operator = defaultUsageAlertOperator(ruleForm.metric)
 }
 
+async function fetchAllPlatformAccounts(platform: 'openai' | 'anthropic'): Promise<Account[]> {
+  const pageSize = 1000
+  const collected: Account[] = []
+  for (let page = 1; ; page++) {
+    const res = await accountsAPI.list(page, pageSize, {
+      platform,
+      lite: '1',
+      include_scheduler_score: '0'
+    })
+    const batch = res.items || []
+    collected.push(...batch)
+    const totalPages = res.pages ?? (res.total ? Math.ceil(res.total / pageSize) : 1)
+    if (batch.length < pageSize || page >= totalPages) {
+      return collected
+    }
+  }
+}
+
 async function loadAll() {
   loading.value = true
   try {
@@ -695,14 +723,14 @@ async function loadAll() {
       usageAlertAPI.listRules(),
       usageAlertAPI.listWebhooks(),
       usageAlertAPI.listBindings(),
-      accountsAPI.list(1, 1000, { platform: 'openai' }),
-      accountsAPI.list(1, 1000, { platform: 'anthropic' })
+      fetchAllPlatformAccounts('openai'),
+      fetchAllPlatformAccounts('anthropic')
     ])
     realAccounts.value = realAccountRows
     rules.value = ruleRows
     webhooks.value = webhookRows
     bindings.value = bindingRows
-    accounts.value = [...openaiAccounts.items, ...claudeAccounts.items]
+    accounts.value = [...openaiAccounts, ...claudeAccounts]
   } catch (error) {
     appStore.showError(errorMessage(error))
   } finally {
@@ -908,6 +936,7 @@ async function testWebhook() {
 
 function buildWebhookPayload(forceEnabled = false): UsageAlertWebhookPayload {
   const payload: UsageAlertWebhookPayload = {
+    ...(webhookForm.id ? { id: webhookForm.id } : {}),
     name: webhookForm.name,
     type: webhookForm.type,
     url: webhookForm.type === 'json_post' ? webhookForm.url : '',
@@ -938,7 +967,8 @@ function editWebhook(webhook: UsageAlertWebhook) {
   webhookForm.name = webhook.name
   webhookForm.type = webhook.type || 'json_post'
   webhookForm.url = webhook.url || ''
-  webhookForm.telegramBotToken = configString(config.bot_token)
+  webhookHasSavedBotToken.value = Boolean(config.has_bot_token || config.bot_token)
+  webhookForm.telegramBotToken = ''
   webhookForm.telegramChatID = configString(config.chat_id)
   webhookForm.telegramMessageThreadID = configString(config.message_thread_id)
   webhookForm.telegramLanguage = normalizeWebhookLanguage(configString(config.language))
@@ -950,6 +980,7 @@ function editWebhook(webhook: UsageAlertWebhook) {
 
 function resetWebhookForm() {
   webhookForm.id = null
+  webhookHasSavedBotToken.value = false
   webhookForm.name = ''
   webhookForm.type = 'json_post'
   webhookForm.url = ''

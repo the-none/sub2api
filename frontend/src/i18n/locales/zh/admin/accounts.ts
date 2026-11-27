@@ -599,6 +599,7 @@ export default {
         nothingHint: '上游返回无可重置窗口，本次未执行重置。至少间隔 10 分钟后再检查；此前未确认的请求仍保留保护。',
         nothingManualHint: '上游返回无可重置窗口，本次未执行重置。请在至少 10 分钟后再尝试。',
         nothingExpired: '到期未使用：上游无可重置窗口。',
+        reservedManualHint: '当前订阅已有进行中或待执行的 reset 预约，请先取消未开始的预约后再手动重置。',
         cooldownHint: '距离上次兑换尝试不足 10 分钟，等待下次检查。',
         expires: '目标 reset 到期时间：{time}',
         executes: '预计执行时间：{time}',

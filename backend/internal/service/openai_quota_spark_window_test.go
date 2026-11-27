@@ -41,6 +41,16 @@ func (r *stubQuotaAccountRepo) GetByID(_ context.Context, id int64) (*Account, e
 	return acc, nil
 }
 
+func (r *stubQuotaAccountRepo) GetByIDs(_ context.Context, ids []int64) ([]*Account, error) {
+	out := make([]*Account, 0, len(ids))
+	for _, id := range ids {
+		if acc, ok := r.accounts[id]; ok {
+			out = append(out, acc)
+		}
+	}
+	return out, nil
+}
+
 func (r *stubQuotaAccountRepo) UpdateCredentials(_ context.Context, id int64, credentials map[string]any) error {
 	acc, ok := r.accounts[id]
 	if !ok {
@@ -723,6 +733,22 @@ func TestCachePostResetSnapshot(t *testing.T) {
 	require.Equal(t, credits, repo.extraUpdates[100][openaiQuotaResetCreditsKey])
 	require.Equal(t, openAICreditsSnapshot{Credits: usage.Credits, FetchedAt: 123}, repo.extraUpdates[100][openaiQuotaCreditsKey])
 	require.Equal(t, 0.0, repo.extraUpdates[100]["codex_5h_used_percent"])
+	require.Equal(t, 0.0, repo.extraUpdates[100]["codex_7d_used_percent"])
+
+	alertRepo := &usageAlertGenerationStateRepoStub{}
+	alertSvc := NewUsageAlertService(alertRepo, nil)
+	svc.SetUsageAlertService(alertSvc)
+	alertRepo.state = nil
+	svc.ObserveQuotaUsage(context.Background(), 100, usage)
+	alertSvc.Stop()
+
+	usageMissingDetails := &OpenAIQuotaUsage{
+		Credits:   &OpenAICredits{HasCredits: true, Balance: &balance},
+		FetchedAt: 456,
+		RateLimit: usage.RateLimit,
+	}
+	err := svc.CachePostResetSnapshot(context.Background(), 100, usageMissingDetails)
+	require.Error(t, err)
 	require.Equal(t, 0.0, repo.extraUpdates[100]["codex_7d_used_percent"])
 }
 

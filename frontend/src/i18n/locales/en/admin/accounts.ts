@@ -1802,6 +1802,7 @@ export default {
         nothingHint: 'Upstream reported no eligible window; this attempt performed no reset. Check again after at least 10 minutes. Earlier unconfirmed attempts remain protected.',
         nothingManualHint: 'Upstream reported no eligible window; this attempt performed no reset. Wait at least 10 minutes before trying again.',
         nothingExpired: 'Expired unused: upstream had no eligible window.',
+        reservedManualHint: 'An active reset reservation owns this subscription; cancel a pending reservation before resetting manually.',
         cooldownHint: 'Less than 10 minutes since the last redemption attempt. Waiting for the next check.',
         expires: 'Target reset expires: {time}',
         executes: 'Scheduled execution: {time}',

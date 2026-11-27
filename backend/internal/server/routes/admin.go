@@ -473,6 +473,7 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		openai.GET("/accounts/:id/quota", h.Admin.OpenAIOAuth.QueryQuota)
 		openai.POST("/accounts/:id/quota/refresh", h.Admin.OpenAIOAuth.RefreshQuota)
 		openai.POST("/accounts/:id/reset-quota", h.Admin.OpenAIOAuth.ResetQuota)
+		openai.POST("/accounts/reset-reservations/batch", h.Admin.OpenAIOAuth.GetBatchResetReservations)
 		openai.GET("/accounts/:id/reset-reservation", h.Admin.OpenAIOAuth.GetResetReservation)
 		openai.POST("/accounts/:id/reset-reservation", h.Admin.OpenAIOAuth.CreateResetReservation)
 		openai.DELETE("/accounts/:id/reset-reservation", h.Admin.OpenAIOAuth.CancelResetReservation)

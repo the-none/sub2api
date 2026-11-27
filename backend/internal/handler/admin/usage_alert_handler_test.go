@@ -1,11 +1,16 @@
 package admin
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,4 +79,64 @@ func TestUsageAlertNestedRealAccountOmitsUncomputedDeletionStatus(t *testing.T) 
 	})
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "has_only_deleted_accounts")
+}
+
+type usageAlertHandlerRepoStub struct {
+	service.UsageAlertRepository
+	webhooks []*service.UsageAlertWebhook
+	bindings []*service.UsageAlertBinding
+}
+
+func (s *usageAlertHandlerRepoStub) ListWebhooks(context.Context) ([]*service.UsageAlertWebhook, error) {
+	return s.webhooks, nil
+}
+
+func (s *usageAlertHandlerRepoStub) GetWebhook(_ context.Context, id int64) (*service.UsageAlertWebhook, error) {
+	for _, w := range s.webhooks {
+		if w.ID == id {
+			return w, nil
+		}
+	}
+	return nil, service.ErrAccountNotFound
+}
+
+func (s *usageAlertHandlerRepoStub) UpdateWebhook(_ context.Context, w *service.UsageAlertWebhook) (*service.UsageAlertWebhook, error) {
+	return w, nil
+}
+
+func (s *usageAlertHandlerRepoStub) ListBindings(context.Context) ([]*service.UsageAlertBinding, error) {
+	return s.bindings, nil
+}
+
+func TestUsageAlertHandlerRedactsBotTokenOnReadAndPreservesOnUpdate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stored := &service.UsageAlertWebhook{
+		ID: 4, Name: "Telegram", Type: service.UsageAlertWebhookTypeTelegram,
+		Config: map[string]any{"bot_token": "999:TOPSECRET", "chat_id": "-1002"},
+	}
+	repo := &usageAlertHandlerRepoStub{
+		webhooks: []*service.UsageAlertWebhook{stored},
+		bindings: []*service.UsageAlertBinding{{ID: 1, RealAccountID: 2, WebhookID: 4, Webhook: stored}},
+	}
+	h := NewUsageAlertHandler(service.NewUsageAlertService(repo, nil))
+	router := gin.New()
+	router.GET("/webhooks", h.ListWebhooks)
+	router.PUT("/webhooks/:id", h.UpdateWebhook)
+	router.GET("/bindings", h.ListBindings)
+
+	for _, path := range []string{"/webhooks", "/bindings"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.NotContains(t, rec.Body.String(), "TOPSECRET")
+		require.Contains(t, rec.Body.String(), `"has_bot_token":true`)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/webhooks/4", bytes.NewBufferString(`{"name":"Telegram 2","type":"telegram","config":{"bot_token":"","chat_id":"-1002"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotContains(t, rec.Body.String(), "TOPSECRET")
+	require.Contains(t, rec.Body.String(), `"has_bot_token":true`)
 }

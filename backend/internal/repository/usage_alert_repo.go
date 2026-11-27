@@ -159,6 +159,11 @@ func (r *usageAlertRepository) DeleteRealAccount(ctx context.Context, id int64) 
 		Exec(ctx); err != nil {
 		return err
 	}
+	if _, err := tx.UsageAlertRule.Delete().
+		Where(dbusagealertrule.RealAccountIDEQ(id)).
+		Exec(ctx); err != nil {
+		return err
+	}
 	if err := tx.RealAccount.DeleteOneID(id).Exec(ctx); err != nil {
 		return err
 	}
@@ -170,24 +175,162 @@ func (r *usageAlertRepository) DeleteRealAccount(ctx context.Context, id int64) 
 }
 
 func (r *usageAlertRepository) AttachAccount(ctx context.Context, realAccountID, accountID int64) error {
-	realAccount, err := r.client.RealAccount.Get(ctx, realAccountID)
+	tx, err := r.client.Tx(ctx)
 	if err != nil {
 		return err
 	}
-	account, err := r.client.Account.Get(ctx, accountID)
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+	realAccount, err := tx.RealAccount.Get(ctx, realAccountID)
+	if err != nil {
+		return err
+	}
+	account, err := tx.Account.Get(ctx, accountID)
 	if err != nil {
 		return err
 	}
 	if account.Platform != realAccount.Platform {
 		return fmt.Errorf("account platform %q does not match real account platform %q", account.Platform, realAccount.Platform)
 	}
-	return r.client.Account.UpdateOneID(accountID).
+	rootID := accountID
+	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
+		rootID = *account.ParentAccountID
+	}
+	family, err := tx.Account.Query().
+		Where(dbaccount.Or(
+			dbaccount.IDEQ(rootID),
+			dbaccount.And(dbaccount.ParentAccountIDEQ(rootID), dbaccount.DeletedAtIsNil()),
+		)).
+		All(ctx)
+	if err != nil {
+		return err
+	}
+	previousIDs := make(map[int64]struct{}, len(family))
+	for _, member := range family {
+		if member.RealAccountID != nil && *member.RealAccountID > 0 && *member.RealAccountID != realAccountID {
+			previousIDs[*member.RealAccountID] = struct{}{}
+		}
+	}
+	if _, err := tx.Account.Update().
+		Where(dbaccount.Or(
+			dbaccount.IDEQ(rootID),
+			dbaccount.And(dbaccount.ParentAccountIDEQ(rootID), dbaccount.DeletedAtIsNil()),
+		)).
 		SetRealAccountID(realAccountID).
-		Exec(ctx)
+		Save(ctx); err != nil {
+		return err
+	}
+	for oldID := range previousIDs {
+		if err := cleanupOrphanRealAccountTx(ctx, tx, oldID); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	rollback = false
+	return nil
+}
+
+const autoCreatedRealAccountIdentifier = "__auto__"
+
+func cleanupOrphanRealAccountTx(ctx context.Context, tx *dbent.Tx, id int64) error {
+	oldRA, err := tx.RealAccount.Get(ctx, id)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if oldRA.Identifier == nil || *oldRA.Identifier != autoCreatedRealAccountIdentifier || oldRA.Notes != nil {
+		return nil
+	}
+	hasLiveOrDeletedAccounts, err := tx.RealAccount.Query().
+		Where(
+			dbrealaccount.IDEQ(id),
+			dbrealaccount.Or(
+				dbrealaccount.HasAccountsWith(dbaccount.DeletedAtIsNil()),
+				dbrealaccount.HasAccountsWith(dbaccount.DeletedAtNotNil()),
+			),
+		).
+		Exist(ctx)
+	if err != nil || hasLiveOrDeletedAccounts {
+		return err
+	}
+	hasRules, err := tx.UsageAlertRule.Query().Where(dbusagealertrule.RealAccountIDEQ(id)).Exist(ctx)
+	if err != nil || hasRules {
+		return err
+	}
+	hasBindings, err := tx.UsageAlertBinding.Query().Where(dbusagealertbinding.RealAccountIDEQ(id)).Exist(ctx)
+	if err != nil || hasBindings {
+		return err
+	}
+	if _, err := tx.RealAccountUsageSnapshot.Delete().Where(dbrealaccountusagesnapshot.RealAccountIDEQ(id)).Exec(ctx); err != nil {
+		return err
+	}
+	if _, err := tx.UsageAlertState.Delete().Where(dbusagealertstate.RealAccountIDEQ(id)).Exec(ctx); err != nil {
+		return err
+	}
+	return tx.RealAccount.DeleteOneID(id).Exec(ctx)
 }
 
 func (r *usageAlertRepository) DetachAccount(ctx context.Context, accountID int64) error {
-	return r.client.Account.UpdateOneID(accountID).ClearRealAccountID().Exec(ctx)
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+	account, err := tx.Account.Get(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	rootID := accountID
+	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
+		rootID = *account.ParentAccountID
+	}
+	family, err := tx.Account.Query().
+		Where(dbaccount.Or(
+			dbaccount.IDEQ(rootID),
+			dbaccount.And(dbaccount.ParentAccountIDEQ(rootID), dbaccount.DeletedAtIsNil()),
+		)).
+		All(ctx)
+	if err != nil {
+		return err
+	}
+	previousIDs := make(map[int64]struct{}, len(family))
+	for _, member := range family {
+		if member.RealAccountID != nil && *member.RealAccountID > 0 {
+			previousIDs[*member.RealAccountID] = struct{}{}
+		}
+	}
+	if _, err := tx.Account.Update().
+		Where(dbaccount.Or(
+			dbaccount.IDEQ(rootID),
+			dbaccount.And(dbaccount.ParentAccountIDEQ(rootID), dbaccount.DeletedAtIsNil()),
+		)).
+		ClearRealAccountID().
+		Save(ctx); err != nil {
+		return err
+	}
+	for oldID := range previousIDs {
+		if err := cleanupOrphanRealAccountTx(ctx, tx, oldID); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	rollback = false
+	return nil
 }
 
 func (r *usageAlertRepository) EnsureRealAccountForAccount(ctx context.Context, account *service.Account) (*service.RealAccount, error) {
@@ -228,6 +371,7 @@ func (r *usageAlertRepository) EnsureRealAccountForAccount(ctx context.Context, 
 	row, err := tx.RealAccount.Create().
 		SetName(account.Name).
 		SetPlatform(account.Platform).
+		SetIdentifier(autoCreatedRealAccountIdentifier).
 		Save(ctx)
 	if err != nil {
 		return nil, err
@@ -335,7 +479,21 @@ func (r *usageAlertRepository) CreateRule(ctx context.Context, rule *service.Usa
 }
 
 func (r *usageAlertRepository) UpdateRule(ctx context.Context, rule *service.UsageAlertRule) (*service.UsageAlertRule, error) {
-	builder := r.client.UsageAlertRule.UpdateOneID(rule.ID).
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+	before, err := tx.UsageAlertRule.Get(ctx, rule.ID)
+	if err != nil {
+		return nil, err
+	}
+	builder := tx.UsageAlertRule.UpdateOneID(rule.ID).
 		SetName(rule.Name).
 		SetPlatform(rule.Platform).
 		SetUsageType(rule.UsageType).
@@ -364,11 +522,45 @@ func (r *usageAlertRepository) UpdateRule(ctx context.Context, rule *service.Usa
 	if err != nil {
 		return nil, err
 	}
-	return usageAlertRuleEntityToService(row), nil
+	updated := usageAlertRuleEntityToService(row)
+	if service.UsageAlertRuleSemanticsChanged(usageAlertRuleEntityToService(before), updated) {
+		if _, err := tx.UsageAlertState.Delete().
+			Where(dbusagealertstate.RuleIDEQ(rule.ID)).
+			Exec(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	rollback = false
+	return updated, nil
 }
 
 func (r *usageAlertRepository) DeleteRule(ctx context.Context, id int64) error {
-	return r.client.UsageAlertRule.DeleteOneID(id).Exec(ctx)
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err := tx.UsageAlertState.Delete().
+		Where(dbusagealertstate.RuleIDEQ(id)).
+		Exec(ctx); err != nil {
+		return err
+	}
+	if err := tx.UsageAlertRule.DeleteOneID(id).Exec(ctx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	rollback = false
+	return nil
 }
 
 func (r *usageAlertRepository) ListWebhooks(ctx context.Context) ([]*service.UsageAlertWebhook, error) {
@@ -786,11 +978,15 @@ func realAccountEntityToService(row *dbent.RealAccount, includeAccounts bool) *s
 	if row == nil {
 		return nil
 	}
+	var identifier *string
+	if row.Identifier != nil && *row.Identifier != autoCreatedRealAccountIdentifier {
+		identifier = row.Identifier
+	}
 	out := &service.RealAccount{
 		ID:         row.ID,
 		Name:       row.Name,
 		Platform:   row.Platform,
-		Identifier: row.Identifier,
+		Identifier: identifier,
 		Notes:      row.Notes,
 		CreatedAt:  row.CreatedAt,
 		UpdatedAt:  row.UpdatedAt,

@@ -2488,6 +2488,51 @@ func (r *accountRepository) ClearAnthropicRateLimitIfObserved(ctx context.Contex
 	return true, nil
 }
 
+// ClearOpenAIRateLimitIfObserved clears only the OpenAI account-level 429
+// rate-limit timestamps observed before an upstream probe. OverloadUntil,
+// TempUnschedulable, model_rate_limits, error status, and any newer 429
+// generation are preserved untouched.
+func (r *accountRepository) ClearOpenAIRateLimitIfObserved(ctx context.Context, id int64, observedLimitedAt, observedResetAt *time.Time) (bool, error) {
+	if observedLimitedAt == nil && observedResetAt == nil {
+		return false, nil
+	}
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.ClearOpenAIRateLimitIfObserved(ctx, id, observedLimitedAt, observedResetAt)
+	}
+	update := r.client.Account.Update().
+		Where(
+			dbaccount.IDEQ(id),
+			dbaccount.PlatformEQ(service.PlatformOpenAI),
+			dbaccount.StatusNEQ(service.StatusError),
+		)
+	if observedLimitedAt != nil {
+		update = update.Where(dbaccount.RateLimitedAtEQ(*observedLimitedAt))
+	} else {
+		update = update.Where(dbaccount.RateLimitedAtIsNil())
+	}
+	if observedResetAt != nil {
+		update = update.Where(dbaccount.RateLimitResetAtEQ(*observedResetAt))
+	} else {
+		update = update.Where(dbaccount.RateLimitResetAtIsNil())
+	}
+	updated, err := update.
+		ClearRateLimitedAt().
+		ClearRateLimitResetAt().
+		Save(ctx)
+	if err != nil {
+		return false, err
+	}
+	if updated == 0 {
+		r.syncSchedulerAccountSnapshot(ctx, id)
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue openai observed rate-limit clear failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
+}
+
 // SetRateLimitedIfUnchanged atomically applies a rate-limit reset only while the
 // account still carries exactly the generation the caller observed: its
 // UpdatedAt row version, its RateLimitedAt and its RateLimitResetAt (nil means

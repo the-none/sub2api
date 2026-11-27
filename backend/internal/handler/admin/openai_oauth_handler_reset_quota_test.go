@@ -34,6 +34,23 @@ func TestResetQuotaPolicyRefusalsNeverRecoverOrRefresh(t *testing.T) {
 	}
 }
 
+func TestResetQuotaRejectsNonSuccessCodesWithoutRecovery(t *testing.T) {
+	for _, code := range []string{"", "no_credit", "nocredit", "unexpected_status"} {
+		t.Run("code="+code, func(t *testing.T) {
+			quota := successfulOpenAIQuotaWorkflowStub()
+			quota.resetResult = &service.OpenAIQuotaResetResult{Code: code}
+			recovery := &openAIAccountStateRecovererStub{}
+			admin := recoveredAccountStub()
+			handler := &OpenAIOAuthHandler{quotaService: quota, rateLimitService: recovery, adminService: admin}
+			status, _ := performOpenAIQuotaResetRequest(t, handler)
+			require.Equal(t, http.StatusConflict, status)
+			require.Zero(t, recovery.calls)
+			require.Zero(t, quota.queryCalls)
+			require.Zero(t, quota.cacheCalls)
+		})
+	}
+}
+
 type openAIQuotaWorkflowStub struct {
 	resetResult        *service.OpenAIQuotaResetResult
 	resetErr           error

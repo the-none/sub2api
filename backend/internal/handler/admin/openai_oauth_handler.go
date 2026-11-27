@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -630,6 +631,15 @@ func (h *OpenAIOAuthHandler) ResetQuota(c *gin.Context) {
 	}
 	if result == nil {
 		response.Error(c, http.StatusInternalServerError, "openai quota reset returned an empty result")
+		return
+	}
+	if !service.IsOpenAIQuotaResetConfirmedSuccess(result.Code) {
+		trimmed := strings.TrimSpace(result.Code)
+		if strings.EqualFold(trimmed, "no_credit") || strings.EqualFold(trimmed, "nocredit") {
+			scopedOpenAIError(c, infraerrors.Conflict("NO_RESET_CREDIT", "no reset credit is available"))
+			return
+		}
+		scopedOpenAIError(c, infraerrors.Conflict("OPENAI_RESET_RESULT_UNCONFIRMED", "unexpected upstream reset result"))
 		return
 	}
 

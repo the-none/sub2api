@@ -143,6 +143,7 @@ type OpenAIQuotaService struct {
 	resetReconcileActive map[int64]struct{}
 	resetReconcileDelays []time.Duration
 	referralClient       OpenAIReferralClient
+	usageAlertService    *UsageAlertService
 	agentIdentityTaskMu  sync.Mutex
 	agentIdentityWS      agentIdentityWSConnectionInvalidator
 }
@@ -180,6 +181,31 @@ func (s *OpenAIQuotaService) SetResetReconciler(reconciler OpenAIQuotaResetRecon
 		return
 	}
 	s.resetReconciler = reconciler
+}
+
+func (s *OpenAIQuotaService) SetUsageAlertService(alertService *UsageAlertService) {
+	if s == nil {
+		return
+	}
+	s.usageAlertService = alertService
+}
+
+// ObserveQuotaUsage forwards authoritative quota snapshots to UsageAlertService
+// so auto-reset, reservation, and post-reset refreshes advance or resolve alerts.
+func (s *OpenAIQuotaService) ObserveQuotaUsage(ctx context.Context, accountID int64, usage *OpenAIQuotaUsage) {
+	if s == nil || s.usageAlertService == nil || accountID <= 0 || usage == nil {
+		return
+	}
+	now := time.Now()
+	updates := buildOpenAIAutoResetUsageUpdates(usage, now)
+	if len(updates) == 0 {
+		return
+	}
+	snapshot := usageAlertSnapshotFromCodexExtra(accountID, UsageAlertSourceOpenAICodexUsageAPI, updates, now)
+	if snapshot == nil {
+		return
+	}
+	s.usageAlertService.Observe(ctx, snapshot)
 }
 
 // QueryUsage fetches the latest rate-limit/usage snapshot for the given OpenAI
@@ -312,15 +338,26 @@ func (s *OpenAIQuotaService) CachePostResetSnapshot(ctx context.Context, account
 	}
 	updates := buildOpenAIAutoResetUsageUpdates(usage, time.Now())
 	if updates == nil {
-		updates = make(map[string]any)
+		updates = make(map[string]any, 1)
 	}
 	updates[openaiQuotaCreditsKey] = openAICreditsSnapshot{Credits: usage.Credits, FetchedAt: usage.FetchedAt}
-	return s.cacheResetCreditsSnapshot(
-		ctx,
-		accountID,
-		usage.RateLimitResetCredits,
-		updates,
-	)
+	credits := usage.RateLimitResetCredits
+	if credits == nil || (credits.AvailableCount > 0 && len(credits.Credits) == 0) {
+		if err := s.accountRepo.UpdateExtra(ctx, accountID, updates); err != nil {
+			return infraerrors.New(
+				http.StatusInternalServerError,
+				"OPENAI_QUOTA_CACHE_WRITE_FAILED",
+				"failed to cache post-reset usage snapshot",
+			).WithCause(err)
+		}
+		s.ObserveQuotaUsage(ctx, accountID, usage)
+		return s.cacheResetCreditsSnapshot(ctx, accountID, credits, nil)
+	}
+	if err := s.cacheResetCreditsSnapshot(ctx, accountID, credits, updates); err != nil {
+		return err
+	}
+	s.ObserveQuotaUsage(ctx, accountID, usage)
+	return nil
 }
 
 func (s *OpenAIQuotaService) cacheResetCreditsSnapshot(ctx context.Context, accountID int64, credits *OpenAIRateLimitResetCredits, updates map[string]any) error {
@@ -394,6 +431,7 @@ func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (
 // ResetCreditTargeted 使用固定卡 ID 与兑换 ID执行自动消费。调用方必须在重试时
 // 复用同一组参数；本方法不会回退到不带 credit_id 的旧消费方式。
 func (s *OpenAIQuotaService) ResetCreditTargeted(ctx context.Context, accountID int64, creditID, redeemRequestID string) (*OpenAIQuotaResetResult, error) {
+	setOpenAIResetDispatched(ctx, false)
 	creditID = strings.TrimSpace(creditID)
 	redeemRequestID = strings.TrimSpace(redeemRequestID)
 	if creditID == "" || redeemRequestID == "" {
@@ -403,6 +441,7 @@ func (s *OpenAIQuotaService) ResetCreditTargeted(ctx context.Context, accountID 
 }
 
 func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, creditID, redeemRequestID string, targeted bool) (*OpenAIQuotaResetResult, error) {
+	setOpenAIResetDispatched(ctx, false)
 	ctx = WithScopedAdminAccountOperation(ctx, "openai.quota.reset")
 	if err := scopedAccountIDAccess(ctx, s.accountRepo, accountID, "openai.quota.reset", false); err != nil {
 		return nil, err
@@ -474,6 +513,7 @@ func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, c
 				return nil, err
 			}
 		}
+		setOpenAIResetDispatched(ctx, true)
 		resp, err := client.R().
 			SetContext(callCtx).
 			SetHeaders(headers).
@@ -508,13 +548,23 @@ func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, c
 		"code", payload.Code,
 		"windows_reset", payload.WindowsReset,
 	)
-	if openAIResetOutcome(payload.Code) == "nothing_to_reset" {
+	outcome := openAIResetOutcome(payload.Code)
+	if outcome == "nothing_to_reset" {
 		return nil, openAIResetNoopError()
+	}
+	if !targeted {
+		switch outcome {
+		case "no_credit":
+			return nil, infraerrors.Conflict("NO_RESET_CREDIT", "no reset credit is available")
+		case "ok":
+		default:
+			return nil, infraerrors.Conflict("OPENAI_RESET_RESULT_UNCONFIRMED", "unexpected upstream reset result")
+		}
 	}
 	// Targeted consumption is the auto-reset path. Its caller runs the shared
 	// post-process after the idempotent consume completes, so invoking the legacy
 	// manual reconciler here would duplicate probes and scheduler recovery.
-	if s.resetReconciler != nil && !targeted && openAIResetOutcome(payload.Code) == "ok" {
+	if s.resetReconciler != nil && !targeted && outcome == "ok" {
 		if reconcileErr := s.resetReconciler.ReconcileOpenAIQuotaReset(ctx, accountID); reconcileErr != nil {
 			slog.Error("openai_quota_reset_local_reconcile_failed",
 				"account_id", accountID,
@@ -890,7 +940,7 @@ func buildCodexSparkWindowExtraUpdates(usage *OpenAIQuotaUsage, now time.Time) m
 	if w := spark.PrimaryWindow; w != nil {
 		p := w.UsedPercent
 		snap.PrimaryUsedPercent = &p
-		ra := int(w.ResetAfterSeconds)
+		ra := openAIRateLimitWindowResetAfterSeconds(w, now)
 		snap.PrimaryResetAfterSeconds = &ra
 		if w.LimitWindowSeconds > 0 {
 			wm := int(w.LimitWindowSeconds / 60)
@@ -900,7 +950,7 @@ func buildCodexSparkWindowExtraUpdates(usage *OpenAIQuotaUsage, now time.Time) m
 	if w := spark.SecondaryWindow; w != nil {
 		p := w.UsedPercent
 		snap.SecondaryUsedPercent = &p
-		ra := int(w.ResetAfterSeconds)
+		ra := openAIRateLimitWindowResetAfterSeconds(w, now)
 		snap.SecondaryResetAfterSeconds = &ra
 		if w.LimitWindowSeconds > 0 {
 			wm := int(w.LimitWindowSeconds / 60)
